@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { LightingOutput } from './lighting';
 import type { VehicleSpec } from './spec';
 
 /** 차량 시각 모델. 충돌체(OBB)/센서 좌표는 VehicleSpec 에 별도로 있으며 이 모델과 독립적이다. */
@@ -10,7 +11,8 @@ export interface CarModel {
   steeringWheel: THREE.Object3D | null;
   frontPivots: THREE.Object3D[];
   rollers: THREE.Object3D[];
-  headSpot: THREE.SpotLight | null;
+  headSpot: THREE.SpotLight | null; // 하향등
+  highSpot: THREE.SpotLight | null; // 상향등
   lights: LightMaterials | null;
   setState(s: CarVisualState): void;
   dispose(): void;
@@ -19,7 +21,9 @@ export interface CarModel {
 export interface CarVisualState {
   steer: number;
   roll: number;
-  headlights: boolean;
+  lighting: LightingOutput;
+  /** AUTO Leveling 보정 각도(rad, 아래 −). 가속도 기반 근사 */
+  levelPitch: number;
   brake: boolean;
   reverse: boolean;
   signalLeft: boolean; // 현재 깜빡임 켜짐 상태
@@ -28,6 +32,7 @@ export interface CarVisualState {
 
 interface LightMaterials {
   head: THREE.MeshStandardMaterial;
+  drl: THREE.MeshStandardMaterial;
   tail: THREE.MeshStandardMaterial;
   rev: THREE.MeshStandardMaterial;
   sigL: THREE.MeshStandardMaterial;
@@ -116,6 +121,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
   const clearance = 0.24;
 
   const root = new THREE.Group();
+  root.userData.hl = hl;
   const bodyGroup = new THREE.Group();
   root.add(bodyGroup);
 
@@ -217,6 +223,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
 
   let lights: LightMaterials | null = null;
   let headSpot: THREE.SpotLight | null = null;
+  let highSpot: THREE.SpotLight | null = null;
   const cockpit = new THREE.Group();
   let steeringWheel: THREE.Object3D | null = null;
 
@@ -237,6 +244,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     };
     lights = {
       head: mk(0xfff4d6, 0xfff0c0),
+      drl: mk(0xe4eeff, 0xd2e4ff),
       tail: mk(0x7a0d12, 0xff1a1a),
       rev: mk(0xdddddd, 0xffffff),
       sigL: mk(0xb87400, 0xffa200),
@@ -255,12 +263,18 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       sf.position.set(sx * (W / 2 - 0.1), hy - 0.1, hl - 0.03);
       const sr = new THREE.Mesh(box(`${key}:sigr`, 0.12, 0.06, 0.05), sig);
       sr.position.set(sx * (W / 2 - 0.1), hy - 0.1, -hl + 0.03);
-      bodyGroup.add(hlm, tlm, rvm, sf, sr);
+      const drlStrip = new THREE.Mesh(box(`${key}:drl`, W * 0.22, 0.022, 0.04), lights.drl);
+      drlStrip.position.set(sx * W * 0.33, hy + 0.075, hl - 0.035);
+      bodyGroup.add(hlm, tlm, rvm, sf, sr, drlStrip);
     }
     headSpot = new THREE.SpotLight(0xfff2d0, 0, 26, 0.55, 0.5, 1.6);
     headSpot.position.set(0, 0.7, hl - 0.2);
     headSpot.target.position.set(0, 0, hl + 8);
     root.add(headSpot, headSpot.target);
+    highSpot = new THREE.SpotLight(0xf4f7ff, 0, 48, 0.32, 0.4, 1.3);
+    highSpot.position.set(0, 0.72, hl - 0.2);
+    highSpot.target.position.set(0, 0.4, hl + 18);
+    root.add(highSpot, highSpot.target);
 
     // 1인칭 콕핏 (차체는 숨기고 대시보드/후드/필러/지붕 안쪽만 표시)
     const dashMat = sharedMat('dash', () => new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.7 }));
@@ -310,6 +324,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     frontPivots,
     rollers,
     headSpot,
+    highSpot,
     lights,
     setState(s) {
       for (const p of model.frontPivots) p.rotation.y = s.steer;
@@ -323,16 +338,27 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       }
       const l = model.lights;
       if (!l) return;
-      l.head.emissiveIntensity = s.headlights ? 1.6 : 0;
-      l.tail.emissiveIntensity = s.brake ? 2.2 : s.headlights ? 0.7 : 0.08;
+      const L = s.lighting;
+      l.head.emissiveIntensity = L.high ? 2.6 : L.low ? 1.6 : 0;
+      l.drl.emissiveIntensity = L.drl * 2.2;
+      l.tail.emissiveIntensity = s.brake ? 2.4 : L.tail > 0 ? 0.8 : 0.06; // 브레이크등은 미등보다 더 밝다
       l.rev.emissiveIntensity = s.reverse ? 2.0 : 0;
       l.sigL.emissiveIntensity = s.signalLeft ? 2.4 : 0;
       l.sigR.emissiveIntensity = s.signalRight ? 2.4 : 0;
-      if (model.headSpot) model.headSpot.intensity = s.headlights ? 60 : 0;
+      // 실제 광원: 하향등/상향등이 노면과 장애물을 비춘다. 조사각은 AUTO Leveling 보정(가속도 기반 근사)을 반영
+      if (model.headSpot) {
+        model.headSpot.intensity = L.low ? 60 : 0;
+        model.headSpot.target.position.set(0, Math.tan(s.levelPitch) * 8, model.root.userData.hl + 8);
+      }
+      if (model.highSpot) {
+        model.highSpot.intensity = L.high ? 120 : 0;
+        model.highSpot.target.position.set(0, 0.4 + Math.tan(s.levelPitch) * 18, model.root.userData.hl + 18);
+      }
     },
     dispose() {
       for (const m of ownMaterials) m.dispose();
       headSpot?.dispose();
+      highSpot?.dispose();
     },
   };
   void opts;
