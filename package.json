@@ -1,0 +1,27 @@
+{
+  "name": "3d-parking-simulator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "cap:sync": "npm run build && cap sync android",
+    "e2e": "node scripts/e2e-smoke.cjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.6.0",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@types/three": "^0.187.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
