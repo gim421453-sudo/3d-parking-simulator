@@ -1,16 +1,29 @@
 name: CI
 
+# Actions 사용량 절약: 일반 push 에서는 실행하지 않는다. (기본 검증은 로컬: npm run typecheck && npm test && npm run build)
+# 실행 시점: ① 수동 실행 ② 기본 브랜치로 향하는 PR 이 "열릴 때 / Ready for review 로 바뀔 때" (초안 PR 제외, 문서·스크린샷만 바뀐 경우 제외)
 on:
-  push:
-    branches: ['**']
+  workflow_dispatch:
   pull_request:
+    types: [opened, ready_for_review]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'export/**'
+      - 'screenshots/**'
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,7 +33,7 @@ jobs:
       - run: npm ci
       - name: TypeScript 검사
         run: npm run typecheck
-      - name: 단위 테스트 (센서/물리/주차 판정/맵 무결성)
+      - name: 단위 테스트
         run: npm test
       - name: 프로덕션 빌드
         run: npm run build

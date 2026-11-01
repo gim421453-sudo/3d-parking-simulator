@@ -1,18 +1,21 @@
-name: Android APK (debug)
+name: Android APK (debug, manual)
 
+# 수동 실행 전용. push/PR 로 자동 실행하지 않는다. (Actions → "Android APK (debug, manual)" → Run workflow)
+# 실행 전 로컬에서 npm run typecheck && npm test && npm run build 를 통과시킬 것 (이 워크플로는 테스트를 다시 돌리지 않는다).
 on:
-  push:
-    branches: [main, 'claude/**', 'feature/**']
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -34,11 +37,7 @@ jobs:
       - name: Gradle 캐시
         uses: gradle/actions/setup-gradle@v4
 
-      - name: 의존성 설치
-        run: npm ci
-
-      - name: 단위 테스트
-        run: npm test
+      - run: npm ci
 
       - name: 웹 게임 빌드 → Capacitor Android 동기화
         run: |
@@ -56,10 +55,9 @@ jobs:
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk
           ls -l "$APK"
-          # build-tools 의 aapt2/apksigner 로 패키지명·버전·서명 확인
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/aapt2" dump badging "$APK" | grep -E "package:|sdkVersion|launchable-activity" || true
-          "$BT/apksigner" verify --print-certs "$APK" | head -5 || true
+          "$BT/aapt2" dump badging "$APK" | grep -E "package:|launchable-activity" || true
+          "$BT/apksigner" verify --print-certs "$APK" | head -3 || true
 
       - name: APK 업로드 (Artifact)
         uses: actions/upload-artifact@v4
@@ -69,8 +67,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: 빌드 로그 업로드 (실패 원인 확인용)
-        if: always()
+      - name: 실패 로그 업로드 (실패했을 때만)
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: android-build-logs-${{ github.run_number }}
@@ -78,4 +76,4 @@ jobs:
             gradle-build.log
             android/app/build/reports/**
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7

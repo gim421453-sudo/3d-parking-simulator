@@ -1,9 +1,11 @@
-name: Deploy to GitHub Pages
+name: Deploy to GitHub Pages (manual)
 
-# 저장소 Settings → Pages → Build and deployment → Source 를 "GitHub Actions" 로 바꿔야 배포된다.
+# 수동 실행 전용. (일반 push 마다 배포하지 않는다)
+# 선행 조건: ① 저장소 Settings → Pages → Source = "GitHub Actions"
+#           ② 비공개 저장소의 Pages 는 GitHub Pro/Team/Enterprise 요금제에서만 지원됨 (Free 개인 계정은 공개 저장소만)
+#           ③ github-pages 환경의 "배포 허용 브랜치" 규칙이 실행하는 브랜치를 허용해야 함
+# 주의: Pages 로 배포된 정적 파일과 JS 는 URL 을 아는 누구나 받을 수 있다.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,16 +28,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
-      - run: npm run build # vite base './' 이므로 하위 경로(/<repo>/)에서도 리소스 경로가 맞는다
+      - run: npm run build # base './' → 하위 경로(/<repo>/)에서도 상대 경로로 리소스 로딩 (로컬에서 하위 경로 서버로 검증함)
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+          retention-days: 3
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
