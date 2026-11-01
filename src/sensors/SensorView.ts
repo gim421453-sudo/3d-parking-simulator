@@ -441,13 +441,13 @@ export class SensorView {
       v.set(lp.x, spec.sensorHeight + 0.35, lp.z).project(this.camera);
       const sx = (v.x * 0.5 + 0.5) * this.w;
       const sy = (-v.y * 0.5 + 0.5) * this.h;
-      label.style.display = 'block';
+      label.style.display = o.debug ? 'block' : 'none';
       label.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%,-100%)`;
       label.textContent = `${best.d.toFixed(2)}m`;
       const lv: ProximityLevel = proximityLevel(best.d, o.range, o.critical);
       label.style.setProperty('--c', '#' + LEVEL_COLORS[lv].toString(16).padStart(6, '0'));
     }
-    this.info.textContent = summary.join(' · ');
+    this.info.textContent = o.debug ? summary.join(' · ') : '';
     this.renderer.render(this.scene, this.camera);
   }
 
