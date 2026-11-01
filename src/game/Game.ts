@@ -5,8 +5,8 @@ import { loadRecords, loadSettings, QUALITY_PRESETS, sanitizeSettings, saveRecor
 import { removeKey } from '../core/storage';
 import { getMap, mapColliders } from '../maps';
 import { buildMap, type BuiltMap } from '../maps/mapBuilder';
-import type { MapData, MapMission } from '../maps/types';
-import { HOLD_SECONDS, HEADING_TOLERANCE, MissionRunner, type ParkingSlot } from '../mission/parking';
+import type { MapData, MapMission, MapSlot } from '../maps/types';
+import { HOLD_SECONDS, HEADING_TOLERANCE, MissionRunner } from '../mission/parking';
 import { Beeper } from '../sensors/beeper';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
 import {
@@ -23,13 +23,23 @@ import { Menu, type ResultInfo } from '../ui/menu';
 import { LIGHT_MODE_NAME, computeLighting, nextLightMode, stepLeveling, type LightMode } from '../vehicle/lighting';
 import { AssistController, type AssistOutput, type AssistSettings } from '../pdc/assistPolicy';
 import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
-import { buildPdcState } from '../pdc/pdcModel';
+import { buildPdcState, type PdcState } from '../pdc/pdcModel';
+import { ASSIST_VIEW_NAME, ASSIST_VIEW_ORDER, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
+import { InfotainmentController, type InfoOutput, type InfoSettings } from '../infotainment/controller';
+import { drawCenterScreen, drawCluster } from '../infotainment/cabinScreens';
+import { Navigator, type NavState } from '../nav/navigator';
+import { drawNavMap } from '../nav/navView';
+import { SHIFTER_ORDER } from '../ui/shifter';
+import { shiftGear, type ShiftDecision } from '../vehicle/transmission';
+import { mapGamepad } from './gamepad';
+import { MirrorSystem } from './mirrors';
+import { exportVehicleGlb } from './devGlb';
+import { proximityLevel, type ProximityLevel } from '../sensors/sensorSystem';
 import { applyGlbVisual, createCarModel, type CarModel } from '../vehicle/carModel';
 import {
   centerOf,
   createVehicleState,
   obbOf,
-  requestGear,
   stepVehicle,
   type Gear,
   type VehicleInput,
@@ -58,7 +68,20 @@ export class Game {
   readonly showroom: Showroom;
   readonly assist = new AssistController();
   readonly assistPanel: AssistPanel;
-  assistOut: AssistOutput = { active: false, camera: 'rear', focus: 'rear', cameraMode: 'auto', reason: '' };
+  assistOut: AssistOutput = { active: false, camera: 'rear', manualView: null, focus: 'rear', cameraMode: 'auto', reason: '' };
+  /** 인포테인먼트 공유 상태 (3인칭 플로팅/1인칭 실내가 같은 상태를 본다) */
+  readonly info = new InfotainmentController();
+  readonly nav = new Navigator();
+  readonly viewPolicy = new ViewPolicy();
+  infoOut: InfoOutput = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '' };
+  viewOut: { view: AssistView; auto: boolean; reason: string } = { view: 'rear', auto: false, reason: '' };
+  navState: NavState = this.nav.state;
+  pdcState: PdcState | null = null;
+  private padPrev: boolean[] = [];
+  private cabinAcc = 0;
+  private navAcc = 0;
+  private destIndex = 0;
+  readonly mirrors = new MirrorSystem();
   private assistCamAcc = 0;
   private assistLastCamera = '';
 
@@ -75,7 +98,7 @@ export class Game {
   model: CarModel | null = null;
   missionDef: MapMission | null = null;
   mission: MissionRunner | null = null;
-  targetSlot: ParkingSlot | null = null;
+  targetSlot: MapSlot | null = null;
   sensorSnap: SensorSnapshot | null = null;
 
   private lightMode: LightMode = 'auto';
@@ -119,7 +142,11 @@ export class Game {
     this.showroom = new Showroom(this.renderer);
     this.showroom.setVehicle(getVehicle(this.settings.vehicleId));
 
-    this.hud = new Hud(root, { action: (a) => this.onAction(a), input: this.input });
+    this.hud = new Hud(root, {
+      action: (a) => this.onAction(a),
+      input: this.input,
+      shifter: { request: (g) => this.requestShift(g), context: () => this.shiftContext() },
+    });
     this.hud.bindExtra();
     this.assistPanel = new AssistPanel(root, {
       onToggleSensor: () => this.onAction('sensorToggle'),
@@ -130,6 +157,7 @@ export class Game {
         this.menu.showSettings(() => this.menu.showPause());
       },
       onClose: () => this.onAction('assistClose'),
+      onCycleDestination: () => this.onAction('infoDest'),
     });
     this.hud.onSensorSize = (s) => (s === 'reset' ? this.sensorView.resetCamera() : this.setSensorSize(s));
     this.sensorView = new SensorView(this.hud.sensorSlot);
@@ -153,6 +181,7 @@ export class Game {
       hasNextMission: () => this.nextMissionId() !== null,
     });
 
+    (window as unknown as { __devExportGlb?: typeof exportVehicleGlb }).__devExportGlb = exportVehicleGlb;
     this.input.onAction = (a) => this.onAction(a);
     this.input.attach();
     this.rig.bind(canvas);
@@ -284,7 +313,16 @@ export class Game {
     this.assistPanel.setPalette(this.settings.pdcPalette);
     this.assist.reset('P');
     this.assistLastCamera = '';
-    this.assistOut = { active: false, camera: 'rear', focus: 'rear', cameraMode: 'auto', reason: '' };
+    this.assistOut = { active: false, camera: 'rear', manualView: null, focus: 'rear', cameraMode: 'auto', reason: '' };
+    this.info.reset('P');
+    this.viewPolicy.reset();
+    this.infoOut = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '' };
+    this.viewOut = { view: 'rear', auto: false, reason: '' };
+    this.nav.setMap(map);
+    this.destIndex = 0;
+    const sp0 = this.missionDef?.spawn ?? map.spawn;
+    this.nav.setDestination(this.targetSlot, { x: sp0.x, z: sp0.z });
+    this.navState = this.nav.state;
 
     const sp = this.missionDef?.spawn ?? map.spawn;
     this.car = createVehicleState(this.spec, sp.x, sp.z, sp.heading);
@@ -374,6 +412,47 @@ export class Game {
     this.hud.setSensorControls(s);
   }
 
+  // ------------------------------------------------------------ 변속 (브레이크 인터록)
+  private brakePressed(): boolean {
+    return this.input.held.brake || (this.input.pad.brake ?? 0) > 0.2;
+  }
+
+  shiftContext(): { gear: Gear; v: number; brake: boolean } {
+    const c = this.car as VehicleState | undefined;
+    return { gear: c?.gear ?? 'P', v: c?.v ?? 0, brake: this.brakePressed() };
+  }
+
+  /** 키보드/터치 레버/게임패드/화면 버튼이 모두 통과하는 변속 경로 */
+  requestShift(g: Gear): ShiftDecision {
+    if (this.state !== 'playing') return { ok: false, code: 'brake_required', reason: '지금은 변속할 수 없습니다' };
+    const prev = this.car.gear;
+    const d = shiftGear(this.car, g, this.brakePressed());
+    if (!d.ok) {
+      this.hud.toast(d.reason ?? '지금은 기어를 바꿀 수 없습니다', 'warn');
+    } else if (g !== prev) {
+      if (g === 'R') this.hud.toast(this.settings.sensorEnabled ? '후진(R) · 후방카메라/PDC 작동' : '후진(R) · PDC 꺼짐(설정)');
+      else this.hud.toast(`기어 ${g}`);
+    }
+    return d;
+  }
+
+  /** 목적지로 고를 수 있는 주차 구획: 미션 목표 먼저, 그다음 비어 있는 구획 */
+  private selectableSlots(): MapSlot[] {
+    const cars = this.map.obstacles.filter((o) => o.tag === 'car');
+    const free = this.map.slots.filter((sl) => !cars.some((c) => Math.hypot(c.x - sl.x, c.z - sl.z) < Math.min(sl.w, sl.l) * 0.5));
+    const t = this.targetSlot;
+    return t ? [t, ...free.filter((f) => f.id !== t.id)] : free;
+  }
+
+  private pollGamepad(): void {
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
+    const gp = pads && pads[0] ? pads[0] : null;
+    const { out, pressed } = mapGamepad(gp ? { axes: gp.axes, buttons: gp.buttons } : null, this.padPrev);
+    this.padPrev = pressed;
+    this.input.pad = gp ? { steer: out.steer, throttle: out.throttle, brake: out.brake } : { steer: null, throttle: null, brake: null };
+    if (this.input.enabled || out.actions.includes('pause')) for (const act of out.actions) this.onAction(act);
+  }
+
   onAction(a: Action): void {
     if (a === 'pause') {
       if (this.state === 'playing') this.pause();
@@ -385,16 +464,13 @@ export class Game {
       case 'gearD':
       case 'gearR':
       case 'gearP':
-      case 'gearN': {
-        const g = a.slice(4) as Gear;
-        const r = requestGear(this.car, g);
-        if (!r.ok) {
-          this.hud.toast(r.reason ?? '지금은 기어를 바꿀 수 없습니다', 'warn');
-        } else if (g === 'R') {
-          this.hud.toast(this.settings.sensorEnabled ? '후진(R) · 후방카메라/PDC 작동' : '후진(R) · PDC 꺼짐(설정)');
-        } else {
-          this.hud.toast(`기어 ${g}`);
-        }
+      case 'gearN':
+        this.requestShift(a.slice(4) as Gear);
+        break;
+      case 'gearStepUp':
+      case 'gearStepDown': {
+        const i = SHIFTER_ORDER.indexOf(this.car.gear) + (a === 'gearStepUp' ? -1 : 1);
+        if (i >= 0 && i < SHIFTER_ORDER.length) this.requestShift(SHIFTER_ORDER[i]);
         break;
       }
       case 'handbrake':
@@ -440,16 +516,26 @@ export class Game {
         this.startRun();
         break;
       case 'assistToggle':
-        this.assist.toggleManual();
+        this.hud.toast(this.info.toggle() ? '인포테인먼트 표시' : '인포테인먼트 숨김');
         break;
       case 'assistClose':
-        this.assist.dismiss();
+        this.info.hide();
         break;
       case 'assistCamera': {
-        const cur = this.assist.cameraMode;
-        const next = cur === 'auto' ? 'rear' : cur === 'rear' ? 'front' : 'auto';
+        const order: ('auto' | AssistView)[] = ['auto', ...ASSIST_VIEW_ORDER];
+        const next = order[(order.indexOf(this.assist.cameraMode) + 1) % order.length];
         this.assist.setManualCamera(next);
-        this.hud.toast(`카메라 화면: ${next === 'auto' ? '자동(기어 연동)' : next === 'rear' ? '후방' : '전방'}`);
+        this.viewPolicy.reset();
+        this.hud.toast(`카메라 화면: ${next === 'auto' ? '자동(기어/센서 연동)' : ASSIST_VIEW_NAME[next]}`);
+        break;
+      }
+      case 'infoDest': {
+        const slots = this.selectableSlots();
+        if (slots.length) {
+          this.destIndex = (this.destIndex + 1) % slots.length;
+          this.nav.setDestination(slots[this.destIndex], this.poseNow());
+          this.hud.toast(`목적지: ${slots[this.destIndex].id}`);
+        }
         break;
       }
       case 'sensorToggle':
@@ -481,6 +567,7 @@ export class Game {
     }
     if (!this.car) return;
 
+    this.pollGamepad();
     if (this.state === 'playing') this.simulate(dt);
     else if (this.state === 'result') {
       // 결과 대기: 차는 천천히 정지, 결과 화면 표시 지연
@@ -517,9 +604,10 @@ export class Game {
       const r = (d > 0 ? up : down) * dt;
       return Math.abs(d) <= r ? target : cur + Math.sign(d) * r;
     };
-    this.throttle = ramp(this.throttle, h.throttle ? 1 : 0, 3.5, 6);
-    this.brake = ramp(this.brake, h.brake ? 1 : 0, 6, 8);
-    const st = (h.left ? 1 : 0) - (h.right ? 1 : 0);
+    this.throttle = ramp(this.throttle, Math.max(h.throttle ? 1 : 0, this.input.pad.throttle ?? 0), 3.5, 6);
+    this.brake = ramp(this.brake, Math.max(h.brake ? 1 : 0, this.input.pad.brake ?? 0), 6, 8);
+    const kb = (h.left ? 1 : 0) - (h.right ? 1 : 0);
+    const st = this.input.pad.steer ? this.input.pad.steer : kb;
     this.steerIn = ramp(this.steerIn, st, 5, 7);
     return { throttle: this.throttle, brake: this.brake, steerInput: this.steerIn };
   }
@@ -566,6 +654,17 @@ export class Game {
       pExitSec: this.settings.assistExitSec,
     };
     this.assistOut = this.assist.update({ gear: this.car.gear, speedKmh: Math.abs(this.car.v) * 3.6, dt }, asSet);
+    // 자동 3D 시점(측면 장애물) + 인포테인먼트 공유 상태 + 내비게이션
+    this.viewOut = this.viewPolicy.update(
+      dt,
+      this.assistOut.camera,
+      this.assistOut.manualView,
+      this.sensorSnap ? this.sideObservation(this.sensorSnap) : null,
+      this.settings.assistAutoView && this.assistOut.active && this.settings.sensorEnabled,
+    );
+    const infoSet: InfoSettings = { autoShow: this.settings.infoAutoShow, autoHide: this.settings.infoAutoHide, autoHideSec: this.settings.infoAutoHideSec };
+    this.infoOut = this.info.update({ dt, gear: this.car.gear, parkingActive: this.assistOut.active, firstPerson: this.rig.mode === 'driver' }, infoSet);
+    this.navState = this.nav.update(dt, { x: pose.x, z: pose.z });
 
     // 경고음
     this.beeper.enabled = this.settings.sensorSound && this.settings.sensorEnabled;
@@ -690,11 +789,20 @@ export class Game {
     this.built?.animate(this.time);
 
     // 주차 보조 디스플레이: 실제 3D 장면을 후방/전방 카메라로 렌더링해 패널에 표시
-    const open = this.state !== 'menu' && this.assistOut.active;
+    const open = this.state !== 'menu' && this.infoOut.floatingVisible;
+    const firstPerson = this.rig.mode === 'driver';
+    const parking = this.infoOut.content === 'parking';
     this.hud.setAssistOpen(open);
     this.assistPanel.setVisible(open);
+    this.assistPanel.setContent(this.infoOut.content);
     this.canvas.classList.toggle('mirror', this.rig.mode === 'rear' && this.settings.rearMirror);
-    if (open) this.renderAssist(dt, pose);
+    // 후방/전방/3D 시점 카메라는 "보이는 곳(플로팅 또는 1인칭 실내 화면)"이 있을 때만 렌더링한다 (불필요한 렌더링 중단)
+    if (parking && (open || firstPerson)) this.renderAssist(dt, pose);
+    if (!parking && (open || firstPerson)) this.drawNav(dt, pose);
+    if (firstPerson) {
+      this.drawCabin(dt);
+      if (this.settings.mirrorFps > 0 && this.model) this.mirrors.update(this.renderer, this.scene, this.model, pose, this.spec, dt, this.settings.mirrorFps);
+    }
 
     this.renderer.setScissorTest(false);
     const w = window.innerWidth;
@@ -731,19 +839,33 @@ export class Game {
     return computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor });
   }
 
+  private sideObservation(snap: SensorSnapshot): SideObservation {
+    const rank: Record<ProximityLevel, number> = { none: 0, far: 1, mid: 2, near: 3, critical: 4 };
+    const level: Record<string, ProximityLevel> = { front: 'none', rear: 'none', left: 'none', right: 'none' };
+    const hits: Record<string, number> = { front: 0, rear: 0, left: 0, right: 0 };
+    for (const r of snap.readings) {
+      hits[r.group] += r.hits.length;
+      const lv = proximityLevel(r.distance, snap.range, snap.critical);
+      if (rank[lv] > rank[level[r.group]]) level[r.group] = lv;
+    }
+    return { level: level as SideObservation['level'], hits: hits as SideObservation['hits'] };
+  }
+
   private brakeLightOn(): boolean {
     return this.brake > 0.05 || this.car.handbrake;
   }
 
+  /** 주차 보조 카메라: 실제 3D 장면을 선택된 시점의 가상 카메라로 렌더링해 패널(및 실내 화면)에 복사 */
   private renderAssist(dt: number, pose: { x: number; z: number; heading: number }): void {
-    const camKind = this.assistOut.camera;
-    const switched = this.assistLastCamera !== camKind;
+    const view = this.viewOut.view;
+    this.rig.updateAssistCamera(dt, view, pose, this.spec); // 시점 보간은 매 프레임
+    const switched = this.assistLastCamera !== view;
     this.assistCamAcc += dt;
-    // 부하 관리: 보조 카메라는 설정 FPS 로만 다시 렌더링한다 (카메라가 바뀌면 즉시)
+    // 부하 관리: 보조 카메라는 설정 FPS 로만 다시 렌더링한다 (시점이 바뀌면 즉시)
     if (!switched && this.assistCamAcc < 1 / this.settings.assistCameraFps) return;
     this.assistCamAcc = 0;
-    this.assistLastCamera = camKind;
-    const cam = camKind === 'rear' ? this.rig.rearCamera : this.rig.frontCamera;
+    this.assistLastCamera = view;
+    const cam = this.rig.assistCamera;
     const pw = ASSIST_CAM_W;
     const ph = ASSIST_CAM_H;
     const pr = this.renderer.getPixelRatio();
@@ -753,23 +875,87 @@ export class Game {
     const vh = vw * (ph / pw);
     cam.aspect = pw / ph;
     cam.updateProjectionMatrix();
+    // 3D 시점(측면/탑/사선)에서는 내 차 모델이 보여야 한다. 1인칭에서 숨겨 둔 차체를 이 패스에서만 켠다.
+    const m = this.model!;
+    const prevBody = m.bodyGroup.visible;
+    const prevCockpit = m.cockpit.visible;
+    const show3d = view === 'left' || view === 'right' || view === 'top' || view === 'oblique';
+    if (show3d) {
+      m.bodyGroup.visible = true;
+      m.cockpit.visible = false;
+    }
     this.renderer.setScissorTest(true);
     this.renderer.setViewport(0, 0, vw, vh);
     this.renderer.setScissor(0, 0, vw, vh);
     this.renderer.render(this.scene, cam);
     this.renderer.setScissorTest(false);
+    m.bodyGroup.visible = prevBody;
+    m.cockpit.visible = prevCockpit;
     const sw = Math.max(1, Math.round(vw * pr));
     const sh = Math.max(1, Math.round(vh * pr));
-    const mirror = camKind === 'rear' && this.settings.rearMirror;
+    const mirror = view === 'rear' && this.settings.rearMirror;
     this.assistPanel.blit(this.canvas, 0, this.canvas.height - sh, sw, sh, mirror);
     this.assistPanel.drawGuides({
       camera: cam,
       pose,
       steer: this.car.steer,
-      dir: camKind === 'rear' ? -1 : 1,
+      dir: view === 'rear' ? -1 : 1,
       mirror,
-      show: this.settings.assistGuides,
+      show: this.settings.assistGuides && (view === 'rear' || view === 'front'),
     });
+  }
+
+  /** 내비게이션 지도를 캔버스에 그린다 (10Hz) */
+  private drawNav(dt: number, pose: { x: number; z: number; heading: number }): void {
+    this.navAcc += dt;
+    if (this.navAcc < 0.1) return;
+    this.navAcc = 0;
+    const c = this.assistPanel.navCanvas;
+    drawNavMap(c.getContext('2d')!, c.width, c.height, this.map, pose, this.navState, this.spec);
+  }
+
+  /** 1인칭 실내 센터 디스플레이/계기판 갱신 (설정 FPS) */
+  private drawCabin(dt: number): void {
+    const cab = this.model?.cabin;
+    if (!cab) return;
+    this.cabinAcc += dt;
+    if (this.cabinAcc < 1 / this.settings.cabinFps) return;
+    this.cabinAcc = 0;
+    const c = this.car;
+    const slotName = this.navState.destination?.id ?? '';
+    drawCenterScreen(cab.center.ctx, cab.center.canvas.width, cab.center.canvas.height, {
+      content: this.infoOut.content,
+      cam: this.assistPanel.cam,
+      guide: this.assistPanel.guide,
+      navCanvas: this.assistPanel.navCanvas,
+      spec: this.spec,
+      pdc: this.pdcState,
+      palette: this.settings.pdcPalette,
+      viewName: ASSIST_VIEW_NAME[this.viewOut.view],
+      gear: c.gear,
+      nav: this.navState,
+      sensorOn: this.settings.sensorEnabled,
+      soundOn: this.settings.sensorSound,
+      cameraMode: this.assist.cameraMode === 'auto' ? '자동' : ASSIST_VIEW_NAME[this.assist.cameraMode],
+      mission: this.mission ? this.mission.def.name : slotName ? `목적지 ${slotName}` : '자유주행',
+    });
+    cab.center.texture.needsUpdate = true;
+    const L = this.currentLighting();
+    const spd = Math.abs(c.v) * 3.6;
+    drawCluster(cab.cluster.ctx, cab.cluster.canvas.width, cab.cluster.canvas.height, {
+      speedKmh: spd,
+      gear: c.gear,
+      rpm: c.gear === 'P' || c.gear === 'N' ? 800 + Math.abs(this.throttle) * 1500 : Math.min(5500, 850 + spd * 55 + this.throttle * 700),
+      signalLeft: (this.sigLeft || this.hazard) && this.blinkOn,
+      signalRight: (this.sigRight || this.hazard) && this.blinkOn,
+      hazard: this.hazard && this.blinkOn,
+      lightMode: LIGHT_MODE_NAME[this.lightMode],
+      lowBeam: L.low,
+      handbrake: c.handbrake,
+      pdcLevel: this.pdcState?.overall ?? 'none',
+      steerDeg: c.steer / DEG,
+    });
+    cab.cluster.texture.needsUpdate = true;
   }
 
   private updateHud(): void {
@@ -814,13 +1000,16 @@ export class Game {
       fpsText: this.settings.showFps ? `FPS ${this.fpsInstant.toFixed(0)} · 평균 ${this.avgFps().toFixed(0)}` : null,
     };
     this.hud.update(d);
-    if (this.assistOut.active) {
+    // PDC 상태는 항상 계산 (패널, 실내 화면, 계기판이 공유). 일반 화면에 거리 숫자는 포함되지 않는다.
+    this.pdcState = buildPdcState(this.spec, this.sensorSnap, this.settings.sensorEnabled, this.assistOut.focus);
+    if (this.infoOut.floatingVisible || this.rig.mode === 'driver') {
       this.assistPanel.setPalette(this.settings.pdcPalette);
       this.assistPanel.setGear(car.gear);
       this.assistPanel.setMission(mh ? `${mh.name} · ${mh.timeText.split(' / ')[0]}` : '자유주행');
-      this.assistPanel.setCamera(this.assistOut.camera, this.assistOut.cameraMode);
+      this.assistPanel.setCamera(this.viewOut.view, this.assist.cameraMode, this.viewOut.auto);
       this.assistPanel.setToggles(this.settings.sensorEnabled, this.settings.sensorSound);
-      this.assistPanel.updateZones(buildPdcState(this.spec, this.sensorSnap, this.settings.sensorEnabled, this.assistOut.focus));
+      this.assistPanel.updateZones(this.pdcState);
+      this.assistPanel.setNav(this.navState, this.navState.destination?.id ?? '');
     }
   }
 }

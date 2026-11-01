@@ -4,7 +4,25 @@ import type { LightingOutput } from './lighting';
 import type { VehicleSpec } from './spec';
 
 /** 차량 시각 모델. 충돌체(OBB)/센서 좌표는 VehicleSpec 에 별도로 있으며 이 모델과 독립적이다. */
+/** 실내 화면: 캔버스에 그리고 텍스처로 쓴다 */
+export interface CabinScreen {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  texture: THREE.CanvasTexture;
+  mesh: THREE.Mesh;
+}
+
+export interface MirrorPlanes {
+  left: THREE.Mesh;
+  right: THREE.Mesh;
+  room: THREE.Mesh;
+}
+
 export interface CarModel {
+  /** 1인칭 사이드미러/룸미러 표시면 (실제 장면 렌더링 텍스처가 붙는다) */
+  mirrors: MirrorPlanes | null;
+  /** 1인칭 실내의 센터 디스플레이/계기판 (lite 모델에는 없음) */
+  cabin: { center: CabinScreen; cluster: CabinScreen } | null;
   root: THREE.Group; // 원점 = 차체 중심의 지면 투영점, +z = 앞, +x = 왼쪽
   bodyGroup: THREE.Group; // 1인칭 시점에서는 숨긴다
   cockpit: THREE.Group; // 1인칭 시점 전용 (대시보드, 핸들)
@@ -123,6 +141,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
   const root = new THREE.Group();
   root.userData.hl = hl;
   const bodyGroup = new THREE.Group();
+  bodyGroup.name = 'Body';
   root.add(bodyGroup);
 
   const bodyMat = sharedMat(`body:${color}`, () => new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.35 })) as THREE.MeshStandardMaterial;
@@ -192,6 +211,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
   ] as [number, boolean][]) {
     for (const sx of [1, -1]) {
       const pivot = new THREE.Group();
+      pivot.name = `Wheel_${front ? 'F' : 'R'}${sx > 0 ? 'L' : 'R'}`; // GLB 규약: 원점 = 바퀴 회전 중심
       pivot.position.set(sx * (W / 2 - tw / 2), r, wz);
       const roll = new THREE.Group();
       const tire = new THREE.Mesh(cyl(`${key}:tire`, r, r, tw, 18), tireMat);
@@ -226,6 +246,8 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
   let highSpot: THREE.SpotLight | null = null;
   const cockpit = new THREE.Group();
   let steeringWheel: THREE.Object3D | null = null;
+  let cabinScreens: { center: CabinScreen; cluster: CabinScreen } | null = null;
+  let mirrorPlanes: MirrorPlanes | null = null;
 
   const ownMaterials: THREE.Material[] = [];
 
@@ -250,6 +272,12 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       sigL: mk(0xb87400, 0xffa200),
       sigR: mk(0xb87400, 0xffa200),
     };
+    lights.head.name = 'Lamp_Head';
+    lights.drl.name = 'Lamp_DRL';
+    lights.tail.name = 'Lamp_Tail';
+    lights.rev.name = 'Lamp_Rev';
+    lights.sigL.name = 'Lamp_SigL';
+    lights.sigR.name = 'Lamp_SigR';
     const hy = belt - 0.2;
     for (const sx of [1, -1]) {
       const hlm = new THREE.Mesh(box(`${key}:head`, W * 0.2, 0.1, 0.06), lights.head);
@@ -312,11 +340,49 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     wheel.rotation.x = -0.9; // 운전자 쪽으로 기울임
     cockpit.add(wheel);
     steeringWheel = wheel;
+    // 실내 화면 (센터 디스플레이 + 디지털 계기판): 3인칭 플로팅 패널과 같은 상태를 그린다
+    const mkScreen = (cw: number, ch: number, mw: number, mh: number, pos: THREE.Vector3): CabinScreen => {
+      const canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#05080c';
+      ctx.fillRect(0, 0, cw, ch);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(mw, mh), new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }));
+      mesh.position.copy(pos);
+      mesh.lookAt(new THREE.Vector3(eye.x, eye.y, eye.z)); // 운전자 쪽을 향함
+      cockpit.add(mesh);
+      ownMaterials.push(mesh.material as THREE.Material);
+      return { canvas, ctx, texture, mesh };
+    };
+    const mkMirror = (mw: number, mh: number, pos: THREE.Vector3, yaw: number): THREE.Mesh => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(mw, mh), new THREE.MeshBasicMaterial({ color: 0x1a2430, toneMapped: false }));
+      m.position.copy(pos);
+      m.lookAt(new THREE.Vector3(eye.x, eye.y, eye.z));
+      m.rotateY(yaw);
+      cockpit.add(m);
+      ownMaterials.push(m.material as THREE.Material);
+      return m;
+    };
+    mirrorPlanes = {
+      left: mkMirror(0.2, 0.1, new THREE.Vector3(W / 2 + 0.1, belt + 0.1, z1 - 0.08), 0),
+      right: mkMirror(0.2, 0.1, new THREE.Vector3(-(W / 2 + 0.1), belt + 0.1, z1 - 0.08), 0),
+      room: mkMirror(0.24, 0.07, new THREE.Vector3(0.12, H - 0.17, z1t - 0.1), 0),
+    };
+    cabinScreens = {
+      center: mkScreen(768, 336, 0.58, 0.254, new THREE.Vector3(0.02, belt + 0.2, z1 - 0.2)),
+      cluster: mkScreen(512, 196, 0.42, 0.161, new THREE.Vector3(eye.x, eye.y - 0.16, eye.z + 0.72)),
+    };
     cockpit.visible = false;
     root.add(cockpit);
   }
 
   const model: CarModel = {
+    mirrors: mirrorPlanes,
+    cabin: cabinScreens,
     root,
     bodyGroup,
     cockpit,
@@ -391,6 +457,7 @@ export function attachGlbScene(
   node.rotation.y = rotY;
   const rollers: THREE.Object3D[] = [];
   const pivots: THREE.Object3D[] = [];
+  const lampSeen = new Set<string>();
   for (const k of ['FL', 'FR', 'RL', 'RR']) {
     const w = node.getObjectByName(`Wheel_${k}`);
     if (!w || !w.parent) continue;
@@ -403,7 +470,21 @@ export function attachGlbScene(
     if (k[0] === 'F') pivots.push(pivot);
   }
   node.traverse((o) => {
-    if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    o.castShadow = true;
+    // 램프 재질 이름 규약(Lamp_Head/DRL/Tail/Rev/SigL/SigR)이 있으면 점등 시스템에 연결
+    const mat = mesh.material as THREE.MeshStandardMaterial;
+    const l = model.lights;
+    if (!l || !mat?.name) return;
+    const map: Record<string, keyof typeof l> = { Lamp_Head: 'head', Lamp_DRL: 'drl', Lamp_Tail: 'tail', Lamp_Rev: 'rev', Lamp_SigL: 'sigL', Lamp_SigR: 'sigR' };
+    const key = map[mat.name];
+    if (key) {
+      if (!lampSeen.has(key)) {
+        lampSeen.add(key);
+        l[key] = mat;
+      } else mesh.material = l[key]; // 같은 이름의 재질은 하나로 공유
+    }
   });
   // 기존 프로시저럴 차체 제거
   for (const c of [...model.bodyGroup.children]) model.bodyGroup.remove(c);

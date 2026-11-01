@@ -19,6 +19,9 @@ export type Action =
   | 'assistToggle'
   | 'assistCamera'
   | 'assistClose'
+  | 'gearStepUp'
+  | 'gearStepDown'
+  | 'infoDest'
   | 'sensorToggle'
   | 'soundToggle';
 
@@ -58,6 +61,8 @@ export class Input {
   private keyHeld: Record<HeldKey, boolean> = { throttle: false, brake: false, left: false, right: false };
   onAction: (a: Action) => void = () => {};
   enabled = true;
+  /** 게임패드 아날로그 입력 (null = 사용 안 함) */
+  pad: { steer: number | null; throttle: number | null; brake: number | null } = { steer: null, throttle: null, brake: null };
 
   attach(): void {
     window.addEventListener('keydown', this.keyDown);

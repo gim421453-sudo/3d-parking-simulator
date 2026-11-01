@@ -1,4 +1,5 @@
 import { DEG } from '../core/math';
+import type { GearboxKind } from './transmission';
 
 export type SensorGroup = 'front' | 'rear' | 'left' | 'right';
 
@@ -37,6 +38,10 @@ export interface VehicleSpec {
   maxSpeedFwd: number; // m/s
   maxSpeedRev: number;
   accel: number;
+  /** 변속기 종류 (auto 구현됨 / manual 은 구조만 준비, 물리 미구현) */
+  transmission: GearboxKind;
+  /** 차종 분류 (향후 SUV/버스/트럭 확장용) */
+  category: 'compact' | 'sedan' | 'suv' | 'bus' | 'truck';
   // --- 바퀴(시각/회전) ---
   wheelRadius: number;
   trackWidth: number;
@@ -103,6 +108,8 @@ function make(p: {
     maxSpeedFwd: p.maxSpeedFwd ?? 40 / 3.6,
     maxSpeedRev: 15 / 3.6,
     accel: 2.6,
+    transmission: 'auto',
+    category: p.body === 'suv' ? 'suv' : p.body === 'hatch' ? 'compact' : 'sedan',
     wheelRadius: p.wheelRadius,
     trackWidth: p.width - 0.22,
     driverEye: { x: 0.36, y: eyeY, z: -0.05 },
@@ -157,7 +164,22 @@ export const VEHICLES: VehicleSpec[] = [
   }),
 ];
 
-export const getVehicle = (id: string): VehicleSpec => VEHICLES.find((v) => v.id === id) ?? VEHICLES[1];
+/**
+ * 추가 선택 차량 (장애물 차량 배치에는 쓰이지 않음 → 맵 레이아웃이 바뀌지 않는다).
+ * sedan-glb: 같은 제원의 세단을 "실제 GLB 파일"에서 불러오는 파이프라인 시험 차량.
+ */
+export const VEHICLE_EXTRAS: VehicleSpec[] = [
+  {
+    ...VEHICLES[1],
+    id: 'sedan-glb',
+    name: '중형 세단 (GLB 시험)',
+    desc: '같은 제원을 GLB 파일에서 불러오는 파이프라인 시험 차량 (public/models/sedan-test.glb).',
+    visual: { kind: 'glb', body: 'sedan', url: './models/sedan-test.glb', scale: 1, offset: { x: 0, y: 0, z: 0 }, rotY: 0 },
+  },
+];
+export const SELECTABLE_VEHICLES: VehicleSpec[] = [...VEHICLES, ...VEHICLE_EXTRAS];
+
+export const getVehicle = (id: string): VehicleSpec => SELECTABLE_VEHICLES.find((v) => v.id === id) ?? VEHICLES[1];
 
 /** 주차된 차량(장애물 차량)용 사양: 사양 목록에서 index로 선택 */
 export const parkedSpec = (i: number): VehicleSpec => VEHICLES[((i % VEHICLES.length) + VEHICLES.length) % VEHICLES.length];

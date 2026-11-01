@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { localToWorld } from '../core/math';
 import { ICON } from '../ui/icons';
 import type { VehicleSpec } from '../vehicle/spec';
-import type { AssistCamera } from './assistPolicy';
+import type { InfoContent } from '../infotainment/controller';
+import type { NavState } from '../nav/navigator';
+import { ASSIST_VIEW_NAME, type AssistView } from './viewPolicy';
 import { buildGuideLines, guideColor } from './guidelines';
 import { PDC_PALETTES, bandLevel, bandLit, outlinePoint, zoneGeometry, type PdcPaletteId, type PdcState, type ZoneBandShape } from './pdcModel';
 
@@ -12,13 +14,13 @@ export interface AssistPanelHandlers {
   onCycleCamera(): void;
   onSettings(): void;
   onClose(): void;
+  onCycleDestination(): void;
 }
 
 export const ASSIST_CAM_W = 480;
 export const ASSIST_CAM_H = 270;
 
-const CAMERA_NAME: Record<AssistCamera, string> = { rear: '후방 카메라', front: '전방 카메라' };
-const MODE_NAME: Record<'auto' | AssistCamera, string> = { auto: '자동', rear: '후방', front: '전방' };
+const MODE_NAME: Record<'auto' | AssistView, string> = { auto: '자동', rear: '후방', front: '전방', left: '좌측', right: '우측', top: '탑뷰', oblique: '사선' };
 
 /**
  * 주차 보조 디스플레이(차량 디스플레이 시스템의 한 화면).
@@ -29,6 +31,7 @@ export class AssistPanel {
   readonly el: HTMLElement;
   readonly cam: HTMLCanvasElement;
   readonly guide: HTMLCanvasElement;
+  readonly navCanvas: HTMLCanvasElement;
   private svg: SVGSVGElement;
   private statusEl: HTMLElement;
   private gearEl: HTMLElement;
@@ -38,7 +41,8 @@ export class AssistPanel {
   private levels = new Map<string, string>();
   private palette: PdcPaletteId = 'standard';
   private lastState: PdcState | null = null;
-  private currentCamera: AssistCamera = 'rear';
+  private currentCamera: AssistView = 'rear';
+  private content: InfoContent = 'parking';
   private ctx: CanvasRenderingContext2D;
   private gctx: CanvasRenderingContext2D;
   private spec: VehicleSpec | null = null;
@@ -63,10 +67,17 @@ export class AssistPanel {
         <div class="pa-cam">
           <canvas class="pa-cam-canvas" width="${ASSIST_CAM_W}" height="${ASSIST_CAM_H}"></canvas>
           <canvas class="pa-guide-canvas" width="${ASSIST_CAM_W}" height="${ASSIST_CAM_H}"></canvas>
+          <canvas class="pa-nav-canvas" width="${ASSIST_CAM_W}" height="${ASSIST_CAM_H}"></canvas>
         </div>
         <div class="pa-pdc">
           <svg class="pa-svg" role="img" aria-label="차량 주변 주차거리감지(PDC)"></svg>
           <div class="pa-status">센서 대기</div>
+          <div class="pa-guidance">
+            <div class="pa-turn" data-turn="straight"><svg viewBox="0 0 48 48" aria-hidden="true"><path class="arrow" d="M24 40V14M24 14l-9 9M24 14l9 9" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="pa-nav-text">목적지를 선택하세요</div>
+            <div class="pa-nav-dist"></div>
+            <button type="button" class="pa-dest" data-pa="dest">목적지</button>
+          </div>
         </div>
         <nav class="pa-side" aria-label="주차 보조 메뉴">
           <button type="button" data-pa="sensor"><i>${ICON.parkAssist}</i><span>주차 보조<em class="v-sensor">켜짐</em></span></button>
@@ -79,6 +90,9 @@ export class AssistPanel {
     const q = <T extends Element>(s: string): T => this.el.querySelector(s) as T;
     this.cam = q('.pa-cam-canvas');
     this.guide = q('.pa-guide-canvas');
+    this.navCanvas = q('.pa-nav-canvas');
+    this.el.dataset.content = 'parking';
+    this.el.dataset.open = 'false';
     this.svg = q('.pa-svg');
     this.statusEl = q('.pa-status');
     this.gearEl = q('.pa-gear');
@@ -97,13 +111,55 @@ export class AssistPanel {
     this.btn.camera.addEventListener('click', h.onCycleCamera);
     this.btn.settings.addEventListener('click', h.onSettings);
     this.btn.close.addEventListener('click', h.onClose);
+    (this.el.querySelector('[data-pa="dest"]') as HTMLButtonElement).addEventListener('click', h.onCycleDestination);
   }
 
   get visible(): boolean {
     return !this.el.classList.contains('hidden');
   }
+  private hideTimer = 0;
+  /** 부드러운 등장/퇴장. (hidden 클래스는 퇴장 애니메이션이 끝난 뒤에 붙는다) */
   setVisible(on: boolean): void {
-    this.el.classList.toggle('hidden', !on);
+    if (on) {
+      clearTimeout(this.hideTimer);
+      if (this.el.classList.contains('hidden')) {
+        this.el.classList.remove('hidden');
+        this.el.classList.add('pa-enter');
+        void this.el.offsetWidth;
+      }
+      this.el.classList.remove('pa-leave');
+      this.el.dataset.open = 'true';
+      requestAnimationFrame(() => this.el.classList.remove('pa-enter'));
+    } else if (this.el.dataset.open !== 'false' || !this.el.classList.contains('hidden')) {
+      if (this.el.dataset.open === 'false' && this.el.classList.contains('hidden')) return;
+      this.el.dataset.open = 'false';
+      this.el.classList.add('pa-leave');
+      clearTimeout(this.hideTimer);
+      this.hideTimer = window.setTimeout(() => {
+        if (this.el.dataset.open === 'false') {
+          this.el.classList.add('hidden');
+          this.el.classList.remove('pa-leave');
+        }
+      }, 190);
+    }
+  }
+
+  /** 콘텐츠 전환 (주차 보조 ↔ 내비게이션). DOM/사이드 메뉴는 그대로, 보이는 내용만 바뀐다 */
+  setContent(c: InfoContent): void {
+    if (c === this.content) return;
+    this.content = c;
+    this.el.dataset.content = c;
+    this.chipEl.textContent = c === 'nav' ? '경로 안내' : ASSIST_VIEW_NAME[this.currentCamera];
+    (this.el.querySelector('.pa-title') as HTMLElement).textContent = c === 'nav' ? '내비게이션' : '주차 보조';
+  }
+
+  /** 내비게이션 안내 갱신 */
+  setNav(st: NavState, destName: string): void {
+    const turn = this.el.querySelector('.pa-turn') as HTMLElement;
+    turn.dataset.turn = st.status === 'guiding' ? st.next.type : st.status === 'arrived' ? 'arrive' : 'straight';
+    (this.el.querySelector('.pa-nav-text') as HTMLElement).textContent = st.text;
+    (this.el.querySelector('.pa-nav-dist') as HTMLElement).textContent = st.status === 'guiding' ? `${Math.round(st.next.distM)} m 후 · 남은 ${Math.round(st.remainingM)} m` : '';
+    (this.el.querySelector('.pa-dest') as HTMLElement).textContent = destName ? `목적지 ${destName}` : '목적지 선택';
   }
 
   setPalette(p: PdcPaletteId): void {
@@ -250,16 +306,17 @@ export class AssistPanel {
     this.el.dataset.gear = g;
   }
 
-  setCamera(cam: AssistCamera, mode: 'auto' | AssistCamera): void {
+  setCamera(cam: AssistView, mode: 'auto' | AssistView, auto = false): void {
     if (cam !== this.currentCamera) {
       this.currentCamera = cam;
       this.el.dataset.camera = cam;
-      this.chipEl.textContent = CAMERA_NAME[cam];
+      if (this.content === 'parking') this.chipEl.textContent = ASSIST_VIEW_NAME[cam] + (auto && cam !== 'rear' && cam !== 'front' ? ' (자동)' : '');
       // 레이아웃은 그대로, 영상만 교체: 짧은 전환 효과
       this.el.classList.add('pa-switching');
       setTimeout(() => this.el.classList.remove('pa-switching'), 180);
     }
     (this.btn.camera.querySelector('.v-camera') as HTMLElement).textContent = MODE_NAME[mode];
+    this.el.dataset.autoView = String(auto);
   }
 
   setToggles(sensorOn: boolean, soundOn: boolean): void {

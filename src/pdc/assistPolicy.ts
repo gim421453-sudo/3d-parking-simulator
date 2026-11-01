@@ -1,5 +1,7 @@
 import type { Gear } from '../vehicle/physics';
+import type { AssistView } from './viewPolicy';
 
+/** 기어 기준 기본 카메라 */
 export type AssistCamera = 'rear' | 'front';
 
 export interface AssistSettings {
@@ -7,9 +9,10 @@ export interface AssistSettings {
   autoFront: boolean; // D 선택 시 전방카메라 자동 표시
   frontMaxKmh: number; // D 에서 주차 보조 화면이 유지되는 최대 속도
   pExitSec: number; // P 로 바꾼 뒤 화면이 닫히기까지 지연
+  minHoldSec?: number; // 속도 경계에서 열림/닫힘이 번갈아 깜빡이지 않도록 하는 최소 유지 시간
 }
 
-export const DEFAULT_ASSIST: AssistSettings = { autoRear: true, autoFront: true, frontMaxKmh: 10, pExitSec: 3 };
+export const DEFAULT_ASSIST: AssistSettings = { autoRear: true, autoFront: true, frontMaxKmh: 15, pExitSec: 3, minHoldSec: 1.5 };
 
 export interface AssistInput {
   gear: Gear;
@@ -19,12 +22,14 @@ export interface AssistInput {
 
 export interface AssistOutput {
   active: boolean;
-  /** 화면에 보이는 카메라 영상 */
+  /** 기본 카메라(기어 기준, 수동으로 후방/전방을 고르면 그 값) */
   camera: AssistCamera;
+  /** 수동으로 고른 시점 (자동이면 null) — 측면/탑/사선 포함 */
+  manualView: AssistView | null;
   /** PDC 강조 방향 (기어 기준) */
   focus: AssistCamera;
   /** 카메라 선택 방식 */
-  cameraMode: 'auto' | AssistCamera;
+  cameraMode: 'auto' | AssistView;
   reason: string;
 }
 
@@ -43,7 +48,8 @@ export class AssistController {
   private pTimer = 0;
   private dismissed = false;
   private forced = false;
-  private manual: 'auto' | AssistCamera = 'auto';
+  private manual: 'auto' | AssistView = 'auto';
+  private holdT = 99;
   private focus: AssistCamera = 'rear';
   private lastReason = '';
 
@@ -55,13 +61,14 @@ export class AssistController {
     this.forced = false;
     this.manual = 'auto';
     this.focus = 'rear';
+    this.holdT = 99;
   }
 
   /** 사용자가 카메라를 직접 고른다 ('auto' 로 돌아갈 수 있음). 다음 기어 변경까지 유지. */
-  setManualCamera(c: 'auto' | AssistCamera): void {
+  setManualCamera(c: 'auto' | AssistView): void {
     this.manual = c;
   }
-  get cameraMode(): 'auto' | AssistCamera {
+  get cameraMode(): 'auto' | AssistView {
     return this.manual;
   }
   /** 수동 닫기: 다음 기어 변경까지 자동으로 다시 열리지 않는다 */
@@ -83,6 +90,8 @@ export class AssistController {
   update(inp: AssistInput, s: AssistSettings): AssistOutput {
     const g = inp.gear;
     const slow = inp.speedKmh <= s.frontMaxKmh;
+    const minHold = s.minHoldSec ?? 0;
+    this.holdT += inp.dt;
     if (g !== this.lastGear) {
       // 기어 변경: 수동 상태 초기화 후 새 기어 규칙 적용
       this.dismissed = false;
@@ -90,6 +99,7 @@ export class AssistController {
       this.manual = 'auto';
       this.pTimer = 0;
       this.closedBySpeed = false;
+      this.holdT = 0;
       if (g === 'R') {
         this.open = s.autoRear;
         this.focus = 'rear';
@@ -107,12 +117,14 @@ export class AssistController {
 
     if (!this.dismissed) {
       if (g === 'D') {
-        if (this.open && !slow && !this.forced) {
+        if (this.open && !slow && !this.forced && this.holdT >= minHold) {
           this.open = false;
+          this.holdT = 0;
           this.closedBySpeed = true;
           this.lastReason = '고속 주행: 일반 화면 복귀';
-        } else if (!this.open && this.closedBySpeed && s.autoFront && inp.speedKmh <= s.frontMaxKmh * 0.6) {
+        } else if (!this.open && this.closedBySpeed && s.autoFront && inp.speedKmh <= s.frontMaxKmh * 0.6 && this.holdT >= minHold) {
           this.open = true; // 히스테리시스: 충분히 느려지면 다시 표시
+          this.holdT = 0;
           this.closedBySpeed = false;
           this.lastReason = '저속 복귀: 전방카메라';
         }
@@ -131,8 +143,8 @@ export class AssistController {
 
     const focus: AssistCamera = g === 'R' ? 'rear' : g === 'D' ? 'front' : this.focus;
     this.focus = focus;
-    const camera: AssistCamera = this.manual === 'auto' ? focus : this.manual;
-    return { active: this.open && !this.dismissed, camera, focus, cameraMode: this.manual, reason: this.lastReason };
+    const camera: AssistCamera = this.manual === 'rear' || this.manual === 'front' ? this.manual : focus;
+    return { active: this.open && !this.dismissed, camera, manualView: this.manual === 'auto' ? null : this.manual, focus, cameraMode: this.manual, reason: this.lastReason };
   }
 
   private closedBySpeed = false;

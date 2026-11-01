@@ -22,6 +22,7 @@ export const ICON = {
   parkAssist: svg('<rect x="8.5" y="7" width="7" height="12" rx="2.6"/><path d="M6 5.6a8 8 0 0 1 12 0"/><path d="M4 3.8a11 11 0 0 1 16 0"/>'),
   assist: svg('<circle cx="12" cy="12" r="8"/><path d="M10 16V8h3a2.5 2.5 0 0 1 0 5h-3"/><path d="M19.5 5.5l1.6-1.6"/>'),
   cameraSwitch: svg('<path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><path d="M9.5 13.5h5M13 12l1.8 1.5L13 15"/>'),
+  display: svg('<rect x="3" y="5" width="18" height="11.5" rx="2"/><path d="M9 20h6M12 16.5V20"/><path d="M6.5 13l2.6-3 2 2.2 2.4-3.2 2 4"/>'),
   car: svg('<path d="M4 15.5V12l1.8-4.2A2 2 0 0 1 7.6 6.6h8.8a2 2 0 0 1 1.8 1.2L20 12v3.5"/><path d="M3.5 15.5h17v2.2H3.5z"/><circle cx="7.5" cy="17.7" r="1.4" fill="currentColor"/><circle cx="16.5" cy="17.7" r="1.4" fill="currentColor"/><path d="M5 12h14"/>'),
   keyboard: svg('<rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M6.5 10h.01M9.5 10h.01M12.5 10h.01M15.5 10h.01M17.5 10h.01M7 14h10"/>'),
   star: svg('<path d="M12 4l2.5 5.1 5.6.8-4 3.9.9 5.6L12 16.8 7 19.4l.9-5.6-4-3.9 5.6-.8z" fill="currentColor" stroke="none"/>'),

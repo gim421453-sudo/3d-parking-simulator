@@ -135,7 +135,7 @@ describe('동적 주차 가이드라인', () => {
 });
 
 describe('주차 보조 표시 정책 (R/D 자동 전환)', () => {
-  const S: AssistSettings = { ...DEFAULT_ASSIST };
+  const S: AssistSettings = { ...DEFAULT_ASSIST, frontMaxKmh: 10, minHoldSec: 0 }; // 기본값(15km/h, 최소유지 1.5s)은 infotainment.test 에서 검증
   const run = (c: AssistController, gear: 'P' | 'R' | 'N' | 'D', speed: number, dt = 0.05, s = S) => c.update({ gear, speedKmh: speed, dt }, s);
 
   it('R: 후방카메라 + 후방 PDC 자동 표시', () => {

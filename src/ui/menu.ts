@@ -2,7 +2,7 @@ import { DEFAULT_SETTINGS, QUALITY_PRESETS, type MissionRecord, type Records, ty
 import { MAPS, getMap } from '../maps';
 import type { MapMission } from '../maps/types';
 import type { ScoreResult } from '../mission/parking';
-import { VEHICLES } from '../vehicle/spec';
+import { SELECTABLE_VEHICLES as VEHICLES } from '../vehicle/spec';
 import { PDC_PALETTES } from '../pdc/pdcModel';
 import { ICON } from './icons';
 import { Minimap } from './minimap';
@@ -44,7 +44,8 @@ const KEYS: [string, string][] = [
   ['C', '카메라 변경'],
   ['M', '미니맵 (작게/크게/숨김)'],
   ['V', '주차 센서 화면 (작게/크게/숨김)'],
-  ['B', '주차 보조 화면 열기/닫기'],
+  ['B', '인포테인먼트 화면 열기/닫기'],
+  ['↑ ↓ (D-pad)', '게임패드: 기어 한 칸씩 (브레이크 인터록 적용)'],
   ['Q / E', '좌 / 우 방향지시등'],
   ['H', '비상등'],
   ['L', '전조등'],
@@ -262,6 +263,12 @@ export class Menu {
                ${chk('assistFrontAuto', '전진(D) 선택 시 전방카메라 + 전방 PDC 자동 표시', 'R→D 전환 시 화면 구성은 그대로, 영상만 전방으로 바뀜', s.assistFrontAuto)}
                ${rng('assistFrontMaxKmh', 'D 에서 주차 보조 화면 유지 속도', '이 속도를 넘으면 일반 화면으로 복귀', 3, 30, 1, s.assistFrontMaxKmh)}
                ${rng('assistExitSec', 'P 기어 후 화면 종료 지연', '주차(P) 후 자동으로 닫히기까지', 0, 10, 1, s.assistExitSec)}
+               ${chk('assistAutoView', '측면 장애물 접근 시 3D 측면/탑뷰 자동 전환', '좌/우 센서 근접 → 3D 측면뷰, 양측 → 탑뷰, 해제 후 원래 시점 복귀. 수동 선택이 우선', s.assistAutoView)}
+               ${chk('infoAutoShow', '인포테인먼트 자동 표시', '주차 보조가 필요하면 플로팅 디스플레이를 자동으로 띄움 (B 키/버튼으로 수동 토글)', s.infoAutoShow)}
+               ${chk('infoAutoHide', '인포테인먼트 자동 숨김', '끄면 주차 보조 종료 후에도 내비게이션을 표시하며 유지', s.infoAutoHide)}
+               ${rng('infoAutoHideSec', '자동 숨김 지연', '주차 보조가 끝난 뒤 숨기기까지', 0.5, 10, 0.5, s.infoAutoHideSec)}
+               ${rng('mirrorFps', '미러 갱신 속도 (0=끔)', '사이드/룸미러는 실제 장면을 작은 해상도로 렌더링 — 모바일 부하 조절', 0, 30, 5, s.mirrorFps)}
+               ${rng('cabinFps', '1인칭 실내 화면 갱신 속도', '낮추면 모바일 부하 감소', 5, 30, 5, s.cabinFps)}
                ${chk('assistGuides', '조향 연동 주차 가이드라인', '카메라 영상 위에 예상 경로 표시', s.assistGuides)}
                ${sel('pdcPalette', 'PDC 경고 색상', '', Object.entries(PDC_PALETTES).map(([k, v]) => [k, v.name] as [string, string]), s.pdcPalette)}
                ${rng('assistCameraFps', '주차 보조 카메라 갱신 속도', '낮추면 모바일 부하 감소', 10, 60, 5, s.assistCameraFps)}
@@ -328,7 +335,7 @@ export class Menu {
             <div><kbd>더블클릭</kbd><span>센서 화면 시점 초기화</span></div>
           </div>
           <h3 class="sec" style="margin-top:18px">주차 요령</h3>
-          <p class="sub">기어를 먼저 선택하세요 (F=전진, R=후진). 주행 중에는 반대 방향 기어로 바꿀 수 없습니다. 주차선 안에 차 네 모서리가 모두 들어오고 방향이 맞은 채 1.5초 정지하면 성공입니다. 후진(R)에서는 후방카메라와 PDC 가, 저속 전진(D)에서는 전방카메라가 주차 보조 화면에 자동으로 표시됩니다. 화면 아래 버튼과 터치 버튼은 키보드와 같은 동작을 합니다.</p>
+          <p class="sub">기어를 먼저 선택하세요 (F=전진, R=후진). 주행 중에는 반대 방향 기어로 바꿀 수 없습니다. 주차선 안에 차 네 모서리가 모두 들어오고 방향이 맞은 채 1.5초 정지하면 성공입니다. 기어 레버는 위아래로 드래그해서 바꿉니다(브레이크를 밟은 상태에서 P/R/N/D 변속). 후진(R)에서는 후방카메라와 PDC 가, 저속 전진(D)에서는 전방카메라가 자동으로 표시되고 15km/h 를 넘으면 내비게이션으로 바뀝니다. 화면 아래 버튼과 터치 버튼은 키보드와 같은 동작을 합니다.</p>
         </div>
       </div>`);
     d.querySelector('#back')!.addEventListener('click', back);
@@ -405,6 +412,9 @@ const FMT: Record<string, (v: number) => string> = {
   assistFrontMaxKmh: (v) => `${v} km/h`,
   assistExitSec: (v) => `${v}초`,
   assistCameraFps: (v) => `${v} FPS`,
+  cabinFps: (v) => `${v} FPS`,
+  mirrorFps: (v) => (v === 0 ? '끔' : `${v} FPS`),
+  infoAutoHideSec: (v) => `${v}초`,
 };
 function sel(k: string, label: string, hint: string, opts: [string, string][], cur: string): string {
   return `<div class="setting"><div><label>${label}</label>${hint ? `<small>${hint}</small>` : ''}</div>

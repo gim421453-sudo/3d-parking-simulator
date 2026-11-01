@@ -2,6 +2,7 @@ import type { Action, HeldKey, Input } from '../game/input';
 import type { Gear } from '../vehicle/physics';
 import { ICON } from './icons';
 import { Minimap } from './minimap';
+import { Shifter, type ShifterHost } from './shifter';
 
 export interface MissionHud {
   name: string;
@@ -55,6 +56,7 @@ const STEER_SVG = `<svg viewBox="0 0 48 48" aria-hidden="true"><g id="swheel"><c
 export interface HudHandlers {
   action(a: Action): void;
   input: Input;
+  shifter: ShifterHost;
 }
 
 /** 인게임 HUD. 모든 버튼은 키보드와 같은 Action 경로를 사용한다. */
@@ -64,7 +66,8 @@ export class Hud {
   private ringVal!: SVGCircleElement;
   private swheel!: SVGGElement;
   private digital!: HTMLElement;
-  private gearBtns = new Map<Gear, HTMLButtonElement>();
+  private gearInd!: HTMLElement;
+  readonly shifter: Shifter;
   private missionEl!: HTMLDivElement;
   private toasts!: HTMLDivElement;
   private flashEl!: HTMLDivElement;
@@ -99,6 +102,7 @@ export class Hud {
       <div id="fps" class="hidden"></div>
       <div id="top-right">
         <div class="iconbar">
+          ${ab('assistToggle', '인포테인먼트 화면 열기/닫기 (B)', ICON.display)}
           ${ab('camera', '카메라 변경 (C)', ICON.camera)}
           ${ab('sensorView', '주차 센서 3D 화면 (V)', ICON.sensor)}
           ${ab('sensorToggle', '주차 센서 켜기/끄기', ICON.parkAssist)}
@@ -113,13 +117,9 @@ export class Hud {
         <div class="cl-main">
           <div id="steer-box" title="조향">${STEER_SVG}<b id="steer-text">0°</b></div>
           <div id="speedo">${speedRing()}<div class="digital"><span id="spd">0</span><small>km/h</small></div></div>
-          <div id="gears" role="group" aria-label="기어">
-            <button data-g="P" aria-label="주차 P">P</button><button data-g="R" aria-label="후진 R">R</button>
-            <button data-g="N" aria-label="중립 N">N</button><button data-g="D" aria-label="전진 D">D</button>
-          </div>
+          <div id="gear-ind" aria-label="현재 기어" data-g="P">P</div>
         </div>
         <div id="actionbar" role="group" aria-label="차량 조작">
-          ${ab('assistToggle', '주차 보조 화면 (B)', ICON.assist)}
           ${ab('signalLeft', '좌 방향지시등 (Q)', ICON.left)}
           ${ab('hazard', '비상등 (H)', ICON.hazard)}
           ${ab('signalRight', '우 방향지시등 (E)', ICON.right)}
@@ -147,11 +147,8 @@ export class Hud {
     this.sensorSlot = q('#sensor-slot');
     this.touchEl = q('#touch');
     this.minimap = new Minimap(q('#minimap'));
-    this.root.querySelectorAll<HTMLButtonElement>('#gears button').forEach((b) => {
-      const g = b.dataset.g as Gear;
-      this.gearBtns.set(g, b);
-      b.addEventListener('click', () => this.h.action(('gear' + g) as Action));
-    });
+    this.gearInd = q('#gear-ind');
+    this.shifter = new Shifter(this.root, this.h.shifter);
     this.root.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => {
       this.btns.set(b.dataset.a!, b);
       b.addEventListener('click', () => this.h.action(b.dataset.a as Action));
@@ -213,6 +210,7 @@ export class Hud {
 
   setTouchVisible(v: boolean, scale: number): void {
     this.touchEl.classList.toggle('hidden', !v);
+    this.root.classList.toggle('touch-on', v);
     this.root.style.setProperty('--touch', String(scale));
   }
 
@@ -267,7 +265,9 @@ export class Hud {
     this.digital.textContent = String(Math.round(d.speedKmh));
     this.swheel.setAttribute('transform', `rotate(${d.steerWheelDeg.toFixed(1)} 24 24)`);
     this.steerText.textContent = `${Math.abs(Math.round(d.steerDeg))}°`;
-    for (const [g, b] of this.gearBtns) b.classList.toggle('cur', g === d.gear);
+    this.gearInd.textContent = d.gear;
+    this.gearInd.dataset.g = d.gear;
+    this.shifter.update();
     const on = (a: string, v: boolean): void => {
       this.btns.get(a)?.classList.toggle('on', v);
     };

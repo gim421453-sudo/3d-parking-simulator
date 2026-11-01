@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, forwardOf, localToWorld } from '../core/math';
+import type { AssistView } from '../pdc/viewPolicy';
 import type { VehicleSpec } from '../vehicle/spec';
 
 export type CameraMode = 'chase' | 'driver' | 'top' | 'rear' | 'front' | 'free';
@@ -27,6 +28,14 @@ export class CameraRig {
   /** 전방카메라(보조 화면 + 전방 모드) */
   readonly frontCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
 
+  /** 주차 보조 디스플레이용 가상 카메라 (실제 3D 장면을 렌더링: 후방/전방 카메라, 좌·우 3D 측면뷰, 3D 탑뷰, 3D 사선뷰) */
+  readonly assistCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
+  private aPos = new THREE.Vector3();
+  private aLook = new THREE.Vector3();
+  private aUp = new THREE.Vector3(0, 1, 0);
+  private aFov = 100;
+  private aView: AssistView | null = null;
+
   private chaseDist = 7.5;
   private chaseHeight = 3.1;
   private topHeight = 26;
@@ -37,6 +46,71 @@ export class CameraRig {
   private smoothLook = new THREE.Vector3();
   private needSnap = true;
   private drag: { id: number; x: number; y: number } | null = null;
+
+  /** 시점별 목표 자세 (월드 좌표) */
+  static assistTarget(view: AssistView, pose: CarPose, spec: VehicleSpec): { pos: THREE.Vector3; look: THREE.Vector3; up: THREE.Vector3; fov: number } {
+    const f = forwardOf(pose.heading);
+    const L = spec.length;
+    const W = spec.width;
+    const wp = (lx: number, y: number, lz: number): THREE.Vector3 => {
+      const w = localToWorld(pose.x, pose.z, pose.heading, lx, lz);
+      return new THREE.Vector3(w.x, y, w.z);
+    };
+    const up = new THREE.Vector3(0, 1, 0);
+    switch (view) {
+      case 'rear': {
+        const rc = spec.rearCam;
+        const pos = wp(rc.x, rc.y, rc.z);
+        return { pos, look: new THREE.Vector3(pos.x - f.x * Math.cos(rc.pitch), rc.y - Math.sin(rc.pitch), pos.z - f.z * Math.cos(rc.pitch)), up, fov: 100 };
+      }
+      case 'front': {
+        const fc = spec.frontCam;
+        const pos = wp(fc.x, fc.y, fc.z);
+        return { pos, look: new THREE.Vector3(pos.x + f.x * Math.cos(fc.pitch), fc.y - Math.sin(fc.pitch), pos.z + f.z * Math.cos(fc.pitch)), up, fov: 100 };
+      }
+      case 'left':
+      case 'right': {
+        const sx = view === 'left' ? 1 : -1; // 로컬 +x = 왼쪽
+        return { pos: wp(sx * (W / 2 + 2.3), 2.3, -L * 0.62), look: wp(sx * 0.1, 0.45, L * 0.12), up, fov: 64 };
+      }
+      case 'top':
+        return { pos: new THREE.Vector3(pose.x, 12.5, pose.z), look: new THREE.Vector3(pose.x, 0, pose.z), up: new THREE.Vector3(f.x, 0, f.z), fov: 52 };
+      case 'oblique':
+        return { pos: wp(0, 4.8, -(L * 0.5 + 4.4)), look: wp(0, 0.5, L * 0.3), up, fov: 58 };
+    }
+  }
+
+  /** 시점 전환은 부드럽게 보간한다 (후방↔전방은 실제 카메라가 서로 반대편이라 컷 전환) */
+  updateAssistCamera(dt: number, view: AssistView, pose: CarPose, spec: VehicleSpec): void {
+    const t = CameraRig.assistTarget(view, pose, spec);
+    const cut = this.aView === null || (this.aView === 'rear' && view === 'front') || (this.aView === 'front' && view === 'rear');
+    if (cut) {
+      this.aPos.copy(t.pos);
+      this.aLook.copy(t.look);
+      this.aUp.copy(t.up);
+      this.aFov = t.fov;
+    } else {
+      // 3D 시점은 차를 따라 움직이므로 실시간 추적(빠른 보간), 시점 변경 직후에는 부드럽게 이동
+      const k = 1 - Math.exp(-7 * dt);
+      this.aPos.lerp(t.pos, k);
+      this.aLook.lerp(t.look, k);
+      this.aUp.lerp(t.up, k).normalize();
+      this.aFov += (t.fov - this.aFov) * k;
+    }
+    this.aView = view;
+    const c = this.assistCamera;
+    c.up.copy(this.aUp);
+    c.position.copy(this.aPos);
+    c.fov = this.aFov;
+    c.lookAt(this.aLook);
+    c.updateProjectionMatrix();
+    c.updateMatrixWorld();
+  }
+
+  /** 보간이 거의 끝났는가 (테스트/로그용) */
+  get assistCurrentView(): AssistView | null {
+    return this.aView;
+  }
 
   setMode(m: CameraMode, pose?: CarPose): void {
     this.mode = m;
