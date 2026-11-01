@@ -17,7 +17,6 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #app { position: fixed; inset: 0; }
 #game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #game-canvas.mirror { transform: scaleX(-1); }
-#rear-pip { position: absolute; left: 38%; top: 8px; transform: translateX(-50%); width: clamp(150px, 22vw, 300px); aspect-ratio: 16 / 9; border: 2px solid var(--line); border-radius: 10px; background: #000; z-index: 6; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
 #ui-root { position: absolute; inset: 0; pointer-events: none; }
 #ui-root > * { pointer-events: auto; }
 #boot { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 99; font-size: 18px; color: var(--muted); }
@@ -125,11 +124,8 @@ kbd { background: #2c3b52; border: 1px solid var(--line); border-bottom-width: 3
 #actionbar button.on { background: var(--accent); }
 
 #hint { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); width: max-content; max-width: min(540px, 52vw); text-align: center; font-size: 13px; background: rgba(10,14,20,.8); padding: 12px 18px; border-radius: 14px; border: 1px solid var(--line); line-height: 1.55; pointer-events: none !important; z-index: 8; transition: opacity .6s; }
-#hud.pip #hint { display: none; }
-#hud.pip #toasts { top: calc(clamp(150px, 22vw, 300px) * 0.5625 + 48px); left: 38%; }
 #hint.fade { opacity: 0; }
 #cam-label { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); font-size: 12px; color: #cfd8e3; background: rgba(0,0,0,.35); padding: 2px 10px; border-radius: 999px; pointer-events: none !important; }
-#hud.pip #cam-label { top: calc(clamp(150px, 22vw, 300px) * 0.5625 + 14px); left: 38%; }
 
 /* ---------- 센서 화면 ---------- */
 .sensor-view { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #0b1622; touch-action: none; z-index: 6; }
@@ -201,3 +197,9 @@ kbd { background: #2c3b52; border: 1px solid var(--line); border-bottom-width: 3
   #gears button { min-height: 40px; }
   #sv-controls button { min-height: 30px; }
 }
+
+/* 벡터 아이콘 */
+svg.ic { width: 1em; height: 1em; vertical-align: -0.16em; flex: none; }
+.iconbar button svg, #actionbar button svg { font-size: 16px; }
+.ind svg { font-size: 15px; }
+.tbtn svg { font-size: calc(34px * var(--touch)); }

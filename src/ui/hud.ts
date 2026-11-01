@@ -1,5 +1,6 @@
 import type { Action, HeldKey, Input } from '../game/input';
 import type { Gear } from '../vehicle/physics';
+import { ICON } from './icons';
 import { Minimap } from './minimap';
 
 export interface MissionHud {
@@ -20,6 +21,7 @@ export interface HudData {
   signalRight: boolean;
   hazard: boolean;
   headlights: boolean;
+  lightMode: string;
   braking: boolean;
   cameraName: string;
   sensorOn: boolean;
@@ -98,23 +100,24 @@ export class Hud {
       <div id="fps" class="hidden"></div>
       <div id="top-right">
         <div class="iconbar">
-          <button data-a="camera" title="카메라 (C)">📷<span class="t"> 카메라</span></button>
-          <button data-a="sensorView" title="주차 센서 화면 (V)">📡<span class="t"> 화면</span></button>
+          <button data-a="camera" title="카메라 (C)">${ICON.camera}<span class="t"> 카메라</span></button>
+          <button data-a="sensorView" title="주차 센서 화면 (V)">${ICON.sensor}<span class="t"> 센서화면</span></button>
           <button data-a="sensorToggle" title="주차 센서 ON/OFF">센서</button>
-          <button data-a="soundToggle" title="경고음 ON/OFF">🔊</button>
-          <button data-a="minimap" title="미니맵 (M)">🗺<span class="t"> 맵</span></button>
-          <button data-a="pause" title="일시정지 (Esc)">⏸</button>
-          <button data-a="restart" title="미션 재시작">↻</button>
+          <button data-a="soundToggle" title="경고음 ON/OFF">${ICON.volume}</button>
+          <button data-a="minimap" title="미니맵 (M)">${ICON.map}<span class="t"> 맵</span></button>
+          <button data-a="pause" title="일시정지 (Esc)">${ICON.pause}</button>
+          <button data-a="restart" title="미션 재시작">${ICON.restart}</button>
         </div>
         <div id="minimap-wrap" class="panel"><canvas id="minimap"></canvas></div>
       </div>
       <div id="actionbar">
-        <button data-a="signalLeft" title="좌 방향지시등 (Q)">◀<span class="t"> 깜빡이</span></button>
-        <button data-a="hazard" title="비상등 (H)">⚠<span class="t"> 비상등</span></button>
-        <button data-a="signalRight" title="우 방향지시등 (E)"><span class="t">깜빡이 </span>▶</button>
-        <button data-a="headlights" title="전조등 (L)">💡<span class="t"> 전조등</span></button>
-        <button data-a="handbrake" title="주차 브레이크 (Space)">🅿<span class="t"> 주차브레이크</span></button>
-        <button data-a="reset" title="차량 초기화 (T)">⟲<span class="t"> 초기화</span></button>
+        <button data-a="assistToggle" title="주차 보조 화면 (B)">${ICON.parkAssist}<span class="t"> 주차보조</span></button>
+        <button data-a="signalLeft" title="좌 방향지시등 (Q)">${ICON.left}<span class="t"> 깜빡이</span></button>
+        <button data-a="hazard" title="비상등 (H)">${ICON.hazard}<span class="t"> 비상등</span></button>
+        <button data-a="signalRight" title="우 방향지시등 (E)"><span class="t">깜빡이 </span>${ICON.right}</button>
+        <button data-a="headlights" title="조명 모드 순환 (L)">${ICON.headlight}<span class="t"> 전조등</span></button>
+        <button data-a="handbrake" title="주차 브레이크 (Space)">${ICON.parkBrake}<span class="t"> 주차브레이크</span></button>
+        <button data-a="reset" title="차량 초기화 (T)">${ICON.reset}<span class="t"> 초기화</span></button>
       </div>
       <div id="cluster" class="panel">
         <div id="steer-box">${STEER_SVG}<b id="steer-text">0°</b><div>조향</div></div>
@@ -124,10 +127,10 @@ export class Hud {
           <button data-g="N">N</button><button data-g="D">D</button>
         </div>
         <div id="indicators">
-          <div class="ind sig" id="ind-l" title="좌 방향지시등">◀</div>
-          <div class="ind sig" id="ind-r" title="우 방향지시등">▶</div>
-          <div class="ind haz" id="ind-h" title="비상등">⚠</div>
-          <div class="ind head" id="ind-head" title="전조등">💡</div>
+          <div class="ind sig" id="ind-l" title="좌 방향지시등">${ICON.left}</div>
+          <div class="ind sig" id="ind-r" title="우 방향지시등">${ICON.right}</div>
+          <div class="ind haz" id="ind-h" title="비상등">${ICON.hazard}</div>
+          <div class="ind head" id="ind-head" title="전조등">${ICON.headlight}</div>
           <div class="ind brake" id="ind-pb" title="주차 브레이크">P!</div>
           <div class="ind brake" id="ind-br" title="브레이크">■</div>
         </div>
@@ -187,6 +190,8 @@ export class Hud {
       const b = document.createElement('button');
       b.className = 'tbtn ' + cls;
       b.textContent = label;
+      if (key === 'left') b.innerHTML = ICON.left;
+      if (key === 'right') b.innerHTML = ICON.right;
       const down = new Set<number>();
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -207,7 +212,7 @@ export class Hud {
       b.addEventListener('contextmenu', (e) => e.preventDefault());
       return b;
     };
-    steer.append(mk('◀', 'left'), mk('▶', 'right'));
+    steer.append(mk('', 'left'), mk('', 'right'));
     pedals.append(mk('브레이크', 'brake', 'brk'), mk('가속', 'throttle', 'gas'));
     this.touchEl.append(steer, pedals);
   }
@@ -234,8 +239,8 @@ export class Hud {
     this.svControls.classList.toggle('hidden', size === 'hidden');
   }
 
-  setPip(on: boolean): void {
-    this.root.classList.toggle('pip', on);
+  setAssistOpen(on: boolean): void {
+    this.root.classList.toggle('assist-open', on);
   }
 
   hint(text: string | null): void {
@@ -278,14 +283,17 @@ export class Hud {
     on('ind-head', d.headlights);
     on('ind-pb', d.handbrake);
     on('ind-br', d.braking);
-    this.btns.get('headlights')?.classList.toggle('on', d.headlights);
+    const hb = this.btns.get('headlights');
+    hb?.classList.toggle('on', d.headlights);
+    const ht = hb?.querySelector('.t');
+    if (ht) ht.textContent = ` 조명 ${d.lightMode}`;
     this.btns.get('handbrake')?.classList.toggle('on', d.handbrake);
     this.btns.get('hazard')?.classList.toggle('on', d.hazard);
     this.btns.get('sensorToggle')?.classList.toggle('on', d.sensorOn);
     this.btns.get('soundToggle')?.classList.toggle('on', d.soundOn);
     const sb = this.btns.get('soundToggle');
-    if (sb) sb.textContent = d.soundOn ? '🔊' : '🔇';
-    this.camLabel.textContent = `📷 ${d.cameraName}`;
+    if (sb) sb.innerHTML = d.soundOn ? ICON.volume : ICON.volumeOff;
+    this.camLabel.textContent = d.cameraName;
     if (d.fpsText) {
       this.fpsEl.classList.remove('hidden');
       this.fpsEl.textContent = d.fpsText;

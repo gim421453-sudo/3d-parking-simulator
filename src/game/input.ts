@@ -16,6 +16,9 @@ export type Action =
   | 'reset'
   | 'pause'
   | 'restart'
+  | 'assistToggle'
+  | 'assistCamera'
+  | 'assistClose'
   | 'sensorToggle'
   | 'soundToggle';
 
@@ -45,6 +48,7 @@ export const KEY_ACTIONS: Record<string, Action> = {
   KeyL: 'headlights',
   KeyT: 'reset',
   Escape: 'pause',
+  KeyB: 'assistToggle',
 };
 
 /** 키보드와 화면 버튼(터치)이 같은 상태/액션 경로를 쓴다. */

@@ -1,3 +1,4 @@
+import { PDC_PALETTES, type PdcPaletteId } from '../pdc/pdcModel';
 import { loadJson, saveJson } from './storage';
 
 export type QualityPreset = 'low' | 'medium' | 'high';
@@ -15,7 +16,13 @@ export interface Settings {
   sensorDebug: boolean;
   sensorViewFps: number; // 센서 3D 화면 갱신 FPS (부하 관리)
   rearMirror: boolean; // 후방카메라 좌우 반전(실제 후방카메라처럼)
-  rearPip: boolean; // 후진(R) 시 후방 카메라 보조 화면 자동 표시
+  rearPip: boolean; // 후진(R) 시 후방카메라 + PDC 주차 보조 화면 자동 표시
+  assistFrontAuto: boolean; // D 선택 시 전방카메라 + 전방 PDC 자동 표시
+  assistFrontMaxKmh: number; // D 에서 주차 보조 화면이 유지되는 최대 속도(km/h)
+  assistExitSec: number; // P 로 바꾼 뒤 주차 보조 화면이 닫히기까지(초)
+  assistGuides: boolean; // 조향 연동 주차 가이드라인
+  assistCameraFps: number; // 주차 보조 카메라 갱신 FPS (부하 조절)
+  pdcPalette: PdcPaletteId; // PDC 경고 색상 프리셋
   touchControls: 'auto' | 'on' | 'off';
   touchScale: number; // 0.8 ~ 1.4
   vehicleId: string;
@@ -41,6 +48,12 @@ export const DEFAULT_SETTINGS: Settings = {
   sensorDebug: false,
   rearMirror: true,
   rearPip: true,
+  assistFrontAuto: true,
+  assistFrontMaxKmh: 10,
+  assistExitSec: 3,
+  assistGuides: true,
+  assistCameraFps: 30,
+  pdcPalette: 'standard',
   touchControls: 'auto',
   touchScale: 1,
   vehicleId: 'sedan',
@@ -56,6 +69,10 @@ export function sanitizeSettings(raw: Partial<Settings>): Settings {
   s.sensorVolume = Math.min(1, Math.max(0, Number(s.sensorVolume)));
   s.touchScale = Math.min(1.5, Math.max(0.7, Number(s.touchScale) || 1));
   s.sensorViewFps = Math.min(60, Math.max(5, Number(s.sensorViewFps) || 24));
+  s.assistFrontMaxKmh = Math.min(30, Math.max(3, Number(s.assistFrontMaxKmh) || 10));
+  s.assistExitSec = Math.min(10, Math.max(0, Number.isFinite(Number(s.assistExitSec)) ? Number(s.assistExitSec) : 3));
+  s.assistCameraFps = Math.min(60, Math.max(10, Number(s.assistCameraFps) || 30));
+  if (!(s.pdcPalette in PDC_PALETTES)) s.pdcPalette = 'standard';
   return s;
 }
 

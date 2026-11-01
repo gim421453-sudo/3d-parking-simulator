@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { clamp, forwardOf, localToWorld } from '../core/math';
 import type { VehicleSpec } from '../vehicle/spec';
 
-export type CameraMode = 'chase' | 'driver' | 'top' | 'rear' | 'free';
-export const CAMERA_ORDER: CameraMode[] = ['chase', 'driver', 'top', 'rear', 'free'];
+export type CameraMode = 'chase' | 'driver' | 'top' | 'rear' | 'front' | 'free';
+export const CAMERA_ORDER: CameraMode[] = ['chase', 'driver', 'top', 'rear', 'front', 'free'];
 export const CAMERA_NAMES: Record<CameraMode, string> = {
   chase: '3인칭 추적',
   driver: '운전석 1인칭',
   top: '탑뷰',
   rear: '후방 카메라',
+  front: '전방 카메라',
   free: '자유 시점',
 };
 
@@ -23,6 +24,8 @@ export class CameraRig {
   readonly camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.12, 600);
   /** 후방 카메라 전용(보조 화면 + 후방 모드) */
   readonly rearCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
+  /** 전방카메라(보조 화면 + 전방 모드) */
+  readonly frontCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
 
   private chaseDist = 7.5;
   private chaseHeight = 3.1;
@@ -64,11 +67,13 @@ export class CameraRig {
     this.camera.updateProjectionMatrix();
     this.rearCamera.aspect = a;
     this.rearCamera.updateProjectionMatrix();
+    this.frontCamera.aspect = a;
+    this.frontCamera.updateProjectionMatrix();
   }
 
   /** 렌더에 사용할 카메라 (후방 모드는 후방 카메라) */
   get active(): THREE.PerspectiveCamera {
-    return this.mode === 'rear' ? this.rearCamera : this.camera;
+    return this.mode === 'rear' ? this.rearCamera : this.mode === 'front' ? this.frontCamera : this.camera;
   }
 
   bind(el: HTMLElement): void {
@@ -115,6 +120,12 @@ export class CameraRig {
     const rp = localToWorld(pose.x, pose.z, pose.heading, rc.x, rc.z);
     this.rearCamera.position.set(rp.x, rc.y, rp.z);
     this.rearCamera.lookAt(rp.x - f.x * Math.cos(rc.pitch), rc.y - Math.sin(rc.pitch), rp.z - f.z * Math.cos(rc.pitch));
+    this.rearCamera.updateMatrixWorld();
+    const fc = spec.frontCam;
+    const fp = localToWorld(pose.x, pose.z, pose.heading, fc.x, fc.z);
+    this.frontCamera.position.set(fp.x, fc.y, fp.z);
+    this.frontCamera.lookAt(fp.x + f.x * Math.cos(fc.pitch), fc.y - Math.sin(fc.pitch), fp.z + f.z * Math.cos(fc.pitch));
+    this.frontCamera.updateMatrixWorld();
 
     const cam = this.camera;
     cam.up.set(0, 1, 0);
@@ -151,8 +162,9 @@ export class CameraRig {
         cam.lookAt(pose.x, 0, pose.z);
         break;
       }
-      case 'rear': {
-        // 후방 카메라: active 로 rearCamera 를 직접 사용
+      case 'rear':
+      case 'front': {
+        // 후방/전방 카메라: active 로 해당 카메라를 직접 사용
         break;
       }
       case 'free': {
@@ -167,7 +179,7 @@ export class CameraRig {
         break;
       }
     }
-    if (this.mode === 'driver' || this.mode === 'rear') {
+    if (this.mode === 'driver' || this.mode === 'rear' || this.mode === 'front') {
       cam.clearViewOffset();
     } else {
       const k = CameraRig.SHIFT;

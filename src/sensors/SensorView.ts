@@ -299,15 +299,16 @@ export class SensorView {
     this.statusEl.textContent = !o.enabled ? '센서 OFF' : o.activeGroups.length ? `경고음 대상: ${o.activeGroups.map((g) => GROUP_NAME[g]).join('·')}` : `기어 ${o.gear} · 경고음 대기 (R 또는 저속 D에서 작동)`;
     this.statusEl.classList.toggle('off', !o.enabled);
 
-    // 범례 (감지 불가 항목 명시)
+    // 범례: 일반 화면에서는 거리 숫자 없이 단계 이름만, 디버그에서만 수치 표시
     const lvl = (d: number): string => `${d.toFixed(1)}m`;
     const span = o.range - o.critical;
+    const C = (l: ProximityLevel): string => '#' + LEVEL_COLORS[l].toString(16).padStart(6, '0');
     this.legendEl.innerHTML =
-      `<span class="chip" style="--c:#d01030">≤${lvl(o.critical)} 연속음</span>` +
-      `<span class="chip" style="--c:#e8512f">≤${lvl(o.critical + span * 0.33)}</span>` +
-      `<span class="chip" style="--c:#f29a2e">≤${lvl(o.critical + span * 0.66)}</span>` +
-      `<span class="chip" style="--c:#e6d93a">≤${lvl(o.range)}</span>` +
-      `<span class="note">연한 부채꼴 밖·낮은 연석(55cm 미만)·높은 천장 물체는 미감지 영역</span>`;
+      `<span class="chip" style="--c:${C('critical')}">매우 가까움${o.debug ? ' ≤' + lvl(o.critical) : ''}</span>` +
+      `<span class="chip" style="--c:${C('near')}">가까움${o.debug ? ' ≤' + lvl(o.critical + span * 0.33) : ''}</span>` +
+      `<span class="chip" style="--c:${C('mid')}">접근${o.debug ? ' ≤' + lvl(o.critical + span * 0.66) : ''}</span>` +
+      `<span class="chip" style="--c:${C('far')}">감지${o.debug ? ' ≤' + lvl(o.range) : ''}</span>` +
+      `<span class="note">연한 부채꼴 밖·낮은 연석·높은 천장 물체는 미감지 영역</span>`;
 
     // 부채꼴/히트 갱신
     const hitList: { x: number; z: number; c: THREE.Color }[] = [];
@@ -423,7 +424,7 @@ export class SensorView {
     for (const g of GROUPS) {
       const label = this.labels.get(g)!;
       const d = snap && o.enabled ? snap.groupMin[g] : null;
-      summary.push(`${GROUP_NAME[g]} ${d === null ? '--' : d.toFixed(2) + 'm'}`);
+      if (o.debug) summary.push(`${GROUP_NAME[g]} ${d === null ? '--' : d.toFixed(2) + 'm'}`);
       if (d === null || !snap) {
         label.style.display = 'none';
         continue;
@@ -441,13 +442,13 @@ export class SensorView {
       v.set(lp.x, spec.sensorHeight + 0.35, lp.z).project(this.camera);
       const sx = (v.x * 0.5 + 0.5) * this.w;
       const sy = (-v.y * 0.5 + 0.5) * this.h;
-      label.style.display = 'block';
+      label.style.display = o.debug ? 'block' : 'none';
       label.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%,-100%)`;
-      label.textContent = `${best.d.toFixed(2)}m`;
+      label.textContent = o.debug ? `${best.d.toFixed(2)}m` : ''; // 일반 화면에는 거리 숫자를 넣지 않는다
       const lv: ProximityLevel = proximityLevel(best.d, o.range, o.critical);
       label.style.setProperty('--c', '#' + LEVEL_COLORS[lv].toString(16).padStart(6, '0'));
     }
-    this.info.textContent = summary.join(' · ');
+    this.info.textContent = o.debug ? summary.join(' · ') : '';
     this.renderer.render(this.scene, this.camera);
   }
 

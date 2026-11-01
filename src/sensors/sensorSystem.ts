@@ -133,10 +133,10 @@ export function proximityLevel(d: number | null, range: number, critical: number
 
 export const LEVEL_COLORS: Record<ProximityLevel, number> = {
   none: 0x2e4a66,
-  far: 0xe6d93a,
-  mid: 0xf29a2e,
-  near: 0xe8512f,
-  critical: 0xd01030,
+  far: 0x7fc24d,
+  mid: 0xf1d13a,
+  near: 0xf08a2b,
+  critical: 0xe5372f,
 };
 
 /** 경고음 주기(ms). 0 = 연속음, null = 소리 없음. 가까울수록 짧아진다. */

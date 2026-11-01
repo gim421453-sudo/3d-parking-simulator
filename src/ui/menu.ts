@@ -3,6 +3,7 @@ import { MAPS, getMap } from '../maps';
 import type { MapMission } from '../maps/types';
 import type { ScoreResult } from '../mission/parking';
 import { VEHICLES } from '../vehicle/spec';
+import { PDC_PALETTES } from '../pdc/pdcModel';
 import { Minimap } from './minimap';
 
 export interface MenuHost {
@@ -42,6 +43,7 @@ const KEYS: [string, string][] = [
   ['C', '카메라 변경'],
   ['M', '미니맵 (작게/크게/숨김)'],
   ['V', '주차 센서 화면 (작게/크게/숨김)'],
+  ['B', '주차 보조 화면 열기/닫기'],
   ['Q / E', '좌 / 우 방향지시등'],
   ['H', '비상등'],
   ['L', '전조등'],
@@ -82,7 +84,7 @@ export class Menu {
     const veh = VEHICLES.find((v) => v.id === s.vehicleId) ?? VEHICLES[1];
     const d = this.mount(`
       <div class="card narrow">
-        <h1>🅿 3D 주차 시뮬레이터</h1>
+        <h1>3D 주차 시뮬레이터</h1>
         <p class="sub">직접 운전하고, 3D 주차 센서로 주변을 확인하며 주차 미션을 완료하세요.</p>
         <div class="panel" style="padding:10px 12px;font-size:13px;color:var(--muted)">
           맵 <b style="color:var(--text)">${map.name}</b><br>
@@ -90,11 +92,11 @@ export class Menu {
           차량 <b style="color:var(--text)">${veh.name}</b>
         </div>
         <div class="menu-list">
-          <button class="primary" id="m-start">▶ 게임 시작</button>
-          <button id="m-map">🗺 맵 / 미션 선택</button>
-          <button id="m-car">🚗 차량 선택</button>
-          <button id="m-set">⚙ 설정</button>
-          <button id="m-keys">⌨ 조작법</button>
+          <button class="primary" id="m-start">게임 시작</button>
+          <button id="m-map">맵 / 미션 선택</button>
+          <button id="m-car">차량 선택</button>
+          <button id="m-set">설정</button>
+          <button id="m-keys">조작법</button>
         </div>
       </div>`);
     d.querySelector('#m-start')!.addEventListener('click', () => this.host.startGame());
@@ -110,11 +112,11 @@ export class Menu {
     const recs = this.host.records();
     const d = this.mount(`
       <div class="card">
-        <div class="row between"><h2>맵 / 미션 선택</h2><button class="ghost" id="back">← 돌아가기</button></div>
+        <div class="row between"><h2>맵 / 미션 선택</h2><button class="ghost" id="back">돌아가기</button></div>
         <div class="grid" id="maps"></div>
         <h3>미션</h3>
         <div id="missions"></div>
-        <div class="row" style="margin-top:14px"><button class="primary" id="go">▶ 이 설정으로 시작</button></div>
+        <div class="row" style="margin-top:14px"><button class="primary" id="go">이 설정으로 시작</button></div>
       </div>`);
     const mapsEl = d.querySelector('#maps')!;
     const missEl = d.querySelector('#missions')!;
@@ -167,7 +169,7 @@ export class Menu {
     const s = this.host.settings();
     const d = this.mount(`
       <div class="card">
-        <div class="row between"><h2>차량 선택</h2><button class="ghost" id="back">← 돌아가기</button></div>
+        <div class="row between"><h2>차량 선택</h2><button class="ghost" id="back">돌아가기</button></div>
         <div class="grid" id="cars"></div>
         <p class="sub" style="margin-top:14px">차량마다 크기·회전반경이 달라 주차 난이도가 변합니다. 차량 모델은 GLB로 교체할 수 있습니다 (docs/CAR_MODEL_GUIDE.md).</p>
       </div>`);
@@ -195,7 +197,7 @@ export class Menu {
       const s = this.host.settings();
       const d = this.mount(`
         <div class="card">
-          <div class="row between"><h2>설정</h2><button class="ghost" id="back">← 돌아가기</button></div>
+          <div class="row between"><h2>설정</h2><button class="ghost" id="back">돌아가기</button></div>
           <h3>그래픽 / 성능</h3>
           ${sel('quality', '그래픽 품질 프리셋', '낮음=모바일 절전, 높음=PC (텍스처/안티앨리어싱은 다음 시작·새로고침 시 적용)', [['low', '낮음'], ['medium', '보통'], ['high', '높음']], s.quality)}
           ${rng('resolutionScale', '렌더링 해상도', '낮추면 FPS가 올라갑니다', 0.4, 1, 0.05, s.resolutionScale)}
@@ -208,9 +210,16 @@ export class Menu {
           ${rng('sensorVolume', '경고음 볼륨', '', 0, 1, 0.05, s.sensorVolume)}
           ${rng('sensorRange', '최대 감지 거리', '이 거리 안에서 경고 시작', 1, 4, 0.1, s.sensorRange)}
           ${rng('sensorCritical', '연속 경고 거리', '이 거리 이하에서 연속음', 0.1, 0.8, 0.05, s.sensorCritical)}
-          ${chk('sensorDebug', '센서 디버그 모드', '감지 광선·센서 방향·충돌 대상·거리(m) 표시 (센서 화면 "크게"에서 상세 표시)', s.sensorDebug)}
+          ${chk('sensorDebug', '센서 디버그 모드', '개발자용: 감지 광선·센서 방향·충돌 대상·거리(m) 표시. 일반 화면에는 거리 숫자를 표시하지 않음', s.sensorDebug)}
+          <h3>주차 보조 디스플레이</h3>
+          ${chk('rearPip', '후진(R) 시 후방카메라 + PDC 자동 표시', '끄면 R 에서도 자동으로 열리지 않음 (우측 사이드/화면의 주차보조 버튼으로 수동 열기)', s.rearPip)}
+          ${chk('assistFrontAuto', '전진(D) 선택 시 전방카메라 + 전방 PDC 자동 표시', 'R→D 전환 시 화면 구성은 그대로, 영상만 전방으로 바뀜', s.assistFrontAuto)}
+          ${rng('assistFrontMaxKmh', 'D 에서 주차 보조 화면 유지 속도', '이 속도를 넘으면 일반 화면으로 복귀', 3, 30, 1, s.assistFrontMaxKmh)}
+          ${rng('assistExitSec', 'P 기어 후 화면 종료 지연', '주차(P) 후 자동으로 닫히기까지', 0, 10, 1, s.assistExitSec)}
+          ${chk('assistGuides', '조향 연동 주차 가이드라인', '카메라 영상 위에 예상 경로 표시', s.assistGuides)}
+          ${sel('pdcPalette', 'PDC 경고 색상', '', Object.entries(PDC_PALETTES).map(([k, v]) => [k, v.name] as [string, string]), s.pdcPalette)}
+          ${rng('assistCameraFps', '주차 보조 카메라 갱신 속도', '낮추면 모바일 부하 감소', 10, 60, 5, s.assistCameraFps)}
           <h3>카메라 / 조작</h3>
-          ${chk('rearPip', '후진 시 후방 카메라 자동 표시', '', s.rearPip)}
           ${chk('rearMirror', '후방 카메라 좌우 반전', '실제 후방카메라처럼 거울상으로 표시', s.rearMirror)}
           ${sel('touchControls', '터치 버튼', '자동=터치 기기에서만 표시', [['auto', '자동'], ['on', '항상 표시'], ['off', '숨김']], s.touchControls)}
           ${rng('touchScale', '터치 버튼 크기', '', 0.7, 1.5, 0.05, s.touchScale)}
@@ -250,7 +259,7 @@ export class Menu {
   showControls(back: () => void): void {
     const d = this.mount(`
       <div class="card">
-        <div class="row between"><h2>조작법</h2><button class="ghost" id="back">← 돌아가기</button></div>
+        <div class="row between"><h2>조작법</h2><button class="ghost" id="back">돌아가기</button></div>
         <h3>키보드</h3>
         <div class="keytable">${KEYS.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>
         <h3>마우스 / 터치</h3>
@@ -272,7 +281,7 @@ export class Menu {
     const d = this.mount(
       `
       <div class="card narrow">
-        <h2>⏸ 일시정지</h2>
+        <h2>일시정지</h2>
         <div class="menu-list">
           <button class="primary" id="p-resume">계속하기</button>
           <button id="p-restart">미션 재시작</button>
@@ -296,7 +305,7 @@ export class Menu {
     const d = this.mount(
       `
       <div class="card narrow">
-        <h2>${r.success ? '🎉 주차 성공!' : '😵 미션 실패'}</h2>
+        <h2>${r.success ? '주차 성공' : '미션 실패'}</h2>
         <p class="sub">${r.title}${r.success ? '' : ' — ' + r.reason}</p>
         ${
           r.success && r.score
@@ -312,8 +321,8 @@ export class Menu {
         </div>
         ${r.score ? `<p class="sub" style="margin-top:10px">기본 200 + 정확도 ${r.score.accuracyPoints} + 시간 ${r.score.timePoints} − 충돌 ${r.score.collisionPenalty}</p>` : ''}
         <div class="menu-list">
-          <button class="primary" id="r-retry">↻ 다시 시도</button>
-          ${r.success && this.host.hasNextMission() ? '<button id="r-next">다음 미션 ▶</button>' : ''}
+          <button class="primary" id="r-retry">다시 시도</button>
+          ${r.success && this.host.hasNextMission() ? '<button id="r-next">다음 미션</button>' : ''}
           <button id="r-menu">메인 메뉴</button>
         </div>
       </div>`,
@@ -333,6 +342,9 @@ const FMT: Record<string, (v: number) => string> = {
   sensorRange: (v) => `${v.toFixed(1)} m`,
   sensorCritical: (v) => `${v.toFixed(2)} m`,
   touchScale: (v) => `${Math.round(v * 100)}%`,
+  assistFrontMaxKmh: (v) => `${v} km/h`,
+  assistExitSec: (v) => `${v}초`,
+  assistCameraFps: (v) => `${v} FPS`,
 };
 function sel(k: string, label: string, hint: string, opts: [string, string][], cur: string): string {
   return `<div class="setting"><div><label>${label}</label>${hint ? `<small>${hint}</small>` : ''}</div>

@@ -20,6 +20,10 @@ import {
 } from '../sensors/sensorSystem';
 import { Hud, type HudData, type MissionHud } from '../ui/hud';
 import { Menu, type ResultInfo } from '../ui/menu';
+import { LIGHT_MODE_NAME, computeLighting, nextLightMode, stepLeveling, type LightMode } from '../vehicle/lighting';
+import { AssistController, type AssistOutput, type AssistSettings } from '../pdc/assistPolicy';
+import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
+import { buildPdcState } from '../pdc/pdcModel';
 import { applyGlbVisual, createCarModel, type CarModel } from '../vehicle/carModel';
 import {
   centerOf,
@@ -50,8 +54,11 @@ export class Game {
   readonly hud: Hud;
   readonly menu: Menu;
   readonly sensorView: SensorView;
-  private pip: HTMLCanvasElement;
-  private pipCtx: CanvasRenderingContext2D;
+  readonly assist = new AssistController();
+  readonly assistPanel: AssistPanel;
+  assistOut: AssistOutput = { active: false, camera: 'rear', focus: 'rear', cameraMode: 'auto', reason: '' };
+  private assistCamAcc = 0;
+  private assistLastCamera = '';
 
   settings: Settings = loadSettings();
   records: Records = loadRecords();
@@ -69,7 +76,10 @@ export class Game {
   targetSlot: ParkingSlot | null = null;
   sensorSnap: SensorSnapshot | null = null;
 
-  private headlights = false;
+  private lightMode: LightMode = 'auto';
+  private levelPitch = 0;
+  private lastV = 0;
+  private accelF = 0;
   private sigLeft = false;
   private sigRight = false;
   private hazard = false;
@@ -98,10 +108,8 @@ export class Game {
   private loadedMapId = '';
   private pendingResult: ResultInfo | null = null;
 
-  constructor(root: HTMLElement, canvas: HTMLCanvasElement, pip: HTMLCanvasElement) {
+  constructor(root: HTMLElement, canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.pip = pip;
-    this.pipCtx = pip.getContext('2d')!;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.settings.quality !== 'low', powerPreference: 'high-performance' });
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor(0x9ec9ee);
@@ -109,6 +117,16 @@ export class Game {
 
     this.hud = new Hud(root, { action: (a) => this.onAction(a), input: this.input });
     this.hud.bindExtra();
+    this.assistPanel = new AssistPanel(root, {
+      onToggleSensor: () => this.onAction('sensorToggle'),
+      onToggleSound: () => this.onAction('soundToggle'),
+      onCycleCamera: () => this.onAction('assistCamera'),
+      onSettings: () => {
+        this.pause();
+        this.menu.showSettings(() => this.menu.showPause());
+      },
+      onClose: () => this.onAction('assistClose'),
+    });
     this.hud.onSensorSize = (s) => (s === 'reset' ? this.sensorView.resetCamera() : this.setSensorSize(s));
     this.sensorView = new SensorView(this.hud.sensorSlot);
     this.sensorView.setSize('small');
@@ -253,10 +271,18 @@ export class Game {
     this.scene.add(this.model.root);
     if (this.spec.visual.kind === 'glb') void applyGlbVisual(this.model, this.spec);
     this.sensorView.setSpec(this.spec);
+    this.assistPanel.setSpec(this.spec);
+    this.assistPanel.setPalette(this.settings.pdcPalette);
+    this.assist.reset('P');
+    this.assistLastCamera = '';
+    this.assistOut = { active: false, camera: 'rear', focus: 'rear', cameraMode: 'auto', reason: '' };
 
     const sp = this.missionDef?.spawn ?? map.spawn;
     this.car = createVehicleState(this.spec, sp.x, sp.z, sp.heading);
-    this.headlights = map.env.indoor;
+    this.lightMode = 'auto'; // 어두운 곳(지하)에서는 자동으로 하향등
+    this.levelPitch = 0;
+    this.lastV = 0;
+    this.accelF = 0;
     this.sigLeft = this.sigRight = this.hazard = false;
     this.throttle = this.brake = this.steerIn = 0;
     this.collisions = 0;
@@ -314,6 +340,7 @@ export class Game {
     this.input.enabled = false;
     this.beeper.silence();
     this.hud.hide();
+    this.assistPanel.setVisible(false);
     this.menu.showMain();
   }
 
@@ -359,8 +386,7 @@ export class Game {
         if (!r.ok) {
           this.hud.toast(r.reason ?? '지금은 기어를 바꿀 수 없습니다', 'warn');
         } else if (g === 'R') {
-          this.hud.toast('후진(R) · 후방 카메라/주차 센서 작동');
-          if (this.settings.sensorEnabled && this.sensorView.getSize() === 'hidden') this.setSensorSize('small');
+          this.hud.toast(this.settings.sensorEnabled ? '후진(R) · 후방카메라/PDC 작동' : '후진(R) · PDC 꺼짐(설정)');
         } else {
           this.hud.toast(`기어 ${g}`);
         }
@@ -399,8 +425,8 @@ export class Game {
         if (this.hazard) this.sigLeft = this.sigRight = false;
         break;
       case 'headlights':
-        this.headlights = !this.headlights;
-        this.hud.toast(this.headlights ? '전조등 ON' : '전조등 OFF');
+        this.lightMode = nextLightMode(this.lightMode);
+        this.hud.toast(`조명: ${LIGHT_MODE_NAME[this.lightMode]}`);
         break;
       case 'reset':
         this.resetCar();
@@ -408,6 +434,19 @@ export class Game {
       case 'restart':
         this.startRun();
         break;
+      case 'assistToggle':
+        this.assist.toggleManual();
+        break;
+      case 'assistClose':
+        this.assist.dismiss();
+        break;
+      case 'assistCamera': {
+        const cur = this.assist.cameraMode;
+        const next = cur === 'auto' ? 'rear' : cur === 'rear' ? 'front' : 'auto';
+        this.assist.setManualCamera(next);
+        this.hud.toast(`카메라 화면: ${next === 'auto' ? '자동(기어 연동)' : next === 'rear' ? '후방' : '전방'}`);
+        break;
+      }
       case 'sensorToggle':
         this.updateSettings({ sensorEnabled: !this.settings.sensorEnabled });
         this.hud.toast(this.settings.sensorEnabled ? '주차 센서 ON' : '주차 센서 OFF', this.settings.sensorEnabled ? '' : 'warn');
@@ -498,6 +537,21 @@ export class Game {
       collectRays: this.settings.sensorDebug,
     };
     this.sensorSnap = this.settings.sensorEnabled ? readSensors(pose, this.spec.sensors, this.spec.sensorHeight, this.colliders, cfg) : null;
+
+    // AUTO Leveling: 속도 변화로 구한 가속도(근사)로 조사각 보정
+    const aRaw = (this.car.v - this.lastV) / Math.max(dt, 1e-3);
+    this.lastV = this.car.v;
+    this.accelF += (aRaw - this.accelF) * Math.min(1, dt * 6);
+    this.levelPitch = stepLeveling(this.levelPitch, this.accelF, dt);
+
+    // 주차 보조 표시 정책 (R: 후방, D: 전방, 속도/기어 조건)
+    const asSet: AssistSettings = {
+      autoRear: this.settings.rearPip,
+      autoFront: this.settings.assistFrontAuto,
+      frontMaxKmh: this.settings.assistFrontMaxKmh,
+      pExitSec: this.settings.assistExitSec,
+    };
+    this.assistOut = this.assist.update({ gear: this.car.gear, speedKmh: Math.abs(this.car.v) * 3.6, dt }, asSet);
 
     // 경고음
     this.beeper.enabled = this.settings.sensorSound && this.settings.sensorEnabled;
@@ -602,7 +656,8 @@ export class Game {
     model.setState({
       steer: car.steer,
       roll: car.wheelRoll,
-      headlights: this.headlights,
+      lighting: this.currentLighting(),
+      levelPitch: this.levelPitch,
       brake: this.brakeLightOn(),
       reverse: car.gear === 'R',
       signalLeft: (this.sigLeft || this.hazard) && this.blinkOn,
@@ -620,12 +675,12 @@ export class Game {
     }
     this.built?.animate(this.time);
 
-    // 후방 카메라 보조 화면 (R 기어, 후방 모드가 아닐 때)
-    const wantPip = this.state !== 'menu' && car.gear === 'R' && this.settings.rearPip && this.rig.mode !== 'rear';
-    this.hud.setPip(wantPip);
+    // 주차 보조 디스플레이: 실제 3D 장면을 후방/전방 카메라로 렌더링해 패널에 표시
+    const open = this.state !== 'menu' && this.assistOut.active;
+    this.hud.setAssistOpen(open);
+    this.assistPanel.setVisible(open);
     this.canvas.classList.toggle('mirror', this.rig.mode === 'rear' && this.settings.rearMirror);
-    if (wantPip) this.renderPip();
-    else this.pip.classList.add('hidden');
+    if (open) this.renderAssist(dt, pose);
 
     this.renderer.setScissorTest(false);
     const w = window.innerWidth;
@@ -633,6 +688,8 @@ export class Game {
     this.renderer.setViewport(0, 0, w, h);
     this.rig.rearCamera.aspect = w / h;
     this.rig.rearCamera.updateProjectionMatrix();
+    this.rig.frontCamera.aspect = w / h;
+    this.rig.frontCamera.updateProjectionMatrix();
     this.renderer.render(this.scene, this.rig.active);
 
     // HUD / 미니맵 / 센서 화면은 낮은 빈도로 갱신
@@ -656,41 +713,49 @@ export class Game {
     }
   }
 
+  private currentLighting() {
+    return computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor });
+  }
+
   private brakeLightOn(): boolean {
     return this.brake > 0.05 || this.car.handbrake;
   }
 
-  private renderPip(): void {
-    const pw = 320;
-    const ph = 180;
+  private renderAssist(dt: number, pose: { x: number; z: number; heading: number }): void {
+    const camKind = this.assistOut.camera;
+    const switched = this.assistLastCamera !== camKind;
+    this.assistCamAcc += dt;
+    // 부하 관리: 보조 카메라는 설정 FPS 로만 다시 렌더링한다 (카메라가 바뀌면 즉시)
+    if (!switched && this.assistCamAcc < 1 / this.settings.assistCameraFps) return;
+    this.assistCamAcc = 0;
+    this.assistLastCamera = camKind;
+    const cam = camKind === 'rear' ? this.rig.rearCamera : this.rig.frontCamera;
+    const pw = ASSIST_CAM_W;
+    const ph = ASSIST_CAM_H;
     const pr = this.renderer.getPixelRatio();
-    const cam = this.rig.rearCamera;
+    const maxW = Math.min(pw, window.innerWidth);
+    const maxH = Math.min(ph, window.innerHeight);
+    const vw = Math.min(maxW, maxH * (pw / ph));
+    const vh = vw * (ph / pw);
     cam.aspect = pw / ph;
     cam.updateProjectionMatrix();
     this.renderer.setScissorTest(true);
-    this.renderer.setViewport(0, 0, pw, ph);
-    this.renderer.setScissor(0, 0, pw, ph);
+    this.renderer.setViewport(0, 0, vw, vh);
+    this.renderer.setScissor(0, 0, vw, vh);
     this.renderer.render(this.scene, cam);
     this.renderer.setScissorTest(false);
-    const sw = Math.round(pw * pr);
-    const sh = Math.round(ph * pr);
-    if (this.pip.width !== 320) {
-      this.pip.width = 320;
-      this.pip.height = 180;
-    }
-    const g = this.pipCtx;
-    g.save();
-    if (this.settings.rearMirror) {
-      g.translate(320, 0);
-      g.scale(-1, 1);
-    }
-    try {
-      g.drawImage(this.canvas, 0, this.canvas.height - sh, sw, sh, 0, 0, 320, 180);
-    } catch {
-      /* 일부 환경에서 WebGL 캔버스 복사가 불가하면 보조 화면은 건너뜀 */
-    }
-    g.restore();
-    this.pip.classList.remove('hidden');
+    const sw = Math.max(1, Math.round(vw * pr));
+    const sh = Math.max(1, Math.round(vh * pr));
+    const mirror = camKind === 'rear' && this.settings.rearMirror;
+    this.assistPanel.blit(this.canvas, 0, this.canvas.height - sh, sw, sh, mirror);
+    this.assistPanel.drawGuides({
+      camera: cam,
+      pose,
+      steer: this.car.steer,
+      dir: camKind === 'rear' ? -1 : 1,
+      mirror,
+      show: this.settings.assistGuides,
+    });
   }
 
   private updateHud(): void {
@@ -725,7 +790,8 @@ export class Game {
       signalLeft: (this.sigLeft || this.hazard) && this.blinkOn,
       signalRight: (this.sigRight || this.hazard) && this.blinkOn,
       hazard: this.hazard && this.blinkOn,
-      headlights: this.headlights,
+      headlights: this.currentLighting().low,
+      lightMode: LIGHT_MODE_NAME[this.lightMode],
       braking: this.brakeLightOn(),
       cameraName: CAMERA_NAMES[this.rig.mode],
       sensorOn: this.settings.sensorEnabled,
@@ -734,6 +800,13 @@ export class Game {
       fpsText: this.settings.showFps ? `FPS ${this.fpsInstant.toFixed(0)} · 평균 ${this.avgFps().toFixed(0)}` : null,
     };
     this.hud.update(d);
+    if (this.assistOut.active) {
+      this.assistPanel.setPalette(this.settings.pdcPalette);
+      this.assistPanel.setGear(car.gear);
+      this.assistPanel.setCamera(this.assistOut.camera, this.assistOut.cameraMode);
+      this.assistPanel.setToggles(this.settings.sensorEnabled, this.settings.sensorSound);
+      this.assistPanel.updateZones(buildPdcState(this.spec, this.sensorSnap, this.settings.sensorEnabled, this.assistOut.focus));
+    }
   }
 }
 

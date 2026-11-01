@@ -1,8 +1,8 @@
 import './style.css';
+import './pdc/pdc.css';
 import { Game } from './game/Game';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-const pip = document.getElementById('rear-pip') as HTMLCanvasElement;
 const root = document.getElementById('ui-root') as HTMLElement;
 
 declare global {
@@ -12,7 +12,7 @@ declare global {
 }
 
 try {
-  const game = new Game(root, canvas, pip);
+  const game = new Game(root, canvas);
   window.__game = game; // 자동 테스트/디버깅용 훅
   game.menu.showMain();
   document.getElementById('boot')?.remove();

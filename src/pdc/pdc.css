@@ -1,0 +1,58 @@
+/* ---------- 주차 보조 디스플레이 (차량 인포테인먼트 스타일) ---------- */
+#parking-assist {
+  position: absolute; z-index: 10; top: 56px; left: 50%; transform: translateX(-50%);
+  width: min(60vw, 720px); background: #0b1016; color: #e6ecf2;
+  border: 1px solid #2a3542; border-radius: 12px; overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(255, 255, 255, .03);
+  font-size: 12px; pointer-events: auto;
+}
+.pa-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px 5px 12px; background: linear-gradient(#10171f, #0b1016); border-bottom: 2px solid #d9531e; letter-spacing: .08em; }
+.pa-title { font-size: 11px; color: #9fb0c2; text-transform: uppercase; }
+.pa-gear { min-width: 20px; text-align: center; font-weight: 800; color: #fff; background: #26384d; border-radius: 4px; padding: 0 5px; }
+#parking-assist[data-gear="R"] .pa-gear { background: #b3402f; }
+.pa-chip { font-size: 11px; color: #cfd9e3; letter-spacing: 0; }
+.pa-fill { flex: 1; }
+.pa-close { background: transparent; border: 0; color: #9fb0c2; padding: 2px 4px; min-width: 28px; min-height: 28px; font-size: 16px; }
+.pa-close:hover { color: #fff; background: #1a2430; }
+
+.pa-body { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr) minmax(0, 0.72fr); align-items: stretch; background: #070a0e; }
+.pa-cam { position: relative; background: #000; aspect-ratio: 16 / 9; align-self: center; transition: opacity .12s; }
+#parking-assist.pa-switching .pa-cam { opacity: .15; }
+.pa-cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.pa-note { position: absolute; left: 6px; bottom: 4px; font-size: 10px; color: #aeb9c6; background: rgba(0, 0, 0, .45); padding: 1px 6px; border-radius: 4px; }
+.pa-pdc { position: relative; min-height: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 45%, #141c26, #090d12 70%); border-left: 1px solid #1c2530; border-right: 1px solid #1c2530; }
+.pa-svg { position: absolute; left: 4px; right: 4px; top: 4px; bottom: 26px; width: calc(100% - 8px); height: calc(100% - 30px); display: block; }
+.pa-status { position: absolute; left: 0; right: 0; bottom: 0; font-size: 11px; color: #c6d1dc; text-align: center; padding: 3px 4px 4px; line-height: 18px; background: linear-gradient(transparent, rgba(7, 10, 14, .85) 40%); }
+.pa-status[data-level="critical"] { color: #ff6b5e; font-weight: 700; }
+.pa-status[data-level="near"] { color: #f6a14f; }
+.pa-status[data-level="mid"] { color: #f1d13a; }
+.pa-status[data-enabled="false"] { color: #7f8c9a; }
+
+/* 사이드 버튼: iDrive 7 스타일의 고정 세로 목록 (화면/카메라/기어가 바뀌어도 위치 불변) */
+.pa-side { display: flex; flex-direction: column; background: #0d1319; min-height: 164px; }
+.pa-side button { flex: 1 1 0; min-height: 41px; display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: transparent; border: 0; border-bottom: 1px solid #1c2530; border-radius: 0; color: #dfe7ef; text-align: left; font-size: 12px; }
+.pa-side button:last-child { border-bottom: 0; }
+.pa-side button:hover { background: #151e28; }
+.pa-side button:active { background: #1d2936; transform: none; }
+.pa-side i { font-style: normal; font-size: 22px; line-height: 1; color: #eef3f8; flex: none; display: grid; place-items: center; width: 26px; }
+.pa-side span { display: flex; flex-direction: column; line-height: 1.2; }
+.pa-side em { font-style: normal; font-size: 10px; color: #7fb069; }
+.pa-side button.off em { color: #d86b5c; }
+.pa-side button.off i { color: #8795a4; }
+
+/* 주차 보조가 열려 있으면 좌측 정보창(미션/센서 화면)과 중복되는 요소를 숨긴다 */
+#hud.assist-open #mission-panel, #hud.assist-open .sensor-view.small, #hud.assist-open #sv-controls:not(.large) { display: none; }
+#hud.assist-open #hint, #hud.assist-open #cam-label { display: none; }
+#hud.assist-open #toasts { left: 8px; transform: none; top: 12px; justify-items: start; }
+
+@media (max-height: 480px) {
+  #parking-assist { left: 8px; transform: none; top: 56px; width: min(62vw, 520px); font-size: 11px; }
+  .pa-head { padding: 2px 6px 2px 10px; }
+  .pa-side button { padding: 3px 6px; gap: 5px; font-size: 11px; }
+  .pa-side i { font-size: 18px; width: 20px; }
+  .pa-side em { font-size: 9px; }
+  .pa-status { font-size: 10px; line-height: 16px; }
+  .pa-svg { bottom: 22px; height: calc(100% - 26px); }
+  /* 낮은 화면에서는 패널이 열려 있는 동안 하단 액션바와 겹치지 않도록 숨긴다 (키보드/패널 닫기 후 사용) */
+  #hud.assist-open #actionbar { display: none; }
+}

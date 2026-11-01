@@ -43,6 +43,7 @@ export interface VehicleSpec {
   // --- 카메라 앵커(차체 중심 기준) ---
   driverEye: { x: number; y: number; z: number };
   rearCam: { x: number; y: number; z: number; pitch: number };
+  frontCam: { x: number; y: number; z: number; pitch: number };
   // --- 센서 ---
   sensorHeight: number;
   sensors: SensorMount[];
@@ -106,6 +107,7 @@ function make(p: {
     trackWidth: p.width - 0.22,
     driverEye: { x: 0.36, y: eyeY, z: -0.05 },
     rearCam: { x: 0, y: 0.95, z: -p.length / 2 + 0.05, pitch: 28 * DEG },
+    frontCam: { x: 0, y: 0.78, z: p.length / 2 - 0.04, pitch: 22 * DEG },
     sensorHeight: 0.55,
     sensors: defaultSensorLayout(p.length, p.width),
     color: p.color,
