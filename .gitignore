@@ -15,3 +15,6 @@ android/app/src/main/assets/capacitor.plugins.json
 android/capacitor-cordova-android-plugins/
 test-results/
 screenshots/
+
+# 공개 디버그 키스토어(비밀 아님)는 서명 일관성을 위해 커밋한다. 릴리스 키스토어는 절대 커밋하지 않는다.
+!android/app/debug.keystore

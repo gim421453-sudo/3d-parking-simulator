@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">3D 주차 시뮬레이터</string>
+    <string name="title_activity_main">3D 주차 시뮬레이터</string>
+    <string name="package_name">io.github.parkingsim.app</string>
+    <string name="custom_url_scheme">io.github.parkingsim.app</string>
+</resources>
