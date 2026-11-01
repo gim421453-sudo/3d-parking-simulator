@@ -1,0 +1,61 @@
+{
+  "sensorConfig": {
+    "rangeM": 2.5,
+    "criticalM": 0.3,
+    "rayStepRad": 0.08726646259971647
+  },
+  "levels": {
+    "order": [
+      "far",
+      "mid",
+      "near",
+      "critical"
+    ],
+    "rule": "f=(d-critical)/(range-critical): f<.33 near, <.66 mid, else far; d<=critical → critical; 미검출 → none"
+  },
+  "beep": {
+    "rule": "d<=critical → 연속음(0), 아니면 110~900ms 선형, 범위 밖 → 무음",
+    "minMs": 110,
+    "maxMs": 900
+  },
+  "activeGroups": {
+    "R": [
+      "rear",
+      "left",
+      "right"
+    ],
+    "D": "speed < 10 km/h → front,left,right"
+  },
+  "palettes": {
+    "standard": {
+      "name": "표준",
+      "colors": {
+        "far": "#7fc24d",
+        "mid": "#f1d13a",
+        "near": "#f08a2b",
+        "critical": "#e5372f"
+      },
+      "idle": "#27323f"
+    },
+    "colorblind": {
+      "name": "색약 친화",
+      "colors": {
+        "far": "#56b4e9",
+        "mid": "#f0e442",
+        "near": "#e69f00",
+        "critical": "#d55e00"
+      },
+      "idle": "#27323f"
+    },
+    "contrast": {
+      "name": "고대비",
+      "colors": {
+        "far": "#00ff7f",
+        "mid": "#ffff00",
+        "near": "#ff8000",
+        "critical": "#ff0000"
+      },
+      "idle": "#1a222c"
+    }
+  }
+}

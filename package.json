@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "cap:sync": "npm run build && cap sync android",
-    "e2e": "node scripts/e2e-smoke.cjs"
+    "e2e": "node scripts/e2e-smoke.cjs",
+    "export:data": "tsx scripts/export-data.ts"
   },
   "dependencies": {
     "@capacitor/core": "^8.6.0",
@@ -20,6 +21,7 @@
     "@capacitor/android": "^8.6.0",
     "@capacitor/cli": "^8.6.0",
     "@types/three": "^0.187.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"

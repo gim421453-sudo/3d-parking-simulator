@@ -1,0 +1,63 @@
+{
+  "lightModes": {
+    "off": "OFF",
+    "position": "미등",
+    "low": "하향등",
+    "high": "상향등",
+    "auto": "AUTO"
+  },
+  "rules": {
+    "off": "DRL 100%(P 제외)",
+    "position": "DRL 100%, 후미등",
+    "low": "DRL 30%, 하향등",
+    "high": "DRL 30%, 하향등+상향등",
+    "auto": "어두우면 low, 밝으면 off"
+  },
+  "autoLevelingMaxRad": 0.035,
+  "assistDefaults": {
+    "autoRear": true,
+    "autoFront": true,
+    "frontMaxKmh": 10,
+    "pExitSec": 3
+  },
+  "uiStates": {
+    "assistDisplay": {
+      "active": "boolean",
+      "camera": "rear | front",
+      "focus": "rear | front",
+      "cameraMode": "auto | rear | front"
+    },
+    "gears": [
+      "P",
+      "R",
+      "N",
+      "D"
+    ],
+    "settingsDefaults": {
+      "quality": "medium",
+      "resolutionScale": 0.85,
+      "shadows": "low",
+      "sensorViewFps": 24,
+      "showFps": false,
+      "sensorEnabled": true,
+      "sensorSound": true,
+      "sensorVolume": 0.5,
+      "sensorRange": 2.5,
+      "sensorCritical": 0.3,
+      "sensorDebug": false,
+      "rearMirror": true,
+      "rearPip": true,
+      "assistFrontAuto": true,
+      "assistFrontMaxKmh": 10,
+      "assistExitSec": 3,
+      "assistGuides": true,
+      "assistCameraFps": 30,
+      "pdcPalette": "standard",
+      "touchControls": "auto",
+      "touchScale": 1,
+      "vehicleId": "sedan",
+      "mapId": "lot",
+      "missionId": "lot-front"
+    }
+  }
+}

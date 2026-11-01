@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "units": "meter / radian",
+  "coordinates": {
+    "world": "x-z 평면이 지면, y 가 위",
+    "heading": "0 = +z 방향, 증가하면 왼쪽(반시계) 회전. forward = (sin h, cos h)",
+    "vehicleLocal": "+z = 앞, +x = 왼쪽, +y = 위. 원점 = 차체 중심의 지면 투영점",
+    "slot": "x,z = 중심, w = 가로(진행 방향에 수직), l = 세로(진행 방향), dir = 앞으로 주차할 때 차 앞이 향하는 heading",
+    "collider": "box: w(로컬 x) × d(로컬 z), rot(heading 규칙), [y0, y0+h]  /  cyl: r, [y0, y0+h]"
+  },
+  "notes": [
+    "센서 높이보다 낮거나(연석) 높은(천장) 충돌체는 센서에 감지되지 않는다. 차체 충돌은 지상고 0.2m 기준."
+  ]
+}
