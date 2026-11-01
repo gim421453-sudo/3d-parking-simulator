@@ -19,6 +19,7 @@ import {
   type SensorSnapshot,
 } from '../sensors/sensorSystem';
 import { Hud, type HudData, type MissionHud } from '../ui/hud';
+import { PdcDisplay } from '../ui/PdcDisplay';
 import { Menu, type ResultInfo } from '../ui/menu';
 import { applyGlbVisual, createCarModel, type CarModel } from '../vehicle/carModel';
 import {
@@ -48,6 +49,7 @@ export class Game {
   readonly input = new Input();
   readonly beeper = new Beeper();
   readonly hud: Hud;
+  readonly parkingDisplay: PdcDisplay;
   readonly menu: Menu;
   readonly sensorView: SensorView;
   private pip: HTMLCanvasElement;
@@ -109,6 +111,7 @@ export class Game {
 
     this.hud = new Hud(root, { action: (a) => this.onAction(a), input: this.input });
     this.hud.bindExtra();
+    this.parkingDisplay = new PdcDisplay(root, pip, () => this.onAction('soundToggle'));
     this.hud.onSensorSize = (s) => (s === 'reset' ? this.sensorView.resetCamera() : this.setSensorSize(s));
     this.sensorView = new SensorView(this.hud.sensorSlot);
     this.sensorView.setSize('small');
@@ -267,6 +270,7 @@ export class Game {
     this.rig.snap();
 
     this.menu.close();
+    this.parkingDisplay.update(false, false, false, false, null);
     this.hud.show();
     this.hud.setMinimapMode(this.minimapMode);
     this.hud.setSensorControls(this.sensorView.getSize());
@@ -314,6 +318,7 @@ export class Game {
     this.input.enabled = false;
     this.beeper.silence();
     this.hud.hide();
+    this.parkingDisplay.update(false, false, false, false, null);
     this.menu.showMain();
   }
 
@@ -622,7 +627,7 @@ export class Game {
 
     // 후방 카메라 보조 화면 (R 기어, 후방 모드가 아닐 때)
     const wantPip = this.state !== 'menu' && car.gear === 'R' && this.settings.rearPip && this.rig.mode !== 'rear';
-    this.hud.setPip(wantPip);
+    this.hud.setParkingOpen(this.state !== 'menu' && car.gear === 'R');
     this.canvas.classList.toggle('mirror', this.rig.mode === 'rear' && this.settings.rearMirror);
     if (wantPip) this.renderPip();
     else this.pip.classList.add('hidden');
@@ -734,6 +739,9 @@ export class Game {
       fpsText: this.settings.showFps ? `FPS ${this.fpsInstant.toFixed(0)} · 평균 ${this.avgFps().toFixed(0)}` : null,
     };
     this.hud.update(d);
+    const reverse = this.state !== 'menu' && car.gear === 'R';
+    const cameraAvailable = reverse && this.settings.rearPip && this.rig.mode !== 'rear';
+    this.parkingDisplay.update(reverse, cameraAvailable, this.settings.sensorEnabled, this.settings.sensorSound, this.sensorSnap);
   }
 }
 
