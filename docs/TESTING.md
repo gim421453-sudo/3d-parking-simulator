@@ -11,7 +11,8 @@
 | 단위 테스트 | `npm test` | ✅ **104/104 PASS** (8개 파일) |
 | 프로덕션 빌드 | `npm run build` | ✅ 성공 (dist, JS ~750KB / gzip ~200KB) |
 | 브라우저 통합(E2E) | `node scripts/e2e-smoke.cjs` | ✅ **104/104 PASS** (feature/pdc-display-v2) |
-| Android APK 빌드 | GitHub Actions `assembleDebug` | ❌ **미실행** (아래 참조) |
+| Android APK 빌드 | GitHub Actions `assembleDebug` | ✅ **성공 (run 1, run 2)** — APK ≈ 4.0MB 아티팩트, versionCode=run 번호, 고정 디버그 서명 확인. 기기 설치는 ❌ 미검증 |
+| CI (타입검사/단위/빌드) | GitHub Actions `ci.yml` | ✅ **success** (`feature/pdc-display-v2`) |
 | 실제 휴대폰 실행 | — | ❌ **미검증** |
 | GitHub Pages 배포 | `pages.yml` | ❌ **미배포** (저장소 Pages 설정 + main 머지 필요) |
 
@@ -54,7 +55,7 @@ E2E(추가분): R 에서 패널 표시, **R→D 에서 같은 DOM 노드 + 패�
 
 | 항목 | 이유 / 현재 상태 |
 |---|---|
-| **APK 빌드/설치/실행** | 개발 세션 네트워크가 `dl.google.com`(Android SDK, Google Maven)을 차단해 로컬에서 Gradle 빌드 불가. 워크플로는 작성했지만 **한 번도 실행되지 않음** → Actions 첫 실행 결과로 확인 필요 |
+| **APK 설치/실행** | Actions 에서 APK 는 빌드됐지만(위 표) 실제 기기에 설치·실행해 보지 않음. 로컬 빌드는 개발 세션이 `dl.google.com` 을 차단해 불가 |
 | 실기기 FPS/발열/터치감 | 휴대폰 없음. 헤드리스 값만 있음 |
 | 경고음 실제 청취 | 헤드리스 환경. 간격 계산은 단위 테스트, WebAudio 생성은 오류 없이 동작하는 것만 확인 |
 | 배포 환경 경로/리소스 로딩 | `vite preview`(정적 서버)와 상대 경로(`base: './'`) 빌드로 확인. **실제 GitHub Pages 하위 경로 배포는 미실행** |

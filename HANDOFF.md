@@ -17,7 +17,7 @@
 | 6 조명 | ✅ 모드/DRL/스포트라이트/AUTO Leveling(근사) / ❌ 오토 상향등·AFS 미구현 / ⏳ 램프 하우징 등 정교한 3D 램프·브레이크 반사광 |
 | 7 내비게이션 | ⏳ **미착수** |
 | 8 UI 현대화 | ⏳ 부분: 벡터 아이콘 HUD·메뉴 이모지 제거 / 미착수: HUD 3스타일, 차량 3D 미리보기, 메뉴 전면 리디자인 |
-| 9 Android | ⏳ 워크플로 그대로, **Actions 첫 실행 미확인** |
+| 9 Android | ✅ Actions APK 빌드 성공 확인(run 1, 2; versionCode=run 번호, 고정 디버그 서명) / ❌ 실기기 설치·업데이트 설치·성능 미검증 / ⏳ 센서·미러·카메라 부하 제어는 설정(FPS)까지만 |
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
@@ -35,7 +35,7 @@
 
 0. **v0.2 다음 작업**: 4 차량 외형(곡면·그릴·휠 디테일·램프 하우징; 무료 GLB 조사 + 라이선스 기록 `docs/ASSETS.md`) → 5 디지털 계기판/인터랙티브 실내 → 8 HUD 3스타일/차량 미리보기 → 7 내비게이션(도로 그래프 필요: 맵 데이터에 `roads` 추가) → 6.4 오토 상향등(이동 차량 시나리오 필요) → 서라운드뷰 → AFS.
 
-1. **GitHub Actions 첫 실행 확인**: `android-apk.yml` 이 실제로 APK 를 만드는지(로컬에서는 SDK 다운로드가 차단되어 한 번도 못 돌렸음). 실패하면 `android-build-logs-*` 아티팩트의 gradle 로그 확인. 가능성 높은 지점: `build.gradle` Groovy 문법, Capacitor 8 의 JDK 21/compileSdk 36 요구, `build-tools;36.0.0` 설치 이름.
+1. ~~GitHub Actions 첫 실행 확인~~ → **완료(성공)**. 남은 것: 아티팩트 APK 를 실제 폰에 설치(`adb install -r`)해 터치/FPS/경고음 확인, 같은 서명으로 덮어쓰기 설치 시 기록 보존 확인.
 2. **GitHub Pages 설정**: 저장소 Settings → Pages → Source = GitHub Actions, 그 후 main 에 머지하면 `pages.yml` 이 배포. 아직 배포된 주소 없음.
 3. **실제 휴대폰 검증**: APK 설치 후 터치 조작, FPS(설정 → FPS 표시), 경고음, 가로 레이아웃 확인. 지금까지는 헤드리스 Chromium(소프트웨어 렌더링) + 터치 에뮬레이션만 해봤다.
 4. 실제 GLB 차량으로 `docs/CAR_MODEL_GUIDE.md` 절차를 한 번 끝까지 시험(합성 GLB 로더 테스트만 있음).

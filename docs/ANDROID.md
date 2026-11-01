@@ -9,7 +9,8 @@
 |---|---|
 | Capacitor Android 프로젝트 생성 (`cap add android`) | ✅ 생성됨 (`android/`) |
 | `cap sync` 로 웹 빌드 동기화 | ✅ 로컬에서 실행됨 |
-| **`assembleDebug` APK 빌드** | ❌ **로컬 미실행** — 개발 세션의 네트워크가 `dl.google.com`(Android SDK/AGP)을 차단. GitHub Actions에서 첫 실행 후 확인 필요 |
+| **`assembleDebug` APK 빌드 (GitHub Actions)** | ✅ **성공** — run 1(`claude/compassionate-fermi-i6emhr`, v0.1.0)과 run 2(`feature/pdc-display-v2`, v0.2 개발)에서 모든 단계 success, APK ≈ 4.0MB 아티팩트 생성. 로그에서 `package=io.github.parkingsim.app`, `versionCode=2`(= run 번호), `BUILD SUCCESSFUL`, 서명 인증서 `CN=Parking Sim Debug` 확인. (로컬 빌드는 개발 세션이 `dl.google.com` 을 차단해 불가) |
+| 같은 서명으로 업데이트 설치(데이터 보존) | ❌ **미검증** — 서명 인증서가 빌드마다 동일하고 versionCode 가 증가하는 것까지만 확인. 실제 기기에서 덮어쓰기 설치는 해보지 않음 |
 | 실제 휴대폰 설치/실행 | ❌ **미검증** (가상 모바일 뷰포트 + 터치 이벤트 에뮬레이션으로 웹 UI만 검증) |
 | Android WebView GPU 성능 | ❌ **미측정** |
 
