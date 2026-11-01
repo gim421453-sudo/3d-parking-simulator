@@ -1,0 +1,81 @@
+name: Android APK (debug)
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Capacitor 8 요구사항
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21 # Capacitor 8 / AGP 요구사항
+
+      - name: Android SDK 설정
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Gradle 캐시
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 단위 테스트
+        run: npm test
+
+      - name: 웹 게임 빌드 → Capacitor Android 동기화
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: assembleDebug
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          # versionCode = 실행 번호(항상 증가). 서명은 저장소의 공개 디버그 키스토어로 항상 동일. (docs/ANDROID.md)
+          ./gradlew assembleDebug --stacktrace --info -PversionCode=${{ github.run_number }} 2>&1 | tee ../gradle-build.log
+
+      - name: APK 정보 확인
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          ls -l "$APK"
+          # build-tools 의 aapt2/apksigner 로 패키지명·버전·서명 확인
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/aapt2" dump badging "$APK" | grep -E "package:|sdkVersion|launchable-activity" || true
+          "$BT/apksigner" verify --print-certs "$APK" | head -5 || true
+
+      - name: APK 업로드 (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: parking-simulator-debug-apk-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 빌드 로그 업로드 (실패 원인 확인용)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-logs-${{ github.run_number }}
+          path: |
+            gradle-build.log
+            android/app/build/reports/**
+          if-no-files-found: ignore
+          retention-days: 14
