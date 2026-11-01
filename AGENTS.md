@@ -40,6 +40,9 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 12. 주차 보조 패널(`#parking-assist`)의 DOM/사이드 버튼은 **고정**이다. 카메라/기어/PDC 상태 변화는 내용만 갱신하고 요소를 재생성하거나 위치를 바꾸지 말 것. 서라운드뷰를 구현하기 전에는 360° 관련 UI/영상을 만들지 말 것.
 13. 주차 보조 표시 규칙은 `pdc/assistPolicy.ts`(순수 로직)에만 둔다. Game 은 결과(`assistOut`)만 소비한다. 규칙을 바꾸면 `tests/pdc.test.ts` 와 `docs/PDC_DISPLAY.md` 표를 함께 수정.
 14. 조명 규칙은 `vehicle/lighting.ts`(순수 로직). AUTO Leveling 은 가속도 기반 근사이며 실제 피치 물리가 아니다 — 이름/문서에서 구분할 것. 구현하지 않은 기능(오토 상향등, AFS)을 완성된 것처럼 표시하지 말 것.
+16. **GitHub Actions 는 수동/제한 실행이 기본이다.** push 로 자동 실행되는 워크플로를 추가하지 말 것. 검증은 로컬에서 먼저(`typecheck`/`test`/`build`/`e2e`/`verify:pages`). Actions 가 필요하면 목적을 먼저 밝히고 한 번만 실행. 워크플로 수정 커밋에는 `[skip ci]`. 자세한 내용은 `docs/DEPLOY.md`.
+17. **UI 는 `src/style.css` 의 디자인 토큰(`--glass`, `--hair`, `--accent`, `--ctl` …)과 `ui/icons.ts` 벡터 아이콘만 사용**한다. 이모지 아이콘 금지. 필수 운전 조작(방향지시/비상등/조명/주차브레이크/기어)은 `#cluster` 에 **항상 표시**되어야 하며 주차 보조 패널이나 다른 UI 로 가리거나 숨기지 말 것(`scripts/e2e-smoke.cjs` 가 7개 화면 크기에서 겹침/접근성을 검사).
+18. 맵은 사용자가 치수/배치를 확정한 뒤 **고정 제작**한다. 다층·경사로·리프트는 엔진(높이/경사 충돌) 확장이 먼저다 (`docs/MAP_ROADMAP.md`). 무료 에셋은 라이선스를 직접 확인하고 `docs/ASSETS.md` 에 기록한 뒤에만 도입한다 (`docs/FREE_ASSETS_SURVEY.md`).
 15. 엔진 독립 데이터(`npm run export:data` → `export/*.json`)는 Unity 이식 대비용이다. 제원/센서/맵 형식을 바꾸면 export 스크립트도 확인.
 
 ## 디렉터리
@@ -48,5 +51,6 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 
 ## 변경 이력 (최근 순)
 
+- v0.3.0-dev (`feature/pdc-display-v2`): Actions 수동화(사용량 최소화), Pages 하위 경로 로컬 검증(`verify:pages`), 전체 UI 재설계(디자인 토큰·슬림 클러스터·사이드 패널 메뉴·3D 쇼룸 차량 미리보기·탭 설정·결과 화면), 주차 보조 패널 재디자인, **필수 조작 버튼을 클러스터로 통합해 주차 보조 중에도 항상 접근 가능**, 화면 크기별 겹침 E2E, 무료 에셋 조사/Blender/Unity/맵 로드맵 문서.
 - v0.2.0-dev (`feature/pdc-display-v2`): 주차 보조 디스플레이(후방/전방카메라 + PDC 탑뷰 + 고정 사이드 버튼 + 동적 가이드라인), R/D 자동 전환 정책, 일반 화면 거리 숫자 제거(디버그 전용), 조명 모드(OFF/미등/하향/상향/AUTO)·DRL·AUTO Leveling(근사), 전방 카메라 모드, 벡터 아이콘 HUD, 엔진 독립 데이터 export. 자세한 내용은 `docs/PDC_DISPLAY.md`.
 - v0.1.0: 최초 플레이 가능 버전. 웹 게임 전체(주행/카메라5/센서/미션8/맵3/UI/설정·기록), Capacitor Android 프로젝트 + APK 워크플로(Actions에서 첫 실행 필요), Pages 워크플로, 단위 테스트 65개, 브라우저 E2E.

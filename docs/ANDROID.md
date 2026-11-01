@@ -16,10 +16,10 @@
 
 ## APK 자동 빌드 (GitHub Actions)
 
-`.github/workflows/android-apk.yml`: Node 22 + JDK 21 + `android-actions/setup-android` → `npm test` → `npm run build` → `npx cap sync android` → `./gradlew assembleDebug`.
+`.github/workflows/android-apk.yml` (**수동 실행 전용** — Actions → "Android APK (debug, manual)" → Run workflow; push/PR 로는 실행되지 않음. 정책: `docs/DEPLOY.md`): Node 22 + JDK 21 + `android-actions/setup-android` → `npm test` → `npm run build` → `npx cap sync android` → `./gradlew assembleDebug`.
 - APK는 Actions 실행 화면의 **Artifacts → `parking-simulator-debug-apk-<번호>`** 에서 받습니다.
 - 실패 시 `android-build-logs-<번호>` 아티팩트(전체 gradle `--stacktrace --info` 로그 + 리포트)로 원인을 확인합니다.
-- `main`, `claude/**` 푸시, PR, 수동 실행(workflow_dispatch)에서 동작합니다.
+- 수동 실행(workflow_dispatch)에서만 동작합니다. 실행 전 로컬에서 `npm run typecheck && npm test && npm run build` 를 통과시키세요 (워크플로는 테스트를 다시 돌리지 않음).
 
 ## 로컬 빌드 (Windows PowerShell, Android Studio/SDK 설치 시)
 

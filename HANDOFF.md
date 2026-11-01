@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.2.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.3.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,27 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.3 (긴급 UI 개선 + 개발 환경 최적화) 진행 상황
+
+| 항목 | 상태 |
+|---|---|
+| P0-1 Actions 최소화 | ✅ 3개 워크플로 모두 수동/제한 실행, concurrency/timeout/캐시/보관기간 축소, `[skip ci]` 로 연쇄 실행 차단. 정책: `docs/DEPLOY.md` |
+| P0-2 Pages 준비 | ✅ 하위 경로 로컬 검증(`npm run verify:pages`, 7항목 PASS) / ❌ **실제 Pages 배포는 실행하지 않음** — 비공개 + 개인 계정 + 요금제 미확인(Pro 이상 필요). 원본 비공개 유지 대안은 `docs/DEPLOY.md` |
+| P0-3 전체 UI 재설계 | ✅ 디자인 토큰, 슬림 클러스터(링 게이지+디지털 속도+기어+필수 조작), 사이드 패널형 메인 메뉴 + **3D 쇼룸 차량 미리보기**, 맵/미션 2단, 탭 설정, 일시정지/결과 화면, 미니맵/미션 칩, 벡터 아이콘. 이모지 제거 |
+| P0-4 PDC 화면 | ✅ 프리미엄 인포테인먼트 스타일로 재디자인(슬림 상단 라인, 정교한 차량 탑뷰, 컴팩트 고정 사이드 메뉴). 기능 계약(R/D 카메라만 교체, 사이드 버튼 좌표 고정, 거리 숫자 없음, 서라운드 없음) 유지 |
+| P0-5 모바일 필수 버튼 | ✅ 숨기던 방식 폐기 → 방향지시/비상등/조명/주차브레이크/기어를 `#cluster` 에 **상시 표시**. 7개 화면 크기(667×375 ~ 1920×1080)에서 겹침·접근성 자동 검사 |
+| P1 무료 에셋 조사 | ✅ `docs/FREE_ASSETS_SURVEY.md` (직접 확인 2건: ToyCar CC0, CarConcept CC BY 4.0 / 간접 1건 / 미확인 다수). **에셋은 하나도 도입하지 않음** |
+| P1 맵 원칙·엔진 한계 | ✅ `docs/MAP_ROADMAP.md` (고정 제작 원칙, 다층·경사로·리프트에 필요한 엔진 확장) |
+| P1 Blender 파이프라인 | ✅ 문서 `docs/BLENDER_PIPELINE.md` / ❌ 실제 Blender 모델 없음, 램프 노드 연결 로더 미구현 |
+| P2 Unity 검토 | ✅ `docs/UNITY_NOTES.md` + `npm run export:data` 유지 |
+
+### 다음 작업 우선순위
+1. (2026-11-03) 실기기 ADB 테스트: `android-apk.yml` 수동 1회 → APK 설치 → 터치감/FPS/경고음/클러스터·패널 겹침 확인, 같은 서명으로 덮어쓰기 설치.
+2. Pages 가능 여부 확인(Settings → Pages) 후 결정: 비공개 유지(로컬 서버/APK) vs 요금제 업그레이드 vs 공개 전환(사용자 허가 필요).
+3. 차량 외형(곡면/그릴/휠/램프 하우징) — Blender 제작 또는 CarConcept(CC BY) 부품 분리.
+4. 디지털 계기판 상세(RPM/경고등/PDC 요약), 인터랙티브 실내·미러, 내비게이션, HUD 3스타일.
+5. 맵 구조 확정 후 고정 맵 제작. 다층/경사로는 엔진 확장 선행.
 
 ## 한 일
 

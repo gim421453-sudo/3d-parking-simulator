@@ -6,11 +6,14 @@
 > TypeScript + Vite + Three.js · 오프라인 싱글플레이 · 로그인/외부 API 없음 · 모든 모델/텍스처는 코드로 생성(저작권 이슈 없음)
 
 <p align="center">
-  <img src="docs/screenshots/32-assist-R.png" width="45%" alt="R: 후방카메라 + PDC 주차 보조">
-  <img src="docs/screenshots/33-assist-D.png" width="45%" alt="D: 같은 화면, 전방카메라로 전환">
-  <img src="docs/screenshots/34-assist-guides.png" width="45%" alt="조향 연동 주차 가이드라인">
-  <img src="docs/screenshots/93-mobile-assist.png" width="45%" alt="모바일 가로 화면의 주차 보조">
+  <img src="docs/screenshots/ui-main.png" width="45%" alt="메인 메뉴 + 3D 차량 미리보기">
+  <img src="docs/screenshots/ui-car.png" width="45%" alt="차량 선택">
+  <img src="docs/screenshots/ui-assist-R.png" width="45%" alt="R: 후방카메라 + PDC 주차 보조">
+  <img src="docs/screenshots/ui-mobile-assist.png" width="45%" alt="모바일 가로(800×360): 주차 보조 + 필수 조작 버튼">
 </p>
+
+> **v0.3 UI**: 어두운 유리 패널·헤어라인·벡터 아이콘의 차량 디지털 시스템 스타일. 방향지시등·비상등·조명·주차브레이크·기어는 하단 클러스터에 **항상 표시**됩니다(주차 보조 화면이 열려 있어도 가려지지 않음).
+> **Actions**: 모든 워크플로는 수동/제한 실행입니다 ([docs/DEPLOY.md](docs/DEPLOY.md)). 웹 테스트는 로컬(`npm run dev`)을 권장합니다 — 비공개 저장소의 Pages 는 요금제 조건이 있어 아직 배포하지 않았습니다.
 
 ## 빠른 실행 (Windows PowerShell)
 
@@ -98,16 +101,17 @@ docs/        ASSETS / CAR_MODEL_GUIDE / MAP_GUIDE / ANDROID / TESTING
 npm run typecheck
 npm test                      # 단위 테스트 104개
 npm run export:data           # 엔진 독립 JSON(export/) — Unity 이식 대비
-npm run build; node scripts/e2e-smoke.cjs   # 브라우저 통합 테스트 104개 (Playwright 필요)
+npm run build; node scripts/e2e-smoke.cjs   # 브라우저 통합 테스트 (Playwright 필요)
+npm run verify:pages          # Pages 와 같은 하위 경로 서빙 검증
 ```
 
 결과와 미검증 항목은 [docs/TESTING.md](docs/TESTING.md) 참고.
 
 ## 배포
 
-- **GitHub Pages**: `.github/workflows/pages.yml` (main 푸시 시 배포). 저장소 *Settings → Pages → Source = GitHub Actions* 로 한 번 설정해야 합니다. 설정 전에는 배포되지 않습니다.
-- **Android APK**: `.github/workflows/android-apk.yml` 이 Android SDK 설정 → 웹 빌드 → `cap sync` → `assembleDebug` 후 APK를 Artifact로 올립니다. 자세한 내용과 서명/버전 관리: [docs/ANDROID.md](docs/ANDROID.md).
+- **GitHub Pages**: `.github/workflows/pages.yml` (**수동 실행 전용**). 비공개 저장소는 Pro/Team/Enterprise 요금제가 필요하고 사이트는 공개됩니다 — 자세한 판단·대안은 [docs/DEPLOY.md](docs/DEPLOY.md). 배포 전 하위 경로 로컬 검증: `npm run verify:pages`. **아직 배포되지 않았습니다.**
+- **Android APK**: `.github/workflows/android-apk.yml` (**수동 실행 전용**) 이 Android SDK 설정 → 웹 빌드 → `cap sync` → `assembleDebug` 후 APK를 Artifact로 올립니다. 자세한 내용과 서명/버전 관리: [docs/ANDROID.md](docs/ANDROID.md).
 
 ## 문서
 
-- [주차 보조 디스플레이](docs/PDC_DISPLAY.md) · [에셋 출처/라이선스](docs/ASSETS.md) · [차량 GLB 교체 가이드](docs/CAR_MODEL_GUIDE.md) · [맵 추가 가이드](docs/MAP_GUIDE.md) · [Android](docs/ANDROID.md) · [테스트 결과](docs/TESTING.md) · [인수인계](HANDOFF.md)
+- [배포/Actions 정책](docs/DEPLOY.md) · [무료 에셋 조사](docs/FREE_ASSETS_SURVEY.md) · [맵 로드맵/엔진 한계](docs/MAP_ROADMAP.md) · [Blender 파이프라인](docs/BLENDER_PIPELINE.md) · [Unity 메모](docs/UNITY_NOTES.md) · [주차 보조 디스플레이](docs/PDC_DISPLAY.md) · [에셋 출처/라이선스](docs/ASSETS.md) · [차량 GLB 교체 가이드](docs/CAR_MODEL_GUIDE.md) · [맵 추가 가이드](docs/MAP_GUIDE.md) · [Android](docs/ANDROID.md) · [테스트 결과](docs/TESTING.md) · [인수인계](HANDOFF.md)

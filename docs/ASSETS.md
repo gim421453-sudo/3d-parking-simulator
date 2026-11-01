@@ -12,6 +12,8 @@
 | 경고음 | WebAudio 오실레이터(사각파 1100Hz) | `src/sensors/beeper.ts` | 프로젝트 자체 코드 |
 | 아이콘/글꼴 | 시스템 글꼴, 이모지/SVG 인라인 | `index.html`, `src/style.css` | 해당 없음 |
 
+> 무료 에셋 후보 조사 결과: [FREE_ASSETS_SURVEY.md](FREE_ASSETS_SURVEY.md) (아직 도입한 에셋 없음)
+
 ## 외부 GLB/glTF 에셋을 추가할 때
 
 사용자가 직접 모델링하지 않아도 되도록 CC0/CC-BY 등 **재배포가 허용된** 무료 에셋을 쓸 수 있게 구조를 열어두었습니다.
