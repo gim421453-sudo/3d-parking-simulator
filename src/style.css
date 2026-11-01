@@ -1,0 +1,203 @@
+:root {
+  --speedo: clamp(110px, 14vw, 150px);
+  --bg: #10151c;
+  --panel: rgba(16, 21, 28, 0.78);
+  --panel-solid: #18202b;
+  --line: rgba(255, 255, 255, 0.14);
+  --text: #eef2f7;
+  --muted: #9aa7b8;
+  --accent: #3b82f6;
+  --good: #35e07a;
+  --warn: #f2b53a;
+  --bad: #ef4a4a;
+  --touch: 1;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+#app { position: fixed; inset: 0; }
+#game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#game-canvas.mirror { transform: scaleX(-1); }
+#rear-pip { position: absolute; left: 38%; top: 8px; transform: translateX(-50%); width: clamp(150px, 22vw, 300px); aspect-ratio: 16 / 9; border: 2px solid var(--line); border-radius: 10px; background: #000; z-index: 6; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+#ui-root { position: absolute; inset: 0; pointer-events: none; }
+#ui-root > * { pointer-events: auto; }
+#boot { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 99; font-size: 18px; color: var(--muted); }
+.hidden { display: none !important; }
+
+/* ---------- 화면(메뉴) ---------- */
+.screen { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 30% 20%, #1d2b3d 0%, #0d1218 70%); overflow: auto; padding: max(16px, env(safe-area-inset-top)) 16px 16px; touch-action: pan-y; z-index: 20; }
+.screen.overlay { background: rgba(6, 10, 14, 0.72); backdrop-filter: blur(3px); }
+.card { width: min(920px, 100%); max-height: 100%; overflow: auto; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; box-shadow: 0 18px 60px rgba(0,0,0,.55); }
+.card.narrow { width: min(460px, 100%); }
+h1 { font-size: clamp(24px, 4vw, 38px); margin: 0 0 4px; letter-spacing: -0.02em; }
+h2 { font-size: 20px; margin: 0 0 12px; }
+h3 { font-size: 15px; margin: 16px 0 8px; color: var(--muted); font-weight: 600; }
+.sub { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+.menu-list { display: grid; gap: 10px; margin-top: 14px; }
+button, .btn { font: inherit; color: var(--text); background: #26354a; border: 1px solid var(--line); border-radius: 10px; padding: 11px 16px; cursor: pointer; transition: background .12s, transform .05s; touch-action: manipulation; }
+button:hover { background: #31445f; }
+button:active { transform: scale(0.98); }
+button.primary { background: var(--accent); border-color: transparent; font-weight: 700; font-size: 17px; padding: 14px 18px; }
+button.primary:hover { background: #4b8fff; }
+button.danger { background: #5a2226; }
+button.ghost { background: transparent; }
+button:disabled { opacity: .45; cursor: default; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.row.between { justify-content: space-between; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.option { background: #1f2b3b; border: 2px solid transparent; border-radius: 12px; padding: 12px; cursor: pointer; text-align: left; display: block; width: 100%; }
+.option.selected { border-color: var(--accent); background: #22344d; }
+.option .title { font-weight: 700; margin-bottom: 4px; }
+.option .desc { font-size: 13px; color: var(--muted); }
+.option canvas { width: 100%; height: auto; border-radius: 8px; margin-bottom: 8px; display: block; background: #0d1218; }
+.badge { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px; background: #2e4666; margin-right: 4px; }
+.badge.clear { background: #1f6b43; }
+.mission-item { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: #1f2b3b; border: 2px solid transparent; cursor: pointer; margin-bottom: 8px; text-align: left; width: 100%; }
+.mission-item.selected { border-color: var(--accent); background: #22344d; }
+.mission-item .meta { font-size: 12px; color: var(--muted); }
+.setting { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.setting label { font-size: 14px; }
+.setting small { display: block; color: var(--muted); font-size: 12px; }
+.setting input[type=range] { width: min(220px, 40vw); }
+.setting select { font: inherit; background: #26354a; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+.setting input[type=checkbox] { width: 22px; height: 22px; }
+.keytable { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; }
+.keytable div { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+kbd { background: #2c3b52; border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 6px; padding: 2px 8px; font-family: inherit; font-size: 13px; min-width: 28px; text-align: center; }
+
+/* ---------- HUD ---------- */
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+#hud > * { pointer-events: auto; }
+#hud .nopoint { pointer-events: none; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(4px); }
+#left-col { position: absolute; left: max(8px, env(safe-area-inset-left)); top: 8px; width: clamp(160px, 21vw, 250px); display: flex; flex-direction: column; gap: 6px; pointer-events: none !important; z-index: 6; }
+#left-col > * { pointer-events: auto; }
+#mission-panel { padding: 8px 11px; font-size: 13px; }
+#mission-panel li { white-space: nowrap; gap: 8px; }
+#mission-panel .mname { font-weight: 700; font-size: 14px; }
+#mission-panel .mhead { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+#mission-panel .mname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#mission-panel .mtime { flex: none; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+#mission-panel ul { list-style: none; padding: 0; margin: 6px 0 0; }
+#mission-panel li { display: flex; justify-content: space-between; color: var(--muted); }
+#mission-panel li.ok { color: var(--good); }
+#mission-panel li.bad { color: var(--bad); }
+#mission-panel .bar { height: 6px; background: #2a3646; border-radius: 4px; margin-top: 6px; overflow: hidden; }
+#mission-panel .bar > i { display: block; height: 100%; width: 0%; background: var(--good); }
+#fps { position: absolute; left: max(8px, env(safe-area-inset-left)); bottom: 6px; font-size: 11px; color: #cfd8e3; background: rgba(0,0,0,.4); padding: 2px 6px; border-radius: 6px; z-index: 6; }
+#toasts { position: absolute; left: 50%; top: 96px; transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; pointer-events: none !important; z-index: 8; }
+.toast { background: rgba(10, 14, 20, 0.88); border: 1px solid var(--line); padding: 8px 16px; border-radius: 999px; font-size: 15px; animation: toastin .18s ease-out; }
+.toast.warn { border-color: var(--warn); color: var(--warn); }
+.toast.bad { border-color: var(--bad); color: #ff8a8a; }
+.toast.good { border-color: var(--good); color: var(--good); }
+@keyframes toastin { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+#flash { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 40%, rgba(239,74,74,.55)); opacity: 0; pointer-events: none !important; transition: opacity .5s; z-index: 7; }
+#flash.on { opacity: 1; transition: none; }
+
+#top-right { position: absolute; right: max(8px, env(safe-area-inset-right)); top: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+#minimap-wrap { padding: 4px; }
+#minimap { width: clamp(130px, 17vw, 190px); height: clamp(130px, 17vw, 190px); display: block; border-radius: 8px; }
+#minimap-wrap.large #minimap { width: clamp(220px, 38vw, 380px); height: clamp(180px, 30vw, 300px); }
+.iconbar { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.iconbar button { padding: 7px 10px; font-size: 13px; border-radius: 10px; background: var(--panel); min-width: 40px; }
+.iconbar button.on { background: var(--accent); }
+
+#cluster { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; align-items: flex-end; gap: 10px; padding: 8px 12px; }
+#speedo { width: var(--speedo); height: var(--speedo); position: relative; }
+#speedo svg { width: 100%; height: 100%; display: block; }
+#speedo .digital { position: absolute; left: 0; right: 0; top: 52%; text-align: center; font-size: clamp(22px, 3vw, 32px); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+#speedo .digital small { display: block; font-size: 11px; font-weight: 500; color: var(--muted); }
+#gears { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+#gears button { padding: 6px 0; width: 42px; font-weight: 800; font-size: 16px; border-radius: 8px; }
+#gears button.cur { background: var(--accent); }
+#gears button.cur[data-g=R] { background: #d44; }
+#steer-box { text-align: center; width: 62px; font-size: 12px; color: var(--muted); }
+#steer-box svg { width: 46px; height: 46px; display: block; margin: 0 auto 2px; }
+#steer-box b { color: var(--text); font-size: 13px; }
+#indicators { display: flex; gap: 5px; flex-wrap: wrap; width: 72px; align-content: flex-end; }
+.ind { width: 31px; height: 26px; border-radius: 6px; display: grid; place-items: center; font-size: 14px; background: #1a2230; color: #44546a; border: 1px solid var(--line); }
+.ind.on { color: #fff; }
+.ind.sig.on { background: #1f8f4a; }
+.ind.haz.on { background: #c43; }
+.ind.head.on { background: #2563eb; }
+.ind.brake.on { background: #c22; }
+#actionbar { position: absolute; left: 50%; bottom: calc(var(--speedo) + 28px); transform: translateX(-50%); display: flex; gap: 6px; }
+#actionbar button { padding: 6px 10px; font-size: 12px; background: var(--panel); border-radius: 999px; white-space: nowrap; }
+#actionbar button.on { background: var(--accent); }
+
+#hint { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); width: max-content; max-width: min(540px, 52vw); text-align: center; font-size: 13px; background: rgba(10,14,20,.8); padding: 12px 18px; border-radius: 14px; border: 1px solid var(--line); line-height: 1.55; pointer-events: none !important; z-index: 8; transition: opacity .6s; }
+#hud.pip #hint { display: none; }
+#hud.pip #toasts { top: calc(clamp(150px, 22vw, 300px) * 0.5625 + 48px); left: 38%; }
+#hint.fade { opacity: 0; }
+#cam-label { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); font-size: 12px; color: #cfd8e3; background: rgba(0,0,0,.35); padding: 2px 10px; border-radius: 999px; pointer-events: none !important; }
+#hud.pip #cam-label { top: calc(clamp(150px, 22vw, 300px) * 0.5625 + 14px); left: 38%; }
+
+/* ---------- 센서 화면 ---------- */
+.sensor-view { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #0b1622; touch-action: none; z-index: 6; }
+.sensor-view canvas { width: 100%; height: 100%; display: block; }
+.sensor-view.small { width: 100%; aspect-ratio: 4 / 3.2; }
+.sensor-view.large { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(78vw, 820px); height: min(76vh, 560px); z-index: 12; box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); }
+.sv-status { position: absolute; left: 6px; top: 5px; font-size: 11px; background: rgba(0,0,0,.5); padding: 2px 7px; border-radius: 999px; pointer-events: none; max-width: 95%; }
+.sv-status.off { color: var(--bad); }
+.sensor-view.small .sv-status:not(.off) { display: none; }
+.sv-info { position: absolute; left: 6px; bottom: 5px; font-size: 11px; background: rgba(0,0,0,.5); padding: 2px 7px; border-radius: 999px; pointer-events: none; font-variant-numeric: tabular-nums; }
+.sv-legend { position: absolute; right: 6px; bottom: 5px; display: none; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 70%; pointer-events: none; }
+.sensor-view.large .sv-legend { display: flex; }
+.sv-legend .chip { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: rgba(0,0,0,.55); border-left: 8px solid var(--c); }
+.sv-legend .note { font-size: 11px; color: #c9d4e2; background: rgba(0,0,0,.55); padding: 1px 7px; border-radius: 6px; }
+.sv-label { position: absolute; left: 0; top: 0; font-size: 12px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: rgba(0,0,0,.7); border: 1px solid var(--c); color: #fff; pointer-events: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sv-debug { display: none; position: absolute; right: 6px; top: 5px; font-family: ui-monospace, Consolas, monospace; font-size: 10px; line-height: 1.25; white-space: pre; background: rgba(0,0,0,.65); padding: 4px 6px; border-radius: 6px; pointer-events: none; color: #bfe3ff; }
+.sensor-view.small .sv-debug { display: none !important; }
+.sensor-view.hidden { display: none; }
+#sv-controls { display: flex; gap: 4px; z-index: 13; flex-wrap: wrap; }
+#sv-controls button { padding: 3px 8px; font-size: 11px; border-radius: 8px; background: var(--panel); }
+#sv-controls.large { position: fixed; left: 50%; top: calc(50% - min(38vh, 280px) - 34px); transform: translateX(-50%); }
+
+/* ---------- 터치 ---------- */
+#touch { position: absolute; inset: 0; pointer-events: none; z-index: 9; }
+#touch > * { pointer-events: auto; position: absolute; }
+.tbtn { width: calc(78px * var(--touch)); height: calc(78px * var(--touch)); border-radius: 18px; display: grid; place-items: center; background: rgba(30, 42, 58, 0.72); border: 2px solid rgba(255,255,255,.22); font-size: calc(26px * var(--touch)); font-weight: 800; touch-action: none; }
+.tbtn.held { background: rgba(59, 130, 246, .75); }
+.tbtn.gas { height: calc(110px * var(--touch)); width: calc(84px * var(--touch)); background: rgba(40, 130, 70, .72); font-size: calc(15px * var(--touch)); }
+.tbtn.brk { background: rgba(160, 50, 50, .72); font-size: calc(15px * var(--touch)); }
+#t-steer { left: max(10px, env(safe-area-inset-left)); bottom: 10px; display: flex; gap: 10px; }
+#t-pedals { right: max(10px, env(safe-area-inset-right)); bottom: 10px; display: flex; gap: 10px; align-items: flex-end; }
+
+/* 낮은 화면(모바일 가로): 컴팩트 HUD */
+@media (max-height: 480px) {
+  :root { --speedo: 86px; }
+  #left-col { width: clamp(130px, 17vw, 160px); gap: 4px; top: 6px; }
+  #mission-panel { font-size: 11px; padding: 5px 8px; }
+  #mission-panel .mname { font-size: 12px; }
+  #mission-panel ul { margin-top: 3px; }
+  #mission-panel li:nth-child(n+4) { display: none; }
+  #sv-controls button { padding: 2px 6px; font-size: 10px; }
+  .sensor-view.small .sv-info { font-size: 9px; }
+  #cluster { padding: 4px 8px; gap: 6px; }
+  #steer-box { width: 44px; font-size: 10px; }
+  #steer-box svg { width: 30px; height: 30px; }
+  #steer-box div { display: none; }
+  #indicators { width: 58px; gap: 3px; }
+  .ind { width: 26px; height: 20px; font-size: 11px; }
+  #gears button { width: 46px; padding: 4px 0; font-size: 15px; }
+  #actionbar { gap: 4px; }
+  #actionbar button, .iconbar button { padding: 5px 9px; font-size: 13px; }
+  .iconbar { gap: 4px; }
+  .t { display: none; }
+  #minimap { width: 96px !important; height: 96px !important; }
+  #minimap-wrap.large #minimap { width: 200px !important; height: 150px !important; }
+  .toast { font-size: 13px; padding: 5px 12px; }
+  #toasts { top: 112px; }
+  #hint { font-size: 11px; padding: 6px 10px; top: 54px; max-width: 46vw; }
+  #cam-label { font-size: 10px; }
+  .sensor-view.large { width: min(70vw, 560px); height: min(66vh, 270px); }
+}
+@media (max-width: 760px) {
+  .card { padding: 16px; }
+}
+
+/* 터치 기기: HUD 버튼 최소 터치 영역 확보 */
+@media (pointer: coarse) {
+  .iconbar button, #actionbar button { min-height: 40px; min-width: 42px; }
+  #gears button { min-height: 40px; }
+  #sv-controls button { min-height: 30px; }
+}

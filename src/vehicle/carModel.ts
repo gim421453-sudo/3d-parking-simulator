@@ -1,0 +1,390 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { VehicleSpec } from './spec';
+
+/** 차량 시각 모델. 충돌체(OBB)/센서 좌표는 VehicleSpec 에 별도로 있으며 이 모델과 독립적이다. */
+export interface CarModel {
+  root: THREE.Group; // 원점 = 차체 중심의 지면 투영점, +z = 앞, +x = 왼쪽
+  bodyGroup: THREE.Group; // 1인칭 시점에서는 숨긴다
+  cockpit: THREE.Group; // 1인칭 시점 전용 (대시보드, 핸들)
+  steeringWheel: THREE.Object3D | null;
+  frontPivots: THREE.Object3D[];
+  rollers: THREE.Object3D[];
+  headSpot: THREE.SpotLight | null;
+  lights: LightMaterials | null;
+  setState(s: CarVisualState): void;
+  dispose(): void;
+}
+
+export interface CarVisualState {
+  steer: number;
+  roll: number;
+  headlights: boolean;
+  brake: boolean;
+  reverse: boolean;
+  signalLeft: boolean; // 현재 깜빡임 켜짐 상태
+  signalRight: boolean;
+}
+
+interface LightMaterials {
+  head: THREE.MeshStandardMaterial;
+  tail: THREE.MeshStandardMaterial;
+  rev: THREE.MeshStandardMaterial;
+  sigL: THREE.MeshStandardMaterial;
+  sigR: THREE.MeshStandardMaterial;
+}
+
+interface BodyShape {
+  belt: number;
+  hood: number; // 앞 오버행 ~ 캐빈 시작
+  trunk: number; // 뒤 ~ 캐빈 시작
+  topRearInset: number;
+  topFrontInset: number;
+}
+
+const SHAPES: Record<'hatch' | 'sedan' | 'suv', BodyShape> = {
+  sedan: { belt: 0.86, hood: 1.15, trunk: 0.95, topRearInset: 0.55, topFrontInset: 0.45 },
+  hatch: { belt: 0.84, hood: 0.85, trunk: 0.0, topRearInset: 0.25, topFrontInset: 0.4 },
+  suv: { belt: 1.0, hood: 1.0, trunk: 0.15, topRearInset: 0.12, topFrontInset: 0.4 },
+};
+
+const geoCache = new Map<string, THREE.BufferGeometry>();
+const matCache = new Map<string, THREE.Material>();
+
+function extrudeProfile(key: string, pts: [number, number][], width: number): THREE.BufferGeometry {
+  const hit = geoCache.get(key);
+  if (hit) return hit;
+  const shape = new THREE.Shape();
+  pts.forEach(([z, y], i) => (i === 0 ? shape.moveTo(z, y) : shape.lineTo(z, y)));
+  shape.closePath();
+  const bevel = 0.035;
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.1, width - bevel * 2),
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 1,
+  });
+  g.translate(0, 0, -(width - bevel * 2) / 2);
+  g.rotateY(-Math.PI / 2); // 프로파일의 x → 차량 z, 압출 방향 → 차량 x
+  geoCache.set(key, g);
+  return g;
+}
+
+function box(key: string, w: number, h: number, d: number): THREE.BufferGeometry {
+  let g = geoCache.get(key);
+  if (!g) {
+    g = new THREE.BoxGeometry(w, h, d);
+    geoCache.set(key, g);
+  }
+  return g;
+}
+
+function cyl(key: string, rt: number, rb: number, h: number, seg: number): THREE.BufferGeometry {
+  let g = geoCache.get(key);
+  if (!g) {
+    g = new THREE.CylinderGeometry(rt, rb, h, seg);
+    g.rotateZ(Math.PI / 2);
+    geoCache.set(key, g);
+  }
+  return g;
+}
+
+function sharedMat(key: string, make: () => THREE.Material): THREE.Material {
+  let m = matCache.get(key);
+  if (!m) {
+    m = make();
+    matCache.set(key, m);
+  }
+  return m;
+}
+
+export interface CarOptions {
+  lite?: boolean; // 주차된 장애물 차량: 조명/콕핏/미러 생략
+  color?: number;
+  blobTexture?: THREE.Texture;
+}
+
+export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarModel {
+  const lite = !!opts.lite;
+  const L = spec.length;
+  const W = spec.width;
+  const H = spec.height;
+  const hl = L / 2;
+  const sh = SHAPES[spec.visual.body];
+  const color = opts.color ?? spec.color;
+  const clearance = 0.24;
+
+  const root = new THREE.Group();
+  const bodyGroup = new THREE.Group();
+  root.add(bodyGroup);
+
+  const bodyMat = sharedMat(`body:${color}`, () => new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.35 })) as THREE.MeshStandardMaterial;
+  const glassMat = sharedMat('glass', () => new THREE.MeshStandardMaterial({ color: 0x16222e, metalness: 0.7, roughness: 0.08 }));
+  const darkMat = sharedMat('dark', () => new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.8 }));
+  const tireMat = sharedMat('tire', () => new THREE.MeshStandardMaterial({ color: 0x0e0f10, roughness: 0.95 }));
+  const rimMat = sharedMat('rim', () => new THREE.MeshStandardMaterial({ color: 0xb9bec5, metalness: 0.9, roughness: 0.25 }));
+  const plateMat = sharedMat('plate', () => new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 }));
+
+  const belt = sh.belt * (H / 1.45);
+  const z0 = -hl + sh.trunk;
+  const z1 = hl - sh.hood;
+  const z0t = z0 + sh.topRearInset;
+  const z1t = z1 - sh.topFrontInset;
+  const bodyW = W * 0.96;
+  const key = `${spec.id}`;
+
+  // 하부 차체(사이드 프로파일 압출)
+  const lower = extrudeProfile(`${key}:lower`, [
+    [-hl, clearance],
+    [hl, clearance],
+    [hl, belt - 0.26],
+    [hl - 0.22, belt - 0.03],
+    [z1, belt],
+    [z0, belt],
+    [-hl, belt - 0.04],
+  ], bodyW);
+  const lowerMesh = new THREE.Mesh(lower, bodyMat);
+  lowerMesh.castShadow = true;
+  bodyGroup.add(lowerMesh);
+
+  // 캐빈(유리) + 지붕
+  const cabin = extrudeProfile(`${key}:cabin`, [
+    [z0 + 0.02, belt - 0.02],
+    [z1, belt - 0.02],
+    [z1t, H - 0.05],
+    [z0t, H - 0.05],
+  ], W * 0.88);
+  const cabinMesh = new THREE.Mesh(cabin, glassMat);
+  cabinMesh.castShadow = true;
+  bodyGroup.add(cabinMesh);
+  const roof = new THREE.Mesh(box(`${key}:roof`, W * 0.84, 0.06, Math.max(0.2, z1t - z0t + 0.1)), bodyMat);
+  roof.position.set(0, H - 0.04, (z0t + z1t) / 2);
+  roof.castShadow = true;
+  bodyGroup.add(roof);
+
+  // 범퍼
+  for (const s of [1, -1]) {
+    const b = new THREE.Mesh(box(`${key}:bumper`, W * 0.97, 0.2, 0.1), darkMat);
+    b.position.set(0, clearance + 0.12, s * (hl - 0.03));
+    bodyGroup.add(b);
+    const plate = new THREE.Mesh(box(`${key}:plate`, 0.52, 0.12, 0.02), plateMat);
+    plate.position.set(0, clearance + 0.3, s * (hl + 0.04));
+    bodyGroup.add(plate);
+  }
+
+  // 바퀴
+  const rearZ = -hl + spec.rearOverhang;
+  const frontZ = rearZ + spec.wheelbase;
+  const r = spec.wheelRadius;
+  const tw = 0.22;
+  const frontPivots: THREE.Object3D[] = [];
+  const rollers: THREE.Object3D[] = [];
+  for (const [wz, front] of [
+    [frontZ, true],
+    [rearZ, false],
+  ] as [number, boolean][]) {
+    for (const sx of [1, -1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(sx * (W / 2 - tw / 2), r, wz);
+      const roll = new THREE.Group();
+      const tire = new THREE.Mesh(cyl(`${key}:tire`, r, r, tw, 18), tireMat);
+      tire.castShadow = true;
+      const rim = new THREE.Mesh(cyl(`${key}:rim`, r * 0.62, r * 0.62, tw + 0.01, 10), rimMat);
+      roll.add(tire, rim);
+      // 림에 방향 표시용 스포크(회전이 눈에 보이도록)
+      const spoke = new THREE.Mesh(box(`${key}:spoke`, tw + 0.02, r * 1.05, 0.05), rimMat);
+      roll.add(spoke);
+      pivot.add(roll);
+      bodyGroup.add(pivot);
+      rollers.push(roll);
+      if (front) frontPivots.push(pivot);
+    }
+  }
+
+  // 지면 블롭 그림자(그림자 맵을 끈 저사양/실내에서도 접지감 제공)
+  if (opts.blobTexture) {
+    const blob = new THREE.Mesh(
+      new THREE.PlaneGeometry(L * 1.25, W * 1.5),
+      new THREE.MeshBasicMaterial({ map: opts.blobTexture, transparent: true, depthWrite: false, opacity: 0.8 }),
+    );
+    blob.rotation.x = -Math.PI / 2;
+    blob.rotation.z = Math.PI / 2;
+    blob.position.y = 0.02;
+    blob.renderOrder = 1;
+    root.add(blob);
+  }
+
+  let lights: LightMaterials | null = null;
+  let headSpot: THREE.SpotLight | null = null;
+  const cockpit = new THREE.Group();
+  let steeringWheel: THREE.Object3D | null = null;
+
+  const ownMaterials: THREE.Material[] = [];
+
+  if (!lite) {
+    // 거울
+    for (const sx of [1, -1]) {
+      const m = new THREE.Mesh(box(`${key}:mirror`, 0.13, 0.1, 0.2), bodyMat);
+      m.position.set(sx * (W / 2 + 0.05), belt + 0.08, z1 - 0.08);
+      bodyGroup.add(m);
+    }
+    // 등화류 (차량별 재질: 켜짐/꺼짐 갱신)
+    const mk = (c: number, e: number): THREE.MeshStandardMaterial => {
+      const m = new THREE.MeshStandardMaterial({ color: c, emissive: e, emissiveIntensity: 0, roughness: 0.3 });
+      ownMaterials.push(m);
+      return m;
+    };
+    lights = {
+      head: mk(0xfff4d6, 0xfff0c0),
+      tail: mk(0x7a0d12, 0xff1a1a),
+      rev: mk(0xdddddd, 0xffffff),
+      sigL: mk(0xb87400, 0xffa200),
+      sigR: mk(0xb87400, 0xffa200),
+    };
+    const hy = belt - 0.2;
+    for (const sx of [1, -1]) {
+      const hlm = new THREE.Mesh(box(`${key}:head`, W * 0.2, 0.1, 0.06), lights.head);
+      hlm.position.set(sx * W * 0.33, hy, hl - 0.04);
+      const tlm = new THREE.Mesh(box(`${key}:tail`, W * 0.22, 0.09, 0.05), lights.tail);
+      tlm.position.set(sx * W * 0.34, hy, -hl + 0.03);
+      const rvm = new THREE.Mesh(box(`${key}:rev`, W * 0.1, 0.06, 0.05), lights.rev);
+      rvm.position.set(sx * W * 0.19, hy - 0.04, -hl + 0.03);
+      const sig = sx > 0 ? lights.sigL : lights.sigR;
+      const sf = new THREE.Mesh(box(`${key}:sigf`, 0.12, 0.06, 0.05), sig);
+      sf.position.set(sx * (W / 2 - 0.1), hy - 0.1, hl - 0.03);
+      const sr = new THREE.Mesh(box(`${key}:sigr`, 0.12, 0.06, 0.05), sig);
+      sr.position.set(sx * (W / 2 - 0.1), hy - 0.1, -hl + 0.03);
+      bodyGroup.add(hlm, tlm, rvm, sf, sr);
+    }
+    headSpot = new THREE.SpotLight(0xfff2d0, 0, 26, 0.55, 0.5, 1.6);
+    headSpot.position.set(0, 0.7, hl - 0.2);
+    headSpot.target.position.set(0, 0, hl + 8);
+    root.add(headSpot, headSpot.target);
+
+    // 1인칭 콕핏 (차체는 숨기고 대시보드/후드/필러/지붕 안쪽만 표시)
+    const dashMat = sharedMat('dash', () => new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.7 }));
+    const eye = spec.driverEye;
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(W * 0.92, 0.2, 0.42), dashMat);
+    dash.position.set(0, belt - 0.07, z1 - 0.22);
+    cockpit.add(dash);
+    const hood = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, 0.05, sh.hood + 0.05), bodyMat);
+    hood.position.set(0, belt - 0.03, (z1 + hl) / 2);
+    cockpit.add(hood);
+    const beam = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): THREE.Mesh => {
+      const a = new THREE.Vector3(ax, ay, az);
+      const b = new THREE.Vector3(bx, by, bz);
+      const len = a.distanceTo(b);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(t, t, len), dashMat);
+      m.position.copy(a).add(b).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), b.clone().sub(a).normalize());
+      return m;
+    };
+    for (const sx of [1, -1]) {
+      cockpit.add(beam(sx * W * 0.45, belt, z1 - 0.02, sx * W * 0.42, H - 0.06, z1t, 0.05)); // A필러
+      cockpit.add(beam(sx * W * 0.45, belt, z0 + 0.02, sx * W * 0.42, H - 0.06, z0t, 0.06)); // C필러
+    }
+    const headlinerLen = z1t - z0t + 0.1;
+    const headliner = new THREE.Mesh(new THREE.BoxGeometry(W * 0.84, 0.03, headlinerLen), dashMat);
+    headliner.position.set(0, H - 0.075, (z0t + z1t) / 2);
+    cockpit.add(headliner);
+    const wheel = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 20), dashMat);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 10), dashMat);
+    hub.rotation.x = Math.PI / 2;
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.025, 0.02), dashMat);
+    wheel.add(ring, hub, bar);
+    wheel.position.set(eye.x, eye.y - 0.2, eye.z + 0.5);
+    wheel.rotation.x = -0.9; // 운전자 쪽으로 기울임
+    cockpit.add(wheel);
+    steeringWheel = wheel;
+    cockpit.visible = false;
+    root.add(cockpit);
+  }
+
+  const model: CarModel = {
+    root,
+    bodyGroup,
+    cockpit,
+    steeringWheel,
+    frontPivots,
+    rollers,
+    headSpot,
+    lights,
+    setState(s) {
+      for (const p of model.frontPivots) p.rotation.y = s.steer;
+      for (const rl of model.rollers) rl.rotation.x = s.roll;
+      if (model.steeringWheel) model.steeringWheel.userData.steer = s.steer;
+      if (model.steeringWheel) {
+        // 핸들 회전: 로컬 z축 기준 (기울어진 상태에서 자연스럽게)
+        const sw = model.steeringWheel;
+        sw.rotation.set(-0.9, 0, 0);
+        sw.rotateZ(s.steer * 6);
+      }
+      const l = model.lights;
+      if (!l) return;
+      l.head.emissiveIntensity = s.headlights ? 1.6 : 0;
+      l.tail.emissiveIntensity = s.brake ? 2.2 : s.headlights ? 0.7 : 0.08;
+      l.rev.emissiveIntensity = s.reverse ? 2.0 : 0;
+      l.sigL.emissiveIntensity = s.signalLeft ? 2.4 : 0;
+      l.sigR.emissiveIntensity = s.signalRight ? 2.4 : 0;
+      if (model.headSpot) model.headSpot.intensity = s.headlights ? 60 : 0;
+    },
+    dispose() {
+      for (const m of ownMaterials) m.dispose();
+      headSpot?.dispose();
+    },
+  };
+  void opts;
+  return model;
+}
+
+/** GLB 차량 교체: spec.visual.kind === 'glb' 일 때 사용. 실패하면 false (프로시저럴 모델 유지). 규칙은 docs/CAR_MODEL_GUIDE.md 참고. */
+export async function applyGlbVisual(model: CarModel, spec: VehicleSpec): Promise<boolean> {
+  const v = spec.visual;
+  if (v.kind !== 'glb' || !v.url) return false;
+  try {
+    const gltf = await new GLTFLoader().loadAsync(v.url);
+    return attachGlbScene(model, gltf.scene, v.scale ?? 1, v.offset ?? { x: 0, y: 0, z: 0 }, v.rotY ?? 0);
+  } catch (e) {
+    console.warn('[GLB] 차량 모델 로드 실패, 기본 모델 사용:', e);
+    return false;
+  }
+}
+
+export function attachGlbScene(
+  model: CarModel,
+  scene: THREE.Object3D,
+  scale: number,
+  offset: { x: number; y: number; z: number },
+  rotY: number,
+): boolean {
+  const node = scene;
+  node.scale.setScalar(scale);
+  node.position.set(offset.x, offset.y, offset.z);
+  node.rotation.y = rotY;
+  const rollers: THREE.Object3D[] = [];
+  const pivots: THREE.Object3D[] = [];
+  for (const k of ['FL', 'FR', 'RL', 'RR']) {
+    const w = node.getObjectByName(`Wheel_${k}`);
+    if (!w || !w.parent) continue;
+    const pivot = new THREE.Group();
+    pivot.position.copy(w.position);
+    w.position.set(0, 0, 0);
+    w.parent.add(pivot);
+    pivot.add(w);
+    rollers.push(w);
+    if (k[0] === 'F') pivots.push(pivot);
+  }
+  node.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+  });
+  // 기존 프로시저럴 차체 제거
+  for (const c of [...model.bodyGroup.children]) model.bodyGroup.remove(c);
+  model.bodyGroup.add(node);
+  model.rollers.length = 0;
+  model.rollers.push(...rollers);
+  model.frontPivots.length = 0;
+  model.frontPivots.push(...pivots);
+  return true;
+}

@@ -15,6 +15,7 @@ export interface Settings {
   sensorDebug: boolean;
   sensorViewFps: number; // 센서 3D 화면 갱신 FPS (부하 관리)
   rearMirror: boolean; // 후방카메라 좌우 반전(실제 후방카메라처럼)
+  rearPip: boolean; // 후진(R) 시 후방 카메라 보조 화면 자동 표시
   touchControls: 'auto' | 'on' | 'off';
   touchScale: number; // 0.8 ~ 1.4
   vehicleId: string;
@@ -39,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sensorCritical: 0.3,
   sensorDebug: false,
   rearMirror: true,
+  rearPip: true,
   touchControls: 'auto',
   touchScale: 1,
   vehicleId: 'sedan',
