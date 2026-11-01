@@ -51,6 +51,7 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 
 ## 변경 이력 (최근 순)
 
+- v0.4-dev (`feature/pdc-display-v2`): 전자식 기어 레버(브레이크 인터록, `vehicle/transmission.ts` 순수 로직, 키보드/게임패드/레버 모두 `Game.requestShift`), 공유 인포테인먼트(`infotainment/`), 15km/h 자동 전환+내비게이션(`nav/`), 측면 3D 시점(`pdc/viewPolicy.ts`), 미러/실내 화면, GLB 시험 차량. 규칙: **기어는 항상 `requestShift` 를 통해 바꿀 것(인터록 우회 금지)**, 거리(m)는 내비 콘텐츠 외 일반 화면 금지, 수동 변속기는 스텁. 자세한 내용 `docs/V04.md`.
 - v0.3.0-dev (`feature/pdc-display-v2`): Actions 수동화(사용량 최소화), Pages 하위 경로 로컬 검증(`verify:pages`), 전체 UI 재설계(디자인 토큰·슬림 클러스터·사이드 패널 메뉴·3D 쇼룸 차량 미리보기·탭 설정·결과 화면), 주차 보조 패널 재디자인, **필수 조작 버튼을 클러스터로 통합해 주차 보조 중에도 항상 접근 가능**, 화면 크기별 겹침 E2E, 무료 에셋 조사/Blender/Unity/맵 로드맵 문서.
 - v0.2.0-dev (`feature/pdc-display-v2`): 주차 보조 디스플레이(후방/전방카메라 + PDC 탑뷰 + 고정 사이드 버튼 + 동적 가이드라인), R/D 자동 전환 정책, 일반 화면 거리 숫자 제거(디버그 전용), 조명 모드(OFF/미등/하향/상향/AUTO)·DRL·AUTO Leveling(근사), 전방 카메라 모드, 벡터 아이콘 HUD, 엔진 독립 데이터 export. 자세한 내용은 `docs/PDC_DISPLAY.md`.
 - v0.1.0: 최초 플레이 가능 버전. 웹 게임 전체(주행/카메라5/센서/미션8/맵3/UI/설정·기록), Capacitor Android 프로젝트 + APK 워크플로(Actions에서 첫 실행 필요), Pages 워크플로, 단위 테스트 65개, 브라우저 E2E.
