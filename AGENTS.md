@@ -15,7 +15,8 @@
 npm install
 npm run dev          # 개발 서버
 npm run typecheck    # tsc --noEmit
-npm test             # vitest 단위 테스트 (65개)
+npm test             # vitest 단위 테스트
+npm run export:data  # 엔진 독립 JSON 내보내기 (export/)
 npm run build        # 타입검사 + 빌드 → dist/
 node scripts/e2e-smoke.cjs   # 브라우저 통합 테스트 (Playwright 필요, dist 필요)
 npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
@@ -35,11 +36,17 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 8. 설정/기록은 `core/settings.ts` 를 통해서만 저장(예외 안전). 새 설정은 `sanitizeSettings` 범위 보정까지 추가.
 9. 테스트에서 "시간"이 아니라 "게임 상태"를 기다릴 것 (소프트웨어 WebGL 은 느려 게임 시간이 실시간보다 느리게 흐른다).
 10. 비밀(키스토어, 비밀번호)은 커밋 금지. 공개 디버그 키스토어(`android/app/debug.keystore`)만 예외.
+11. **일반 화면에 거리(m) 숫자를 표시하지 말 것.** 거리는 내부 계산 전용이고 숫자는 `sensorDebug` 에서만 DOM 에 넣는다. `PdcState` 에 거리 필드를 추가하지 말 것 (`tests/pdc.test.ts`, e2e 가 검사).
+12. 주차 보조 패널(`#parking-assist`)의 DOM/사이드 버튼은 **고정**이다. 카메라/기어/PDC 상태 변화는 내용만 갱신하고 요소를 재생성하거나 위치를 바꾸지 말 것. 서라운드뷰를 구현하기 전에는 360° 관련 UI/영상을 만들지 말 것.
+13. 주차 보조 표시 규칙은 `pdc/assistPolicy.ts`(순수 로직)에만 둔다. Game 은 결과(`assistOut`)만 소비한다. 규칙을 바꾸면 `tests/pdc.test.ts` 와 `docs/PDC_DISPLAY.md` 표를 함께 수정.
+14. 조명 규칙은 `vehicle/lighting.ts`(순수 로직). AUTO Leveling 은 가속도 기반 근사이며 실제 피치 물리가 아니다 — 이름/문서에서 구분할 것. 구현하지 않은 기능(오토 상향등, AFS)을 완성된 것처럼 표시하지 말 것.
+15. 엔진 독립 데이터(`npm run export:data` → `export/*.json`)는 Unity 이식 대비용이다. 제원/센서/맵 형식을 바꾸면 export 스크립트도 확인.
 
 ## 디렉터리
 
-`src/core`(수학/기하/저장/설정) · `src/vehicle`(spec/physics/carModel) · `src/sensors`(센서/경고음/3D 센서 화면) · `src/mission`(판정/점수) · `src/maps`(맵 데이터+빌더) · `src/game`(루프/입력/카메라) · `src/ui`(HUD/메뉴/미니맵) · `tests` · `scripts` · `android` · `docs`
+`src/core`(수학/기하/저장/설정) · `src/vehicle`(spec/physics/carModel) · `src/sensors`(센서/경고음/3D 센서 화면) · `src/pdc`(주차 보조 디스플레이: 모델/정책/가이드라인/패널) · `src/mission`(판정/점수) · `src/maps`(맵 데이터+빌더) · `src/game`(루프/입력/카메라) · `src/ui`(HUD/메뉴/미니맵) · `tests` · `scripts` · `android` · `docs`
 
 ## 변경 이력 (최근 순)
 
+- v0.2.0-dev (`feature/pdc-display-v2`): 주차 보조 디스플레이(후방/전방카메라 + PDC 탑뷰 + 고정 사이드 버튼 + 동적 가이드라인), R/D 자동 전환 정책, 일반 화면 거리 숫자 제거(디버그 전용), 조명 모드(OFF/미등/하향/상향/AUTO)·DRL·AUTO Leveling(근사), 전방 카메라 모드, 벡터 아이콘 HUD, 엔진 독립 데이터 export. 자세한 내용은 `docs/PDC_DISPLAY.md`.
 - v0.1.0: 최초 플레이 가능 버전. 웹 게임 전체(주행/카메라5/센서/미션8/맵3/UI/설정·기록), Capacitor Android 프로젝트 + APK 워크플로(Actions에서 첫 실행 필요), Pages 워크플로, 단위 테스트 65개, 브라우저 E2E.
