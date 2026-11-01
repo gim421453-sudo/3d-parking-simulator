@@ -234,6 +234,10 @@ export class Hud {
     this.svControls.classList.toggle('hidden', size === 'hidden');
   }
 
+  setParkingOpen(on: boolean): void {
+    this.root.classList.toggle('pdc-open', on);
+  }
+
   setPip(on: boolean): void {
     this.root.classList.toggle('pip', on);
   }
