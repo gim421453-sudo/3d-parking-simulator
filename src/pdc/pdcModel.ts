@@ -85,7 +85,10 @@ export function outlinePoint(spec: VehicleSpec, theta: number, offset: number): 
   const s = Math.abs(Math.sin(theta)) / a;
   const c = Math.abs(Math.cos(theta)) / b;
   const r = Math.pow(Math.pow(s, n) + Math.pow(c, n), -1 / n);
-  return { x: r * Math.sin(theta), z: r * Math.cos(theta) };
+  const x = r * Math.sin(theta);
+  const z = r * Math.cos(theta);
+  // 앞/뒤로 갈수록 살짝 좁아지는 실제 차체 느낌 (구역과 차량 그래픽이 같은 외곽을 공유)
+  return { x: x * (1 - 0.1 * Math.pow(Math.min(1, Math.abs(z) / b), 2.2)), z };
 }
 
 /** 센서 장착 위치의 극각 순으로 차 주변 360°를 분할해 센서별 각도 구간을 정한다. */

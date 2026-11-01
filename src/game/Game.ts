@@ -37,6 +37,7 @@ import {
 } from '../vehicle/physics';
 import { getVehicle, type VehicleSpec } from '../vehicle/spec';
 import { CAMERA_NAMES, CameraRig } from './cameras';
+import { Showroom } from './showroom';
 import { Input, type Action } from './input';
 
 const STEP = 1 / 120;
@@ -54,6 +55,7 @@ export class Game {
   readonly hud: Hud;
   readonly menu: Menu;
   readonly sensorView: SensorView;
+  readonly showroom: Showroom;
   readonly assist = new AssistController();
   readonly assistPanel: AssistPanel;
   assistOut: AssistOutput = { active: false, camera: 'rear', focus: 'rear', cameraMode: 'auto', reason: '' };
@@ -114,6 +116,8 @@ export class Game {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor(0x9ec9ee);
     this.applyQuality();
+    this.showroom = new Showroom(this.renderer);
+    this.showroom.setVehicle(getVehicle(this.settings.vehicleId));
 
     this.hud = new Hud(root, { action: (a) => this.onAction(a), input: this.input });
     this.hud.bindExtra();
@@ -158,12 +162,16 @@ export class Game {
     });
     this.applyTouch();
     this.onResize();
+    // 메뉴 상태에서도 쇼룸(차량 미리보기)을 그리기 위해 루프를 바로 시작한다
+    this.last = performance.now();
+    requestAnimationFrame((t) => this.frame(t));
   }
 
   // ------------------------------------------------------------ 설정/품질
   updateSettings(patch: Partial<Settings>): void {
     const before = this.settings;
     this.settings = sanitizeSettings({ ...before, ...patch });
+    if (before.vehicleId !== this.settings.vehicleId) this.showroom.setVehicle(getVehicle(this.settings.vehicleId));
     saveSettings(this.settings);
     if (before.resolutionScale !== this.settings.resolutionScale) this.applyQuality();
     if (before.quality !== this.settings.quality) this.loadedMapId = ''; // 텍스처 해상도는 맵을 다시 만들 때 적용
@@ -219,6 +227,7 @@ export class Game {
   private onResize(): void {
     this.applyQuality();
     this.rig.setAspect(window.innerWidth, window.innerHeight);
+    this.showroom.setAspect(window.innerWidth, window.innerHeight);
   }
 
   // ------------------------------------------------------------ FPS
@@ -306,10 +315,6 @@ export class Game {
         (coarse ? '화면의 <b>D</b>/<b>R</b> 버튼으로 기어를 바꾸고 가속·브레이크 버튼으로 운전하세요' : '<b>F</b> 전진(D) · <b>R</b> 후진 · <b>W/S</b> 가속·브레이크 · <b>A/D</b> 조향 · <b>Space</b> 주차 브레이크') +
         '<br>초록색으로 표시된 칸에 주차하세요.',
     );
-    if (!this.last) {
-      this.last = performance.now();
-      requestAnimationFrame((t) => this.frame(t));
-    }
   }
 
   private poseNow(): { x: number; z: number; heading: number } {
@@ -465,6 +470,15 @@ export class Game {
     this.last = now;
     this.time += dt;
     this.trackFps(dt);
+    if (this.state === 'menu') {
+      // 메뉴: 차량 쇼룸(3D 미리보기)
+      this.showroom.update(dt);
+      this.canvas.classList.remove('mirror');
+      this.renderer.setScissorTest(false);
+      this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+      this.renderer.render(this.showroom.scene, this.showroom.camera);
+      return;
+    }
     if (!this.car) return;
 
     if (this.state === 'playing') this.simulate(dt);
@@ -803,6 +817,7 @@ export class Game {
     if (this.assistOut.active) {
       this.assistPanel.setPalette(this.settings.pdcPalette);
       this.assistPanel.setGear(car.gear);
+      this.assistPanel.setMission(mh ? `${mh.name} · ${mh.timeText.split(' / ')[0]}` : '자유주행');
       this.assistPanel.setCamera(this.assistOut.camera, this.assistOut.cameraMode);
       this.assistPanel.setToggles(this.settings.sensorEnabled, this.settings.sensorSound);
       this.assistPanel.updateZones(buildPdcState(this.spec, this.sensorSnap, this.settings.sensorEnabled, this.assistOut.focus));

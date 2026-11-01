@@ -79,9 +79,12 @@ async function waitServer(url, tries = 50) {
       c.x = cx - Math.sin(h) * off; c.z = cz - Math.cos(h) * off; c.heading = h; c.v = 0; c.steer = 0; c.gear = gear; c.handbrake = false;
     }, { cx, cz, h, gear });
 
+  // 거리 정확도 검증용: 배치 후 주차 브레이크로 고정 (D 기어 크리프로 차가 굴러가 측정이 흔들리는 것을 방지)
+  const placeHold = async (cx, cz, h, gear) => { await place(cx, cz, h, gear); await g(() => { window.__game.car.handbrake = true; }); };
+
   // ---------- 1. 시작 화면 ----------
   await page.goto(URL);
-  await page.waitForSelector('.screen .card', { timeout: 15000 });
+  await page.waitForSelector('#m-start', { timeout: 15000 });
   await shot('01-main-menu');
   check('시작 화면 표시', (await page.locator('text=게임 시작').count()) > 0);
   check('메뉴 항목(맵/차량/설정/조작법)', (await page.locator('#m-map, #m-car, #m-set, #m-keys').count()) === 4);
@@ -233,7 +236,7 @@ async function waitServer(url, tries = 50) {
   check('닫기 버튼: 수동 닫기', (await assistInfo()).visible === false);
 
   // ---- 거리 숫자 제거 / 디버그에서만 표시 ----
-  await place(-36 + 0.8 + L / 2, 10, Math.PI / 2, 'R'); // 동쪽을 보고 서쪽 벽이 뒤 범퍼 0.8m
+  await placeHold(-36 + 0.8 + L / 2, 10, Math.PI / 2, 'R'); // 동쪽을 보고 서쪽 벽이 뒤 범퍼 0.8m
   await sleep(500);
   await page.keyboard.press('KeyV'); // 센서 화면 크게(작게→크게)
   await sleep(700);
@@ -270,7 +273,7 @@ async function waitServer(url, tries = 50) {
   const z0 = await zoneProbe();
   check('장애물 없는 곳: 모든 PDC 구역 소등 (거짓 경고 없음)', open0.visible && Object.values(z0.levels).every((l) => l === 'none'), JSON.stringify(Object.values(z0.levels).filter((l) => l !== 'none')));
   // 서쪽 벽이 차 앞(heading=-π/2, 앞 범퍼 1.0m)
-  await place(-36 + 1.0 + L / 2, 10, -Math.PI / 2, 'D');
+  await placeHold(-36 + 1.0 + L / 2, 10, -Math.PI / 2, 'D');
   await sleep(700);
   const zF = await zoneProbe();
   const REAR_IDS = ['R-L-out', 'R-L-in', 'R-R-in', 'R-R-out', 'L-rear', 'R-rear'];
@@ -281,13 +284,13 @@ async function waitServer(url, tries = 50) {
   const frontOnly = entries(zF).length > 0 && entries(zF).every(([, v]) => v.dy < 0) && nonLit(zF, REAR_IDS);
   check('앞쪽 벽 → 앞 구역만 점등(뒤 구역 소등), 화면에서도 모두 차량 위쪽', frontOnly, JSON.stringify(Object.keys(zF.lit)));
   // 북향, 서쪽 벽이 오른쪽 옆 (앞뒤 모서리 센서는 옆벽을 비스듬히 감지하는 것이 정상 — 모두 오른쪽에 표시되어야 함)
-  await place(-36 + 0.9 + W / 2, 10, 0, 'D');
+  await placeHold(-36 + 0.9 + W / 2, 10, 0, 'D');
   await sleep(700);
   const zR = await zoneProbe();
   const rightOnly = entries(zR).length > 0 && entries(zR).every(([, v]) => v.dx > 0) && nonLit(zR, LEFT_IDS);
   check('오른쪽 벽 → 점등 구역이 모두 화면 오른쪽, 왼쪽 구역 전부 소등', rightOnly, JSON.stringify(Object.keys(zR.lit)));
   // 남향: 같은 벽이 왼쪽 옆
-  await place(-36 + 0.9 + W / 2, 10, Math.PI, 'D');
+  await placeHold(-36 + 0.9 + W / 2, 10, Math.PI, 'D');
   await sleep(700);
   const zL = await zoneProbe();
   const leftOnly = entries(zL).length > 0 && entries(zL).every(([, v]) => v.dx < 0) && nonLit(zL, RIGHT_IDS);
@@ -295,13 +298,13 @@ async function waitServer(url, tries = 50) {
   // 접근 단계: 색이 초록→노랑→주황→빨강으로 변함 (가장 안쪽 띠 기준)
   const stage = [];
   for (const gap of [2.2, 1.4, 0.8, 0.2]) {
-    await place(-36 + gap + L / 2, 10, -Math.PI / 2, 'D');
+    await placeHold(-36 + gap + L / 2, 10, -Math.PI / 2, 'D');
     await sleep(500);
     stage.push(await g(() => Math.max(...[...document.querySelectorAll('#parking-assist path[data-zone^="F-"]')].map((p) => (p.getAttribute('fill') !== getComputedStyle(document.querySelector('.pa-svg')).color ? 1 : 0)))));
   }
   const lvls = [];
   for (const gap of [2.2, 1.4, 0.8, 0.2]) {
-    await place(-36 + gap + L / 2, 10, -Math.PI / 2, 'D');
+    await placeHold(-36 + gap + L / 2, 10, -Math.PI / 2, 'D');
     await sleep(500);
     lvls.push(await g(() => { const z = window.__game.assistPanel.zoneLevels(); return z['F-L-in']; }));
   }
@@ -316,6 +319,65 @@ async function waitServer(url, tries = 50) {
   // 서라운드 미지원: 가짜 360도 UI 없음
   const surround = await g(() => ({ btn: !!document.querySelector('[data-pa="surround"]'), txt: /360|서라운드|3D ?뷰/.test(document.getElementById('parking-assist').innerText) }));
   check('서라운드뷰 미지원 상태: 가짜 360도 버튼/영상 없음', !surround.btn && !surround.txt, JSON.stringify(surround));
+
+  // ---- 필수 운전 버튼: 주차 보조가 열려 있어도 접근 가능 (PC) ----
+  await place(0, -6, 0, 'R');
+  await sleep(600);
+  const ctl = await g(() => {
+    const names = ['signalLeft', 'hazard', 'signalRight', 'headlights', 'handbrake', 'reset'];
+    const out = {};
+    for (const n of names) {
+      const b = document.querySelector(`#actionbar [data-a="${n}"]`);
+      const r = b.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      out[n] = { visible: r.width > 0 && r.height > 0, reachable: !!top && (top === b || b.contains(top)), h: Math.round(r.height) };
+    }
+    return { out, assist: !document.getElementById('parking-assist').classList.contains('hidden') };
+  });
+  check('PC: 주차 보조 표시 중에도 방향지시/비상등/조명/주차브레이크 버튼이 보이고 가려지지 않음', ctl.assist && Object.values(ctl.out).every((v) => v.visible && v.reachable), JSON.stringify(ctl.out));
+  await page.click('#actionbar [data-a="hazard"]');
+  await sleep(200);
+  const hz1 = await g(() => window.__game.hazard);
+  await page.click('#actionbar [data-a="hazard"]');
+  await page.click('#actionbar [data-a="signalLeft"]');
+  await sleep(200);
+  const sl = await g(() => window.__game.sigLeft);
+  await page.click('#actionbar [data-a="signalLeft"]');
+  await page.click('#actionbar [data-a="handbrake"]');
+  await sleep(200);
+  const hb1 = await g(() => window.__game.car.handbrake);
+  await page.click('#actionbar [data-a="handbrake"]');
+  await sleep(200);
+  const hb0 = await g(() => window.__game.car.handbrake);
+  check('PC: 주차 보조 표시 중 비상등/방향지시등/주차브레이크 버튼이 실제로 동작', hz1 === true && sl === true && hb1 === true && hb0 === false, JSON.stringify({ hz1, sl, hb1, hb0 }));
+
+  // ---- 화면 크기별 겹침 검사 (주차 보조 열림 상태) ----
+  const layoutSizes = [[667, 375], [800, 360], [844, 390], [960, 540], [1024, 600], [1280, 720], [1920, 1080]];
+  for (const [w, h] of layoutSizes) {
+    await page.setViewportSize({ width: w, height: h });
+    await sleep(700);
+    const lay = await g(() => {
+      const rect = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+      const vis = (el) => { const b = el.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
+      const panel = document.getElementById('parking-assist');
+      const pr = rect(panel);
+      const others = [];
+      for (const sel of ['#cluster', '.iconbar', '#minimap-wrap', '#toasts']) { const e = document.querySelector(sel); if (e && vis(e)) others.push({ n: sel, ...rect(e) }); }
+      document.querySelectorAll('#touch .tbtn').forEach((e) => vis(e) && others.push({ n: 'tbtn', ...rect(e) }));
+      const hit = (a, b) => a.x < b.x + b.w - 0.5 && a.x + a.w > b.x + 0.5 && a.y < b.y + b.h - 0.5 && a.y + a.h > b.y + 0.5;
+      const overlaps = others.filter((o) => hit(pr, o)).map((o) => o.n);
+      const acts = [...document.querySelectorAll('#actionbar button')].map((b) => { const r = rect(b); const t = document.elementFromPoint(r.x + r.w / 2, r.y + r.h / 2); return { ok: r.x >= 0 && r.y >= 0 && r.x + r.w <= innerWidth && r.y + r.h <= innerHeight && !!t && (t === b || b.contains(t)), h: r.h, w: r.w }; });
+      const side = [...panel.querySelectorAll('.pa-side button')].map((b) => rect(b).h);
+      return { open: !panel.classList.contains('hidden'), panel: pr, overlaps, inView: pr.x >= 0 && pr.y >= 0 && pr.x + pr.w <= innerWidth && pr.y + pr.h <= innerHeight, acts, side, w: innerWidth, h: innerHeight };
+    });
+    await shot(`36-layout-${w}x${h}`);
+    check(`화면 ${w}×${h}: 주차 보조 패널 표시 + 화면 안`, lay.open && lay.inView, JSON.stringify(lay.panel));
+    check(`화면 ${w}×${h}: 패널이 클러스터/아이콘바/미니맵/터치버튼과 겹치지 않음`, lay.overlaps.length === 0, lay.overlaps.join(','));
+    check(`화면 ${w}×${h}: 필수 조작 버튼 7개 모두 화면 안 + 가려지지 않음`, lay.acts.length === 7 && lay.acts.every((a) => a.ok), JSON.stringify(lay.acts.map((a) => a.ok)));
+    check(`화면 ${w}×${h}: 사이드 버튼 4개 높이 ≥ 36px`, lay.side.length === 4 && lay.side.every((v) => v >= 36), JSON.stringify(lay.side.map(Math.round)));
+  }
+  await page.setViewportSize({ width: 960, height: 540 });
+  await sleep(500);
 
   // ---- 가이드라인: 실제 렌더 카메라 투영, 조향에 따라 변함 ----
   const guideStats = () => g(() => {
@@ -357,15 +419,15 @@ async function waitServer(url, tries = 50) {
   // ---------- 5. 센서 ----------
   await g(() => window.__game.rig.setMode('chase'));
   // 서쪽 벽 안쪽 면 x=-36. 서쪽을 보고(heading=-π/2) 앞 범퍼-벽 간격 1.00m
-  await place(-36 + 1.0 + L / 2, 10, -Math.PI / 2, 'D');
+  await placeHold(-36 + 1.0 + L / 2, 10, -Math.PI / 2, 'D');
   await sleep(500);
   const s1 = await g(() => ({ front: window.__game.sensorSnap.groupMin.front, rear: window.__game.sensorSnap.groupMin.rear }));
   check('센서 전방 거리 = 실제 벽까지 1.00m', s1.front !== null && Math.abs(s1.front - 1.0) < 0.03, JSON.stringify(s1));
-  await place(-36 + 0.9 + W / 2, 10, 0, 'D'); // 북쪽을 봄: 벽은 오른쪽 옆
+  await placeHold(-36 + 0.9 + W / 2, 10, 0, 'D'); // 북쪽을 봄: 벽은 오른쪽 옆
   await sleep(400);
   let s3 = await g(() => ({ f: window.__game.sensorSnap.groupMin.front, l: window.__game.sensorSnap.groupMin.left, r: window.__game.sensorSnap.groupMin.right, b: window.__game.sensorSnap.groupMin.rear }));
   check('차량 회전(북향): 서쪽 벽은 오른쪽 센서가 0.90m로 감지, 왼쪽은 미검출 (앞 모서리 센서는 비스듬히 더 먼 거리)', s3.r !== null && Math.abs(s3.r - 0.9) < 0.03 && s3.l === null && (s3.f === null || s3.f >= 0.9), JSON.stringify(s3));
-  await place(-36 + 0.9 + W / 2, 10, Math.PI, 'D'); // 남향: 벽은 왼쪽 옆
+  await placeHold(-36 + 0.9 + W / 2, 10, Math.PI, 'D'); // 남향: 벽은 왼쪽 옆
   await sleep(400);
   s3 = await g(() => ({ f: window.__game.sensorSnap.groupMin.front, l: window.__game.sensorSnap.groupMin.left, r: window.__game.sensorSnap.groupMin.right }));
   check('차량 회전(남향): 서쪽 벽은 왼쪽 센서가 감지', s3.l !== null && Math.abs(s3.l - 0.9) < 0.03 && s3.r === null, JSON.stringify(s3));
@@ -373,7 +435,7 @@ async function waitServer(url, tries = 50) {
   const meas = [];
   const levels = [];
   for (const gap of gaps) {
-    await place(-36 + gap + L / 2, 10, -Math.PI / 2, 'D');
+    await placeHold(-36 + gap + L / 2, 10, -Math.PI / 2, 'D');
     await sleep(300);
     meas.push(await g(() => window.__game.sensorSnap.groupMin.front));
   }
@@ -387,7 +449,7 @@ async function waitServer(url, tries = 50) {
   const curb = await g(() => ({ f: window.__game.sensorSnap.groupMin.front }));
   check('낮은 연석(15cm)은 센서에 감지되지 않고 뒤쪽 벽만 감지(1.0+)', curb.f === null || curb.f > 1.3, JSON.stringify(curb));
   // 센서 화면 크게 / 디버그
-  await place(-36 + 0.8 + L / 2, 10, -Math.PI / 2, 'D');
+  await placeHold(-36 + 0.8 + L / 2, 10, -Math.PI / 2, 'D');
   await page.keyboard.press('KeyV');
   await sleep(500);
   await g(() => window.__game.updateSettings({ sensorDebug: true }));
@@ -532,7 +594,7 @@ async function waitServer(url, tries = 50) {
   // ---------- 9. 설정 저장 ----------
   await g(() => window.__game.updateSettings({ sensorRange: 3.2, showFps: true, sensorSound: false }));
   await page.reload();
-  await page.waitForSelector('.screen .card');
+  await page.waitForSelector('#m-start');
   const saved = await g(() => ({ r: window.__game.settings.sensorRange, f: window.__game.settings.showFps, s: window.__game.settings.sensorSound }));
   check('설정이 새로고침 후에도 유지', saved.r === 3.2 && saved.f === true && saved.s === false, JSON.stringify(saved));
   await g(() => window.__game.updateSettings({ sensorSound: true, showFps: false, sensorRange: 2.5 }));
@@ -624,6 +686,17 @@ async function waitServer(url, tries = 50) {
     check('모바일(800×360): 주차 보조 패널 표시', rects.visible, JSON.stringify(rects.panel));
     check('모바일: 주차 보조 패널이 터치 버튼/계기판/HUD 버튼과 겹치지 않음', overlaps.length === 0, overlaps.join(','));
     check('모바일: 패널이 화면 안에 완전히 들어옴', rects.panel.x >= 0 && rects.panel.y >= 0 && rects.panel.x + rects.panel.w <= rects.vw && rects.panel.y + rects.panel.h <= rects.vh, JSON.stringify(rects.panel));
+    const mAct = await mp.evaluate(() => ['signalLeft', 'hazard', 'signalRight', 'headlights', 'handbrake', 'reset'].every((n) => { const b = document.querySelector(`#actionbar [data-a="${n}"]`); const r = b.getBoundingClientRect(); const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return r.width >= 38 && r.height >= 38 && !!t && (t === b || b.contains(t)); }));
+    check('모바일: 주차 보조 표시 중 방향지시/비상등/조명/주차브레이크 버튼이 보이고 터치 가능 (숨기지 않음)', rects.visible && mAct);
+    await mp.tap('#actionbar [data-a="hazard"]');
+    await sleep(250);
+    const mHz = await mp.evaluate(() => window.__game.hazard);
+    await mp.tap('#actionbar [data-a="hazard"]');
+    await mp.tap('#actionbar [data-a="handbrake"]');
+    await sleep(250);
+    const mHb = await mp.evaluate(() => window.__game.car.handbrake);
+    await mp.tap('#actionbar [data-a="handbrake"]');
+    check('모바일: 주차 보조 표시 중 비상등/주차브레이크 터치가 실제로 동작', mHz === true && mHb === true, JSON.stringify({ mHz, mHb }));
     check('모바일: 사이드 버튼 높이 ≥ 40px', rects.side.length === 4 && rects.side.every((b) => b.h >= 40), JSON.stringify(rects.side.map((b) => Math.round(b.h))));
     const fpsTxt = await mp.evaluate(() => document.getElementById('fps').textContent);
     check('모바일: FPS 표시', /FPS/.test(fpsTxt), fpsTxt);

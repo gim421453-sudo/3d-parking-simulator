@@ -1,58 +1,79 @@
-/* ---------- 주차 보조 디스플레이 (차량 인포테인먼트 스타일) ---------- */
+/* ---------- 주차 보조 디스플레이 (차량 인포테인먼트 스타일) ----------
+   iDrive 7 상단 시안의 구성(카메라 | PDC 차량 탑뷰 | 우측 고정 사이드 메뉴)을 참고한 독자 디자인.
+   사이드 메뉴 위치/DOM 은 기어·카메라·센서 상태가 바뀌어도 변하지 않는다. */
 #parking-assist {
-  position: absolute; z-index: 10; top: 56px; left: 50%; transform: translateX(-50%);
-  width: min(60vw, 720px); background: #0b1016; color: #e6ecf2;
-  border: 1px solid #2a3542; border-radius: 12px; overflow: hidden;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(255, 255, 255, .03);
-  font-size: 12px; pointer-events: auto;
+  position: absolute; z-index: 10; top: 58px; left: 50%; transform: translateX(-50%);
+  width: min(58vw, 700px); color: var(--txt); font-size: 12px;
+  background: linear-gradient(180deg, rgba(15, 20, 28, .92), rgba(7, 10, 15, .95));
+  border: 1px solid var(--hair-2); border-radius: 16px; overflow: hidden;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
 }
-.pa-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px 5px 12px; background: linear-gradient(#10171f, #0b1016); border-bottom: 2px solid #d9531e; letter-spacing: .08em; }
-.pa-title { font-size: 11px; color: #9fb0c2; text-transform: uppercase; }
-.pa-gear { min-width: 20px; text-align: center; font-weight: 800; color: #fff; background: #26384d; border-radius: 4px; padding: 0 5px; }
-#parking-assist[data-gear="R"] .pa-gear { background: #b3402f; }
-.pa-chip { font-size: 11px; color: #cfd9e3; letter-spacing: 0; }
+.pa-head { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 6px 0 12px; position: relative; }
+.pa-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--brand), rgba(217, 83, 30, .15) 55%, transparent); }
+.pa-p { display: grid; place-items: center; font-size: 15px; color: var(--txt-2); }
+.pa-title { font-size: 10.5px; letter-spacing: .16em; color: var(--txt-2); text-transform: uppercase; }
+.pa-gear { min-width: 18px; height: 17px; display: grid; place-items: center; font-weight: 800; font-size: 11px; color: #fff; background: rgba(143, 184, 255, .22); border-radius: 4px; padding: 0 5px; }
+#parking-assist[data-gear="R"] .pa-gear { background: rgba(229, 55, 47, .5); }
+.pa-chip { font-size: 11px; color: var(--txt-2); }
 .pa-fill { flex: 1; }
-.pa-close { background: transparent; border: 0; color: #9fb0c2; padding: 2px 4px; min-width: 28px; min-height: 28px; font-size: 16px; }
-.pa-close:hover { color: #fff; background: #1a2430; }
+.pa-mission { font-size: 11px; color: var(--txt-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38%; }
+.pa-close { background: transparent; border: 0; color: var(--txt-3); padding: 0; width: 30px; height: 30px; display: grid; place-items: center; font-size: 15px; border-radius: 8px; }
+.pa-close:hover { color: var(--txt); background: rgba(255, 255, 255, .08); }
 
-.pa-body { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr) minmax(0, 0.72fr); align-items: stretch; background: #070a0e; }
-.pa-cam { position: relative; background: #000; aspect-ratio: 16 / 9; align-self: center; transition: opacity .12s; }
+.pa-body { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1.12fr) minmax(0, .8fr); align-items: stretch; }
+.pa-cam { position: relative; background: #000; aspect-ratio: 16 / 9; align-self: center; margin: 0 0 0 0; transition: opacity .12s; box-shadow: inset 0 0 40px rgba(0, 0, 0, .6); }
+.pa-cam::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 28px rgba(0, 0, 0, .55); }
 #parking-assist.pa-switching .pa-cam { opacity: .15; }
 .pa-cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.pa-note { position: absolute; left: 6px; bottom: 4px; font-size: 10px; color: #aeb9c6; background: rgba(0, 0, 0, .45); padding: 1px 6px; border-radius: 4px; }
-.pa-pdc { position: relative; min-height: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 45%, #141c26, #090d12 70%); border-left: 1px solid #1c2530; border-right: 1px solid #1c2530; }
-.pa-svg { position: absolute; left: 4px; right: 4px; top: 4px; bottom: 26px; width: calc(100% - 8px); height: calc(100% - 30px); display: block; }
-.pa-status { position: absolute; left: 0; right: 0; bottom: 0; font-size: 11px; color: #c6d1dc; text-align: center; padding: 3px 4px 4px; line-height: 18px; background: linear-gradient(transparent, rgba(7, 10, 14, .85) 40%); }
-.pa-status[data-level="critical"] { color: #ff6b5e; font-weight: 700; }
+.pa-pdc { position: relative; min-height: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 42%, #18212c 0%, #0b1017 62%, #080b10 100%); }
+.pa-svg { position: absolute; left: 2px; right: 2px; top: 4px; bottom: 22px; width: calc(100% - 4px); height: calc(100% - 26px); display: block; }
+.pa-status { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10.5px; color: var(--txt-2); text-align: center; padding: 3px 4px 4px; line-height: 16px; background: linear-gradient(transparent, rgba(8, 11, 16, .92) 45%); }
+.pa-status[data-level="critical"] { color: #ff7a6e; font-weight: 700; }
 .pa-status[data-level="near"] { color: #f6a14f; }
-.pa-status[data-level="mid"] { color: #f1d13a; }
-.pa-status[data-enabled="false"] { color: #7f8c9a; }
+.pa-status[data-level="mid"] { color: var(--warn); }
+.pa-status[data-enabled="false"] { color: var(--txt-3); }
 
-/* 사이드 버튼: iDrive 7 스타일의 고정 세로 목록 (화면/카메라/기어가 바뀌어도 위치 불변) */
-.pa-side { display: flex; flex-direction: column; background: #0d1319; min-height: 164px; }
-.pa-side button { flex: 1 1 0; min-height: 41px; display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: transparent; border: 0; border-bottom: 1px solid #1c2530; border-radius: 0; color: #dfe7ef; text-align: left; font-size: 12px; }
+/* 우측 고정 사이드 메뉴 */
+.pa-side { display: flex; flex-direction: column; background: rgba(10, 14, 20, .9); border-left: 1px solid var(--hair); min-height: 168px; }
+.pa-side button { flex: 1 1 0; min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 6px 10px 6px 11px; background: transparent; border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; color: var(--txt); text-align: left; position: relative; }
 .pa-side button:last-child { border-bottom: 0; }
-.pa-side button:hover { background: #151e28; }
-.pa-side button:active { background: #1d2936; transform: none; }
-.pa-side i { font-style: normal; font-size: 22px; line-height: 1; color: #eef3f8; flex: none; display: grid; place-items: center; width: 26px; }
-.pa-side span { display: flex; flex-direction: column; line-height: 1.2; }
-.pa-side em { font-style: normal; font-size: 10px; color: #7fb069; }
+.pa-side button::before { content: ''; position: absolute; left: 0; top: 22%; bottom: 22%; width: 2px; border-radius: 2px; background: var(--accent); opacity: 0; }
+.pa-side button:not(.off)[data-pa="sensor"]::before, .pa-side button:not(.off)[data-pa="sound"]::before { opacity: .9; }
+.pa-side button:hover { background: rgba(255, 255, 255, .06); }
+.pa-side button:active { background: rgba(255, 255, 255, .1); transform: none; }
+.pa-side i { font-style: normal; font-size: 20px; line-height: 1; color: var(--txt); flex: none; display: grid; place-items: center; width: 24px; }
+.pa-side span { display: flex; flex-direction: column; line-height: 1.25; font-size: 12px; white-space: nowrap; }
+.pa-side em { font-style: normal; font-size: 10px; color: var(--txt-3); }
+.pa-side button:not(.off) em { color: var(--ok); }
+.pa-side button[data-pa="camera"] em { color: var(--accent); }
+.pa-side button.off i { color: var(--txt-3); }
 .pa-side button.off em { color: #d86b5c; }
-.pa-side button.off i { color: #8795a4; }
 
-/* 주차 보조가 열려 있으면 좌측 정보창(미션/센서 화면)과 중복되는 요소를 숨긴다 */
+/* 주차 보조가 열려 있으면 좌측 미션/작은 센서 화면과 중복되는 요소를 숨긴다. (조작 버튼은 클러스터에 항상 남아 있음) */
 #hud.assist-open #mission-panel, #hud.assist-open .sensor-view.small, #hud.assist-open #sv-controls:not(.large) { display: none; }
 #hud.assist-open #hint, #hud.assist-open #cam-label { display: none; }
-#hud.assist-open #toasts { left: 8px; transform: none; top: 12px; justify-items: start; }
+#hud.assist-open #toasts { left: 10px; transform: none; top: 12px; justify-items: start; }
+#hud.assist-open .toast:not(:last-child) { display: none; } /* 패널과 겹치지 않도록 가장 최근 토스트 1개만 */
 
 @media (max-height: 480px) {
-  #parking-assist { left: 8px; transform: none; top: 56px; width: min(62vw, 520px); font-size: 11px; }
-  .pa-head { padding: 2px 6px 2px 10px; }
-  .pa-side button { padding: 3px 6px; gap: 5px; font-size: 11px; }
-  .pa-side i { font-size: 18px; width: 20px; }
+  #parking-assist { left: 10px; transform: none; top: 8px; width: min(58vw, 464px); font-size: 11px; border-radius: 13px; }
+  .pa-head { height: 26px; }
+  .pa-title { display: none; }
+  .pa-body { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, .95fr); }
+  .pa-side button { min-height: 40px; padding: 3px 7px; gap: 6px; }
+  .pa-side i { font-size: 17px; width: 20px; }
+  .pa-side span { font-size: 11px; }
   .pa-side em { font-size: 9px; }
-  .pa-status { font-size: 10px; line-height: 16px; }
-  .pa-svg { bottom: 22px; height: calc(100% - 26px); }
-  /* 낮은 화면에서는 패널이 열려 있는 동안 하단 액션바와 겹치지 않도록 숨긴다 (키보드/패널 닫기 후 사용) */
-  #hud.assist-open #actionbar { display: none; }
+  .pa-side { min-height: 160px; }
+  .pa-status { font-size: 9.5px; line-height: 14px; }
+  .pa-svg { bottom: 18px; height: calc(100% - 22px); }
+  #hud.assist-open #toasts { top: 200px; left: 10px; transform: none; justify-items: start; }
+}
+/* 좁은 가로 화면(예: 667×375): 우상단 아이콘바와 겹치지 않도록 패널을 아이콘바 아래로 */
+@media (max-height: 480px) and (max-width: 780px) {
+  #parking-assist { top: 50px; }
+  #hud.assist-open #toasts { top: 8px; }
+  #hud.assist-open .toast { max-width: 330px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }

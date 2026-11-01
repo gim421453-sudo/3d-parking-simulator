@@ -4,7 +4,7 @@ import { ICON } from '../ui/icons';
 import type { VehicleSpec } from '../vehicle/spec';
 import type { AssistCamera } from './assistPolicy';
 import { buildGuideLines, guideColor } from './guidelines';
-import { PDC_PALETTES, bandLevel, bandLit, zoneGeometry, type PdcPaletteId, type PdcState, type ZoneBandShape } from './pdcModel';
+import { PDC_PALETTES, bandLevel, bandLit, outlinePoint, zoneGeometry, type PdcPaletteId, type PdcState, type ZoneBandShape } from './pdcModel';
 
 export interface AssistPanelHandlers {
   onToggleSensor(): void;
@@ -51,10 +51,12 @@ export class AssistPanel {
     this.el.setAttribute('aria-label', '주차 보조 디스플레이');
     this.el.innerHTML = `
       <header class="pa-head">
+        <span class="pa-p" aria-hidden="true">${ICON.parkAssist}</span>
         <span class="pa-title">주차 보조</span>
         <span class="pa-gear">R</span>
         <span class="pa-chip">후방 카메라</span>
         <span class="pa-fill"></span>
+        <span class="pa-mission"></span>
         <button type="button" class="pa-close" data-pa="close" aria-label="닫기" title="닫기 (다음 기어 변경까지)">${ICON.close}</button>
       </header>
       <div class="pa-body">
@@ -114,7 +116,7 @@ export class AssistPanel {
   /** 차량(제원) 변경 시 PDC 차량 그래픽과 구역을 다시 만든다 */
   setSpec(spec: VehicleSpec): void {
     this.spec = spec;
-    const M = 1.7;
+    const M = 1.45;
     const vbW = spec.width + M * 2;
     const vbH = spec.length + M * 2;
     const X = (x: number): number => vbW / 2 - x; // 왼쪽(+x) → 화면 왼쪽
@@ -122,32 +124,90 @@ export class AssistPanel {
     this.svg.setAttribute('viewBox', `0 0 ${vbW.toFixed(3)} ${vbH.toFixed(3)}`);
     const hw = spec.width / 2;
     const hl = spec.length / 2;
-    const body = '#' + spec.color.toString(16).padStart(6, '0');
-    let zones = '';
-    this.zonePaths = [];
+    const L = spec.length;
+    const base = '#' + spec.color.toString(16).padStart(6, '0');
     const shapes = zoneGeometry(spec);
-    shapes.forEach((s, i) => {
-      const d = s.points.map((p, k) => `${k ? 'L' : 'M'}${X(p.x).toFixed(3)} ${Y(p.z).toFixed(3)}`).join('') + 'Z';
-      zones += `<path data-zone="${s.sensorId}" data-band="${s.band}" data-group="${s.group}" d="${d}" fill="${PDC_PALETTES[this.palette].idle}" opacity=".55"/>`;
-      void i;
-    });
-    const rr = (x: number, z: number, w: number, h: number, r: number, extra: string): string =>
-      `<rect x="${X(x + w / 2).toFixed(3)}" y="${Y(z + h / 2).toFixed(3)}" width="${w.toFixed(3)}" height="${h.toFixed(3)}" rx="${r}" ${extra}/>`;
+    const zones = shapes
+      .map((s) => {
+        const d = s.points.map((p, k) => `${k ? 'L' : 'M'}${X(p.x).toFixed(3)} ${Y(p.z).toFixed(3)}`).join('') + 'Z';
+        return `<path data-zone="${s.sensorId}" data-band="${s.band}" data-group="${s.group}" d="${d}" fill="${PDC_PALETTES[this.palette].idle}" opacity=".55"/>`;
+      })
+      .join('');
+    // 차체 외곽(구역과 같은 외곽선, offset 0)
+    const outline: string[] = [];
+    for (let i = 0; i < 72; i++) {
+      const p = outlinePoint(spec, (i / 72) * Math.PI * 2, 0);
+      outline.push(`${i ? 'L' : 'M'}${X(p.x).toFixed(3)} ${Y(p.z).toFixed(3)}`);
+    }
+    const bodyPath = outline.join('') + 'Z';
+    const kind = spec.visual.body;
+    // 캐빈 위치(차체 중심 기준 z 비율): [앞유리 바닥, 앞유리 상단(=지붕 앞), 지붕 뒤, 뒷유리 바닥]
+    const C = kind === 'sedan' ? [0.2, 0.07, -0.12, -0.25] : kind === 'hatch' ? [0.19, 0.06, -0.17, -0.31] : [0.21, 0.09, -0.27, -0.34];
+    const poly = (pts: [number, number][], r = 0.08): string => {
+      // 모서리를 둥글게 하는 폴리곤(2차 곡선)
+      const n = pts.length;
+      let d = '';
+      for (let i = 0; i < n; i++) {
+        const p0 = pts[(i + n - 1) % n];
+        const p1 = pts[i];
+        const p2 = pts[(i + 1) % n];
+        const v1 = [p0[0] - p1[0], p0[1] - p1[1]];
+        const v2 = [p2[0] - p1[0], p2[1] - p1[1]];
+        const l1 = Math.hypot(v1[0], v1[1]);
+        const l2 = Math.hypot(v2[0], v2[1]);
+        const a = [p1[0] + (v1[0] / l1) * Math.min(r, l1 / 2), p1[1] + (v1[1] / l1) * Math.min(r, l1 / 2)];
+        const b = [p1[0] + (v2[0] / l2) * Math.min(r, l2 / 2), p1[1] + (v2[1] / l2) * Math.min(r, l2 / 2)];
+        d += `${i ? 'L' : 'M'}${a[0].toFixed(3)} ${a[1].toFixed(3)}Q${p1[0].toFixed(3)} ${p1[1].toFixed(3)} ${b[0].toFixed(3)} ${b[1].toFixed(3)}`;
+      }
+      return d + 'Z';
+    };
+    const P = (x: number, zf: number): [number, number] => [X(x), Y(zf * L)];
+    const wFront = hw * 0.8;
+    const wRoof = hw * 0.74;
+    const wRear = hw * 0.76;
+    const windshield = poly([P(wFront, C[0]), P(-wFront, C[0]), P(-wRoof, C[1]), P(wRoof, C[1])], 0.1);
+    const rearGlass = poly([P(wRoof * 0.98, C[2]), P(-wRoof * 0.98, C[2]), P(-wRear, C[3]), P(wRear, C[3])], 0.1);
+    const roof = poly([P(wRoof, C[1]), P(-wRoof, C[1]), P(-wRoof * 0.98, C[2]), P(wRoof * 0.98, C[2])], 0.06);
     const axleRear = -hl + spec.rearOverhang;
     const axleFront = axleRear + spec.wheelbase;
     let wheels = '';
-    for (const z of [axleRear, axleFront]) for (const sx of [1, -1]) wheels += rr(sx * (hw - 0.02), z, 0.24, spec.wheelRadius * 2.1, 0.06, 'fill="#0b0e12"');
+    for (const z of [axleRear, axleFront]) {
+      for (const sx of [1, -1]) {
+        wheels += `<rect x="${(X(sx * (hw - 0.04)) - 0.13).toFixed(3)}" y="${(Y(z) - spec.wheelRadius * 1.05).toFixed(3)}" width="0.26" height="${(spec.wheelRadius * 2.1).toFixed(3)}" rx="0.07" fill="#07090c" stroke="#1d242d" stroke-width=".02"/>`;
+      }
+    }
+    const mirror = (sx: number): string => `<ellipse cx="${X(sx * (hw + 0.07)).toFixed(3)}" cy="${Y(L * 0.19).toFixed(3)}" rx="0.09" ry="0.13" fill="url(#pa-body)" stroke="#cfd8e1" stroke-width=".015" transform="rotate(${sx * -14} ${X(sx * (hw + 0.07)).toFixed(3)} ${Y(L * 0.19).toFixed(3)})"/>`;
+    const head = (sx: number): string => {
+      const x0 = X(sx * hw * 0.86);
+      const x1 = X(sx * hw * 0.38);
+      const y = Y(hl - 0.045);
+      return `<path d="M${x0.toFixed(3)} ${(y + 0.02).toFixed(3)} Q${((x0 + x1) / 2).toFixed(3)} ${(y - 0.06).toFixed(3)} ${x1.toFixed(3)} ${(y + 0.01).toFixed(3)} L${x1.toFixed(3)} ${(y + 0.06).toFixed(3)} Q${((x0 + x1) / 2).toFixed(3)} ${(y + 0.0).toFixed(3)} ${x0.toFixed(3)} ${(y + 0.09).toFixed(3)}Z" fill="#eaf3ff" opacity=".92"/>`;
+    };
+    const tailY = Y(-hl + 0.07);
     const car = `
       <defs>
-        <linearGradient id="pa-body" x1="0" x2="1"><stop offset="0" stop-color="${body}" stop-opacity=".78"/><stop offset=".5" stop-color="#e9eef3" stop-opacity=".92"/><stop offset="1" stop-color="${body}" stop-opacity=".78"/></linearGradient>
+        <linearGradient id="pa-body" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stop-color="${base}" stop-opacity=".62"/><stop offset=".22" stop-color="${base}"/>
+          <stop offset=".5" stop-color="#f4f8fc" stop-opacity=".95"/><stop offset=".78" stop-color="${base}"/><stop offset="1" stop-color="${base}" stop-opacity=".62"/>
+        </linearGradient>
+        <linearGradient id="pa-glass" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#2b3f55"/><stop offset="1" stop-color="#0d1722"/></linearGradient>
+        <radialGradient id="pa-spec" cx=".5" cy=".3" r=".6"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+        <filter id="pa-blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation=".16"/></filter>
+        <pattern id="pa-grid" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="rgba(255,255,255,.045)" stroke-width=".015"/></pattern>
       </defs>
+      <rect x="0" y="0" width="${vbW.toFixed(3)}" height="${vbH.toFixed(3)}" fill="url(#pa-grid)"/>
+      <ellipse cx="${(vbW / 2).toFixed(3)}" cy="${(vbH / 2 + 0.05).toFixed(3)}" rx="${(hw * 1.12).toFixed(3)}" ry="${(hl * 1.04).toFixed(3)}" fill="#000" opacity=".55" filter="url(#pa-blur)"/>
       ${wheels}
-      ${rr(0, 0, spec.width, spec.length, spec.width * 0.28, 'fill="url(#pa-body)" stroke="#dfe7ee" stroke-width=".035"')}
-      ${rr(0, spec.length * -0.04, spec.width * 0.82, spec.length * 0.44, spec.width * 0.18, 'fill="#17222e" opacity=".92"')}
-      ${rr(0, spec.length * -0.075, spec.width * 0.72, spec.length * 0.26, spec.width * 0.12, 'fill="#cdd6de" opacity=".85"')}
-      ${rr(hw + 0.05, spec.length * 0.17, 0.13, 0.2, 0.04, 'fill="#aab6c2"')}${rr(-hw - 0.05, spec.length * 0.17, 0.13, 0.2, 0.04, 'fill="#aab6c2"')}
-      ${rr(hw * 0.62, hl - 0.07, spec.width * 0.2, 0.1, 0.04, 'fill="#f6f1d8"')}${rr(-hw * 0.62, hl - 0.07, spec.width * 0.2, 0.1, 0.04, 'fill="#f6f1d8"')}
-      ${rr(hw * 0.62, -hl + 0.07, spec.width * 0.2, 0.1, 0.04, 'fill="#c93a3a"')}${rr(-hw * 0.62, -hl + 0.07, spec.width * 0.2, 0.1, 0.04, 'fill="#c93a3a"')}`;
+      <path d="${bodyPath}" fill="url(#pa-body)" stroke="#e7eef5" stroke-opacity=".75" stroke-width=".03"/>
+      <path d="${bodyPath}" fill="url(#pa-spec)"/>
+      <path d="M${X(hw * 0.7).toFixed(3)} ${Y(L * 0.33).toFixed(3)} Q${(vbW / 2).toFixed(3)} ${Y(L * 0.37).toFixed(3)} ${X(-hw * 0.7).toFixed(3)} ${Y(L * 0.33).toFixed(3)}" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width=".02"/>
+      <path d="${rearGlass}" fill="url(#pa-glass)" stroke="#05080c" stroke-width=".02"/>
+      <path d="${roof}" fill="url(#pa-body)" stroke="#05080c" stroke-opacity=".5" stroke-width=".015"/>
+      <path d="${roof}" fill="url(#pa-spec)" opacity=".7"/>
+      <path d="${windshield}" fill="url(#pa-glass)" stroke="#05080c" stroke-width=".02"/>
+      ${mirror(1)}${mirror(-1)}
+      ${head(1)}${head(-1)}
+      <rect x="${X(hw * 0.84).toFixed(3)}" y="${(tailY - 0.03).toFixed(3)}" width="${(hw * 1.68).toFixed(3)}" height="0.06" rx="0.03" fill="#ff3b30" opacity=".88"/>`;
     this.svg.innerHTML = `<g class="pa-zones">${zones}</g><g class="pa-car">${car}</g>`;
     const paths = [...this.svg.querySelectorAll<SVGPathElement>('path[data-zone]')];
     this.zonePaths = paths.map((path, i) => ({ path, shape: shapes[i], key: '' }));
@@ -178,6 +238,11 @@ export class AssistPanel {
   /** 테스트/디버그: 센서 id → 현재 표시 단계 */
   zoneLevels(): Record<string, string> {
     return Object.fromEntries(this.levels);
+  }
+
+  setMission(text: string): void {
+    const el = this.el.querySelector('.pa-mission') as HTMLElement;
+    if (el.textContent !== text) el.textContent = text;
   }
 
   setGear(g: string): void {

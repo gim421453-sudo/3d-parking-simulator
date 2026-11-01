@@ -11,7 +11,8 @@
     "test": "vitest run",
     "cap:sync": "npm run build && cap sync android",
     "e2e": "node scripts/e2e-smoke.cjs",
-    "export:data": "tsx scripts/export-data.ts"
+    "export:data": "tsx scripts/export-data.ts",
+    "verify:pages": "node scripts/verify-subpath.cjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.6.0",

@@ -30,32 +30,27 @@ export interface HudData {
   fpsText: string | null;
 }
 
-const TICKS = 13; // 0~60km/h, 5km/h 간격
+/** 속도 링: 270° 호. 0 ~ RING_MAX km/h 를 채운다. */
+const RING_R = 50;
+const RING_LEN = 2 * Math.PI * RING_R;
+const ARC_LEN = RING_LEN * 0.75;
+const RING_MAX = 50;
 
-function speedoSvg(): string {
+function speedRing(): string {
   let ticks = '';
-  for (let i = 0; i < TICKS; i++) {
-    const a = ((-120 + (240 * i) / (TICKS - 1)) * Math.PI) / 180;
-    const major = i % 2 === 0;
-    const r1 = 82;
-    const r2 = major ? 70 : 75;
-    const x1 = 100 + Math.sin(a) * r1;
-    const y1 = 100 - Math.cos(a) * r1;
-    const x2 = 100 + Math.sin(a) * r2;
-    const y2 = 100 - Math.cos(a) * r2;
-    ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${major ? '#dfe7f1' : '#6c7b8f'}" stroke-width="${major ? 2.5 : 1.5}"/>`;
-    if (major) {
-      const tx = 100 + Math.sin(a) * 58;
-      const ty = 100 - Math.cos(a) * 58 + 4;
-      ticks += `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" fill="#9fb0c5" font-size="11" text-anchor="middle">${i * 5}</text>`;
-    }
+  for (let i = 0; i <= 5; i++) {
+    const a = ((135 + 270 * (i / 5)) * Math.PI) / 180;
+    const r1 = 58;
+    const r2 = i % 5 === 0 || i === 0 ? 54 : 55;
+    ticks += `<line x1="${(60 + Math.cos(a) * r1).toFixed(1)}" y1="${(60 + Math.sin(a) * r1).toFixed(1)}" x2="${(60 + Math.cos(a) * r2).toFixed(1)}" y2="${(60 + Math.sin(a) * r2).toFixed(1)}" stroke="rgba(255,255,255,.28)" stroke-width="1"/>`;
   }
-  return `<svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="94" fill="rgba(10,14,20,.85)" stroke="rgba(255,255,255,.18)" stroke-width="2"/>${ticks}
-  <g id="needle"><line x1="100" y1="100" x2="100" y2="30" stroke="#ff5a4d" stroke-width="3.5" stroke-linecap="round"/></g>
-  <circle cx="100" cy="100" r="7" fill="#dfe7f1"/></svg>`;
+  return `<svg viewBox="0 0 120 120" aria-hidden="true">
+    <circle cx="60" cy="60" r="${RING_R}" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="5" stroke-linecap="round" stroke-dasharray="${ARC_LEN.toFixed(2)} ${RING_LEN.toFixed(2)}" transform="rotate(135 60 60)"/>
+    <circle id="ring-val" cx="60" cy="60" r="${RING_R}" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-dasharray="0 ${RING_LEN.toFixed(2)}" transform="rotate(135 60 60)"/>
+    ${ticks}</svg>`;
 }
 
-const STEER_SVG = `<svg viewBox="0 0 48 48"><g id="swheel"><circle cx="24" cy="24" r="19" fill="none" stroke="#dfe7f1" stroke-width="4"/><circle cx="24" cy="24" r="4" fill="#dfe7f1"/><line x1="5" y1="24" x2="43" y2="24" stroke="#dfe7f1" stroke-width="3"/><line x1="24" y1="24" x2="24" y2="43" stroke="#dfe7f1" stroke-width="3"/><circle cx="24" cy="5" r="2.6" fill="#ff5a4d"/></g></svg>`;
+const STEER_SVG = `<svg viewBox="0 0 48 48" aria-hidden="true"><g id="swheel"><circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="24" cy="24" r="3.6" fill="currentColor"/><path d="M7 24h12M29 24h12M24 28v14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="24" cy="7" r="2.4" fill="#d9531e"/></g></svg>`;
 
 export interface HudHandlers {
   action(a: Action): void;
@@ -66,7 +61,7 @@ export interface HudHandlers {
 export class Hud {
   readonly root: HTMLDivElement;
   readonly minimap: Minimap;
-  private needle!: SVGGElement;
+  private ringVal!: SVGCircleElement;
   private swheel!: SVGGElement;
   private digital!: HTMLElement;
   private gearBtns = new Map<Gear, HTMLButtonElement>();
@@ -76,7 +71,7 @@ export class Hud {
   private fpsEl!: HTMLDivElement;
   private camLabel!: HTMLDivElement;
   private steerText!: HTMLElement;
-  private inds = new Map<string, HTMLElement>();
+  private speedoEl!: HTMLElement;
   private btns = new Map<string, HTMLButtonElement>();
   private hintEl!: HTMLDivElement;
   private minimapWrap!: HTMLDivElement;
@@ -84,13 +79,17 @@ export class Hud {
   private touchEl: HTMLDivElement;
   private lastMissionKey = '';
 
-  constructor(parent: HTMLElement, private h: HudHandlers) {
+  constructor(
+    parent: HTMLElement,
+    private h: HudHandlers,
+  ) {
     this.root = document.createElement('div');
     this.root.id = 'hud';
     this.root.className = 'hidden';
+    const ab = (a: string, title: string, icon: string, extra = ''): string => `<button class="ab" data-a="${a}" title="${title}" aria-label="${title}">${icon}${extra}</button>`;
     this.root.innerHTML = `
       <div id="left-col">
-        <div id="mission-panel" class="panel"></div>
+        <div id="mission-panel" class="glass"></div>
         <div id="sv-controls"></div>
         <div id="sensor-slot"></div>
       </div>
@@ -100,48 +99,43 @@ export class Hud {
       <div id="fps" class="hidden"></div>
       <div id="top-right">
         <div class="iconbar">
-          <button data-a="camera" title="카메라 (C)">${ICON.camera}<span class="t"> 카메라</span></button>
-          <button data-a="sensorView" title="주차 센서 화면 (V)">${ICON.sensor}<span class="t"> 센서화면</span></button>
-          <button data-a="sensorToggle" title="주차 센서 ON/OFF">센서</button>
-          <button data-a="soundToggle" title="경고음 ON/OFF">${ICON.volume}</button>
-          <button data-a="minimap" title="미니맵 (M)">${ICON.map}<span class="t"> 맵</span></button>
-          <button data-a="pause" title="일시정지 (Esc)">${ICON.pause}</button>
-          <button data-a="restart" title="미션 재시작">${ICON.restart}</button>
+          ${ab('camera', '카메라 변경 (C)', ICON.camera)}
+          ${ab('sensorView', '주차 센서 3D 화면 (V)', ICON.sensor)}
+          ${ab('sensorToggle', '주차 센서 켜기/끄기', ICON.parkAssist)}
+          ${ab('soundToggle', '경고음 켜기/끄기', ICON.volume)}
+          ${ab('minimap', '미니맵 (M)', ICON.map)}
+          ${ab('pause', '일시정지 (Esc)', ICON.pause)}
+          ${ab('restart', '미션 재시작', ICON.restart)}
         </div>
-        <div id="minimap-wrap" class="panel"><canvas id="minimap"></canvas></div>
+        <div id="minimap-wrap" class="glass"><canvas id="minimap"></canvas></div>
       </div>
-      <div id="actionbar">
-        <button data-a="assistToggle" title="주차 보조 화면 (B)">${ICON.parkAssist}<span class="t"> 주차보조</span></button>
-        <button data-a="signalLeft" title="좌 방향지시등 (Q)">${ICON.left}<span class="t"> 깜빡이</span></button>
-        <button data-a="hazard" title="비상등 (H)">${ICON.hazard}<span class="t"> 비상등</span></button>
-        <button data-a="signalRight" title="우 방향지시등 (E)"><span class="t">깜빡이 </span>${ICON.right}</button>
-        <button data-a="headlights" title="조명 모드 순환 (L)">${ICON.headlight}<span class="t"> 전조등</span></button>
-        <button data-a="handbrake" title="주차 브레이크 (Space)">${ICON.parkBrake}<span class="t"> 주차브레이크</span></button>
-        <button data-a="reset" title="차량 초기화 (T)">${ICON.reset}<span class="t"> 초기화</span></button>
-      </div>
-      <div id="cluster" class="panel">
-        <div id="steer-box">${STEER_SVG}<b id="steer-text">0°</b><div>조향</div></div>
-        <div id="speedo">${speedoSvg()}<div class="digital"><span id="spd">0</span><small>km/h</small></div></div>
-        <div id="gears">
-          <button data-g="P">P</button><button data-g="R">R</button>
-          <button data-g="N">N</button><button data-g="D">D</button>
+      <div id="cluster" class="glass">
+        <div class="cl-main">
+          <div id="steer-box" title="조향">${STEER_SVG}<b id="steer-text">0°</b></div>
+          <div id="speedo">${speedRing()}<div class="digital"><span id="spd">0</span><small>km/h</small></div></div>
+          <div id="gears" role="group" aria-label="기어">
+            <button data-g="P" aria-label="주차 P">P</button><button data-g="R" aria-label="후진 R">R</button>
+            <button data-g="N" aria-label="중립 N">N</button><button data-g="D" aria-label="전진 D">D</button>
+          </div>
         </div>
-        <div id="indicators">
-          <div class="ind sig" id="ind-l" title="좌 방향지시등">${ICON.left}</div>
-          <div class="ind sig" id="ind-r" title="우 방향지시등">${ICON.right}</div>
-          <div class="ind haz" id="ind-h" title="비상등">${ICON.hazard}</div>
-          <div class="ind head" id="ind-head" title="전조등">${ICON.headlight}</div>
-          <div class="ind brake" id="ind-pb" title="주차 브레이크">P!</div>
-          <div class="ind brake" id="ind-br" title="브레이크">■</div>
+        <div id="actionbar" role="group" aria-label="차량 조작">
+          ${ab('assistToggle', '주차 보조 화면 (B)', ICON.assist)}
+          ${ab('signalLeft', '좌 방향지시등 (Q)', ICON.left)}
+          ${ab('hazard', '비상등 (H)', ICON.hazard)}
+          ${ab('signalRight', '우 방향지시등 (E)', ICON.right)}
+          ${ab('headlights', '조명 모드 순환 (L)', ICON.headlight, '<span class="t">AUTO</span>')}
+          ${ab('handbrake', '주차 브레이크 (Space)', ICON.parkBrake)}
+          ${ab('reset', '차량 초기화 (T)', ICON.reset)}
         </div>
       </div>
       <div id="hint"></div>
       <div id="touch"></div>`;
     parent.appendChild(this.root);
     const q = <T extends Element>(s: string): T => this.root.querySelector(s) as T;
-    this.needle = q('#needle');
+    this.ringVal = q('#ring-val');
     this.swheel = q('#swheel');
     this.digital = q('#spd');
+    this.speedoEl = q('#speedo');
     this.missionEl = q('#mission-panel');
     this.toasts = q('#toasts');
     this.flashEl = q('#flash');
@@ -153,11 +147,10 @@ export class Hud {
     this.sensorSlot = q('#sensor-slot');
     this.touchEl = q('#touch');
     this.minimap = new Minimap(q('#minimap'));
-    for (const id of ['ind-l', 'ind-r', 'ind-h', 'ind-head', 'ind-pb', 'ind-br']) this.inds.set(id, q('#' + id));
     this.root.querySelectorAll<HTMLButtonElement>('#gears button').forEach((b) => {
       const g = b.dataset.g as Gear;
       this.gearBtns.set(g, b);
-      b.addEventListener('click', () => this.h.action(('gear' + (g === 'D' ? 'D' : g)) as Action));
+      b.addEventListener('click', () => this.h.action(('gear' + g) as Action));
     });
     this.root.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => {
       this.btns.set(b.dataset.a!, b);
@@ -166,7 +159,7 @@ export class Hud {
 
     // 센서 화면 크기 조절 버튼
     const svc = q<HTMLDivElement>('#sv-controls');
-    svc.innerHTML = `<button data-sv="small">작게</button><button data-sv="large">크게</button><button data-sv="hidden">숨김</button><button data-sv="reset" title="시점 초기화">↺</button>`;
+    svc.innerHTML = `<button data-sv="small">작게</button><button data-sv="large">크게</button><button data-sv="hidden">숨김</button><button data-sv="reset" title="시점 초기화" aria-label="시점 초기화">${ICON.reset}</button>`;
     this.svControls = svc;
     this.buildTouch();
   }
@@ -192,6 +185,7 @@ export class Hud {
       b.textContent = label;
       if (key === 'left') b.innerHTML = ICON.left;
       if (key === 'right') b.innerHTML = ICON.right;
+      b.setAttribute('aria-label', key === 'left' ? '왼쪽 조향' : key === 'right' ? '오른쪽 조향' : key === 'brake' ? '브레이크' : '가속');
       const down = new Set<number>();
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -267,30 +261,25 @@ export class Hud {
   }
 
   update(d: HudData): void {
-    // 속도계: 0~60 km/h → -120°~120°
-    const a = -120 + (240 * Math.min(60, d.speedKmh)) / 60;
-    this.needle.setAttribute('transform', `rotate(${a.toFixed(1)} 100 100)`);
+    const ratio = Math.min(1, d.speedKmh / RING_MAX);
+    this.ringVal.setAttribute('stroke-dasharray', `${(ARC_LEN * ratio).toFixed(2)} ${RING_LEN.toFixed(2)}`);
+    this.speedoEl.dataset.gear = d.gear;
     this.digital.textContent = String(Math.round(d.speedKmh));
     this.swheel.setAttribute('transform', `rotate(${d.steerWheelDeg.toFixed(1)} 24 24)`);
-    this.steerText.textContent = `${Math.abs(Math.round(d.steerDeg))}°${d.steerDeg > 0.5 ? ' ←' : d.steerDeg < -0.5 ? ' →' : ''}`;
+    this.steerText.textContent = `${Math.abs(Math.round(d.steerDeg))}°`;
     for (const [g, b] of this.gearBtns) b.classList.toggle('cur', g === d.gear);
-    const on = (id: string, v: boolean): void => {
-      this.inds.get(id)?.classList.toggle('on', v);
+    const on = (a: string, v: boolean): void => {
+      this.btns.get(a)?.classList.toggle('on', v);
     };
-    on('ind-l', d.signalLeft);
-    on('ind-r', d.signalRight);
-    on('ind-h', d.hazard);
-    on('ind-head', d.headlights);
-    on('ind-pb', d.handbrake);
-    on('ind-br', d.braking);
-    const hb = this.btns.get('headlights');
-    hb?.classList.toggle('on', d.headlights);
-    const ht = hb?.querySelector('.t');
-    if (ht) ht.textContent = ` 조명 ${d.lightMode}`;
-    this.btns.get('handbrake')?.classList.toggle('on', d.handbrake);
-    this.btns.get('hazard')?.classList.toggle('on', d.hazard);
-    this.btns.get('sensorToggle')?.classList.toggle('on', d.sensorOn);
-    this.btns.get('soundToggle')?.classList.toggle('on', d.soundOn);
+    on('signalLeft', d.signalLeft);
+    on('signalRight', d.signalRight);
+    on('hazard', d.hazard);
+    on('headlights', d.headlights);
+    on('handbrake', d.handbrake);
+    on('sensorToggle', d.sensorOn);
+    on('soundToggle', d.soundOn);
+    const ht = this.btns.get('headlights')?.querySelector('.t');
+    if (ht) ht.textContent = d.lightMode;
     const sb = this.btns.get('soundToggle');
     if (sb) sb.innerHTML = d.soundOn ? ICON.volume : ICON.volumeOff;
     this.camLabel.textContent = d.cameraName;
@@ -307,7 +296,7 @@ export class Hud {
     if (!m) {
       const key = 'free';
       if (this.lastMissionKey !== key) {
-        this.missionEl.innerHTML = `<div class="mname">자유주행</div><div style="color:var(--muted);margin-top:4px">미션 없이 자유롭게 연습합니다.</div>`;
+        this.missionEl.innerHTML = `<div class="mc-head"><span class="mc-name">자유주행</span></div><div class="mc-sub">미션 없이 자유롭게 연습합니다</div>`;
         this.lastMissionKey = key;
       }
       return;
@@ -316,8 +305,8 @@ export class Hud {
     if (key === this.lastMissionKey) return;
     this.lastMissionKey = key;
     this.missionEl.innerHTML =
-      `<div class="mhead"><span class="mname">${m.name}</span><span class="mtime">${m.timeText}</span></div><ul>` +
-      m.checks.map((c) => `<li class="${c.ok === null ? '' : c.ok ? 'ok' : 'bad'}"><span>${c.ok === null ? '·' : c.ok ? '✔' : '✖'} ${c.label}</span><span>${c.value}</span></li>`).join('') +
+      `<div class="mc-head"><span class="mc-name">${m.name}</span><span class="mc-time">${m.timeText}</span></div><ul class="mc-list">` +
+      m.checks.map((c) => `<li><i class="dot ${c.ok === null ? 'na' : c.ok ? 'ok' : 'bad'}"></i><span class="k">${c.label}</span><span class="v">${c.value}</span></li>`).join('') +
       `</ul><div class="bar"><i style="width:${m.holdPct.toFixed(0)}%"></i></div>`;
   }
 }
