@@ -3,6 +3,7 @@ import type { Gear } from '../vehicle/physics';
 import { ICON } from './icons';
 import { Minimap } from './minimap';
 import { WHEEL_LOCK_DEG, WheelModel } from '../core/wheel';
+import { onTap } from './tap';
 import { Shifter, type ShifterHost } from './shifter';
 
 export interface MissionHud {
@@ -157,7 +158,7 @@ export class Hud {
     this.shifter = new Shifter(this.root, this.h.shifter);
     this.root.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => {
       this.btns.set(b.dataset.a!, b);
-      b.addEventListener('click', () => this.h.action(b.dataset.a as Action));
+      onTap(b, () => this.h.action(b.dataset.a as Action));
     });
 
     // 센서 화면 크기 조절 버튼
@@ -175,7 +176,7 @@ export class Hud {
 
   bindExtra(): void {
     this.svControls.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
-      b.addEventListener('click', () => this.onSensorSize(b.dataset.sv as 'small' | 'large' | 'hidden' | 'reset'));
+      onTap(b, () => this.onSensorSize(b.dataset.sv as 'small' | 'large' | 'hidden' | 'reset'));
     });
   }
 
@@ -219,7 +220,7 @@ export class Hud {
     wheel.setAttribute('aria-label', '핸들 (좌우 540°, 총 1080°)');
     wheel.setAttribute('aria-valuemin', String(-WHEEL_LOCK_DEG));
     wheel.setAttribute('aria-valuemax', String(WHEEL_LOCK_DEG));
-    wheel.innerHTML = `<svg viewBox="-50 -50 100 100" aria-hidden="true"><g class="w-rot"><circle r="43" fill="none" stroke="currentColor" stroke-width="7"/><path d="M-43 0H-9M43 0H9M0 8V43" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle r="9" fill="currentColor" opacity=".35"/><path d="M-6 -43H6" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"/></g></svg>`;
+    wheel.innerHTML = `<svg viewBox="-50 -50 100 100" aria-hidden="true"><g class="w-rot"><circle r="43" fill="none" stroke="currentColor" stroke-width="7"/><path d="M-43 0H-9M43 0H9M0 8V43" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle r="9" fill="currentColor" opacity=".35"/><path d="M-6 -43H6" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"/></g><path class="w-fix" d="M-4.5 -50H4.5L0 -45Z" fill="currentColor"/></svg>`;
     let wid: number | null = null;
     const ang = (e: PointerEvent): { deg: number; frac: number } => {
       const r = wheel.getBoundingClientRect();

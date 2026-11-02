@@ -139,3 +139,46 @@ describe('예측선 장애물 직전 절단', () => {
     expect(l2w(0, 0, 0, 1, 1).x).toBeCloseTo(1, 5);
   });
 });
+
+import { buildWarnLines, LINE_MAX_GAP } from '../src/pdc/overlay';
+describe('서라운드/집중뷰 경고선 (외곽을 따라가는 선)', () => {
+  const body = { x: 0, z: 0, rot: 0, hw: spec.width / 2, hl: spec.length / 2 };
+  it('감지가 없으면 선이 없고, 먼 장애물(>1.8m)은 선을 만들지 않는다', () => {
+    expect(buildWarnLines(snapOf([]), body, 3, 0.5)).toEqual([]);
+    expect(buildWarnLines(null, body, 3, 0.5)).toEqual([]);
+    expect(buildWarnLines(snapOf([wall(spec.width / 2 + 2.4 + 0.25, 0, 0.5, 6)]), body, 3, 0.5)).toEqual([]);
+    expect(LINE_MAX_GAP).toBe(1.8);
+  });
+  it('왼쪽 벽: 왼쪽 외곽(+x) 바깥쪽에만 선이 생기고 실제 벽 구간에만 있다', () => {
+    const ls = buildWarnLines(snapOf([wall(spec.width / 2 + 0.8 + 0.25, 0, 0.5, 3)]), body, 3, 0.5);
+    expect(ls.length).toBeGreaterThan(2);
+    for (const l of ls) {
+      expect(l.id.startsWith('wl-L')).toBe(true);
+      for (const p of [l.a, l.b]) {
+        expect(p.x).toBeGreaterThan(spec.width / 2);
+        expect(Math.abs(p.z)).toBeLessThanOrEqual(1.6); // 벽(길이 3m) 구간 + 센서 분해능
+      }
+    }
+  });
+  it('가까울수록 단계가 높고 선이 차체에 가깝다 (간격 비례 오프셋)', () => {
+    const rank = { far: 1, mid: 2, near: 3, critical: 4 } as const;
+    const near = buildWarnLines(snapOf([wall(spec.width / 2 + 0.3 + 0.25, 0, 0.5, 4)]), body, 3, 0.5);
+    const far = buildWarnLines(snapOf([wall(spec.width / 2 + 1.5 + 0.25, 0, 0.5, 4)]), body, 3, 0.5);
+    expect(Math.max(...near.map((l) => rank[l.level]))).toBeGreaterThan(Math.max(...far.map((l) => rank[l.level])));
+    const off = (ls: typeof near) => Math.min(...ls.map((l) => l.a.x - spec.width / 2));
+    expect(off(near)).toBeLessThan(off(far));
+  });
+  it('뒤 벽은 뒤쪽(-z), 앞 벽은 앞쪽(+z) 외곽에', () => {
+    const b = buildWarnLines(snapOf([wall(0, -(spec.length / 2 + 0.7 + 0.25), 4, 0.5)]), body, 3, 0.5);
+    expect(b.length).toBeGreaterThan(0);
+    expect(b.some((l) => l.id.startsWith('wl-B'))).toBe(true);
+    for (const l of b) for (const p of [l.a, l.b]) expect(p.z).toBeLessThan(-spec.length / 2 + 0.7); // 뒤쪽 반 (모서리 쪽 측면 선 포함)
+    const f = buildWarnLines(snapOf([wall(0, spec.length / 2 + 0.7 + 0.25, 4, 0.5)]), body, 3, 0.5);
+    expect(f.some((l) => l.id.startsWith('wl-F'))).toBe(true);
+    for (const l of f) for (const p of [l.a, l.b]) expect(p.z).toBeGreaterThan(spec.length / 2 - 0.7);
+  });
+  it('작은 기둥도 선이 생긴다', () => {
+    const ls = buildWarnLines(snapOf([wall(spec.width / 2 + 0.6 + 0.25, 0.3, 0.5, 0.5)]), body, 3, 0.5);
+    expect(ls.length).toBeGreaterThan(0);
+  });
+});

@@ -93,7 +93,7 @@
 }
 /* 좁은 가로 화면(예: 667×375): 우상단 아이콘바와 겹치지 않도록 패널을 아이콘바 아래로 */
 @media (max-height: 480px) and (max-width: 780px) {
-  #parking-assist { top: 50px; }
+  #parking-assist { top: 50px; left: 164px; } /* 큰 핸들(왼쪽 아래)과 겹치지 않도록 오른쪽으로 */
   #hud.assist-open #toasts { top: 8px; }
   #hud.assist-open .toast { max-width: 330px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
@@ -107,3 +107,11 @@
   #parking-assist[data-layout="rear"] .pa-body { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, .8fr); }
   #parking-assist[data-layout="rear"] .pa-side { min-height: 120px; }
 }
+
+/* 오른쪽: 실제 3D 서라운드뷰(캔버스) + 경고선. 서라운드 미지원 차량(M4)은 기존 센서 PDC(SVG) */
+.pa-sur-canvas, .pa-sur-ov { position: absolute; left: 0; right: 0; top: 0; bottom: 22px; width: 100%; height: calc(100% - 22px); display: block; }
+.pa-sur-ov { pointer-events: none; }
+#parking-assist[data-surround="true"] .pa-svg { display: none; }
+#parking-assist:not([data-surround="true"]) .pa-sur-canvas, #parking-assist:not([data-surround="true"]) .pa-sur-ov { display: none; }
+#parking-assist[data-content="nav"] .pa-sur-canvas, #parking-assist[data-content="nav"] .pa-sur-ov { display: none; }
+@media (max-height: 480px) { .pa-sur-canvas, .pa-sur-ov { bottom: 18px; height: calc(100% - 18px); } }

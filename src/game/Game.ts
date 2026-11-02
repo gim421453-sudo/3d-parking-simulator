@@ -27,7 +27,7 @@ import { WHEEL_LOCK_DEG } from '../core/wheel';
 import { ceilingAbove, groundAt, levelAt } from '../maps/terrain';
 import { buildTowerVisual, type TowerVisual } from '../maps/towerBuilder';
 import { chooseBeepTarget } from '../sensors/beepPlan';
-import { buildBoundaryCells, buildCameraTiles } from '../pdc/overlay';
+import { buildCameraTiles, buildWarnLines } from '../pdc/overlay';
 import { guideCutDistance } from '../pdc/guidelines';
 import { pointToObbGap, RiskTracker, type RiskOutput } from '../pdc/risk';
 import { frameView } from '../pdc/framing';
@@ -36,7 +36,7 @@ import { segmentBlocked } from '../pdc/visibility';
 import { allowedViews, autoViewAllowed, cameraCycle, clampView, restrictAssist } from '../pdc/capabilities';
 import { ASSIST_VIEW_NAME, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
 import { InfotainmentController, type InfoOutput, type InfoSettings } from '../infotainment/controller';
-import { drawCenterScreen, drawCluster } from '../infotainment/cabinScreens';
+import { drawCenterScreen, drawCluster, type CabinHit } from '../infotainment/cabinScreens';
 import { Navigator, type NavState } from '../nav/navigator';
 import { drawNavMap } from '../nav/navView';
 import { SHIFTER_ORDER } from '../ui/shifter';
@@ -81,6 +81,7 @@ export class Game {
   private beepGroup: 'front' | 'rear' | 'left' | 'right' = 'rear';
   private risk = new RiskTracker();
   riskOut: RiskOutput | null = null;
+  private cabinHits: CabinHit[] = [];
   private tower: TowerVisual | null = null;
   private overlayView = '';
   private latch: LocalFrame | null = null;
@@ -96,7 +97,7 @@ export class Game {
   readonly info = new InfotainmentController();
   readonly nav = new Navigator();
   readonly viewPolicy = new ViewPolicy();
-  infoOut: InfoOutput = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '' };
+  infoOut: InfoOutput = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '', expanded: false, forcedContent: null };
   viewOut: { view: AssistView; auto: boolean; reason: string } = { view: 'rear', auto: false, reason: '' };
   navState: NavState = this.nav.state;
   pdcState: PdcState | null = null;
@@ -209,6 +210,10 @@ export class Game {
     this.input.onAction = (a) => this.onAction(a);
     this.input.attach();
     this.rig.bind(canvas);
+    canvas.addEventListener('pointerdown', (e) => {
+      // 1인칭에서 실내 디스플레이를 눌렀으면 그 동작을 실행 (다른 UI 위에서 시작한 입력은 캔버스에 오지 않는다)
+      if (this.handleCabinPointer(e.clientX, e.clientY)) e.preventDefault();
+    });
     window.addEventListener('resize', () => this.onResize());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.state === 'playing') this.pause();
@@ -353,7 +358,7 @@ export class Game {
     this.assistOut = { active: false, camera: 'rear', manualView: null, focus: 'rear', cameraMode: 'auto', reason: '' };
     this.info.reset('P');
     this.viewPolicy.reset();
-    this.infoOut = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '' };
+    this.infoOut = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '', expanded: false, forcedContent: null };
     this.viewOut = { view: 'rear', auto: false, reason: '' };
     this.nav.setMap(map);
     this.destIndex = 0;
@@ -572,13 +577,18 @@ export class Game {
         this.startRun();
         break;
       case 'assistToggle':
-        this.hud.toast(this.info.toggle() ? '인포테인먼트 표시' : '인포테인먼트 숨김');
+        if (this.rig.mode === 'driver') {
+          // 1인칭: 대시보드 디스플레이가 기본. B/버튼으로 확대 화면을 직접 열고 닫는다
+          this.info.setExpanded(!this.info.isExpanded);
+          if (!this.info.isExpanded) this.info.hide();
+          this.hud.toast(this.info.isExpanded ? '확대 화면' : '확대 화면 닫음');
+        } else this.hud.toast(this.info.toggle() ? '인포테인먼트 표시' : '인포테인먼트 숨김');
         break;
       case 'assistClose':
         this.info.hide();
         break;
       case 'assistCamera': {
-        const order = cameraCycle(this.spec.assist);
+        const order = this.gearCameraCycle();
         if (order.length === 0) {
           this.hud.toast('이 차량은 후방카메라 전용입니다');
           break;
@@ -898,7 +908,10 @@ export class Game {
     this.assistPanel.setContent(this.infoOut.content);
     this.canvas.classList.toggle('mirror', this.rig.mode === 'rear' && this.settings.rearMirror);
     // 후방/전방/3D 시점 카메라는 "보이는 곳(플로팅 또는 1인칭 실내 화면)"이 있을 때만 렌더링한다 (불필요한 렌더링 중단)
-    if (parking && (open || firstPerson)) this.renderAssist(dt, pose);
+    if (parking && (open || firstPerson)) {
+      this.renderAssist(dt, pose);
+      if (this.spec.assist.virtualSurround3D) this.renderSurround(dt, pose);
+    }
     if (!parking && (open || firstPerson)) this.drawNav(dt, pose);
     if (firstPerson) {
       this.drawCabin(dt);
@@ -939,6 +952,60 @@ export class Game {
 
   private currentLighting() {
     return computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor });
+  }
+
+  /** 수동 카메라 순환: 현재 진행 방향 카메라가 가장 먼저 (R 에서 전방카메라가 먼저 나오는 일이 없게) */
+  /** 1인칭: 실내 센터 디스플레이(3D 평면)를 마우스/터치로 눌렀을 때 — 레이캐스트 → UV → 캔버스 좌표 → 같은 Action 경로 */
+  handleCabinPointer(clientX: number, clientY: number): string | null {
+    if (this.rig.mode !== 'driver' || !this.model?.cabin || this.state !== 'playing') return null;
+    const r = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -(((clientY - r.top) / r.height) * 2 - 1));
+    const rc = new THREE.Raycaster();
+    this.rig.camera.updateMatrixWorld();
+    rc.setFromCamera(ndc, this.rig.camera);
+    const hit = rc.intersectObject(this.model.cabin.center.mesh, false)[0];
+    if (!hit || !hit.uv) return null;
+    const cv = this.model.cabin.center.canvas;
+    const px = hit.uv.x * cv.width;
+    const py = (1 - hit.uv.y) * cv.height;
+    // 메뉴 항목이 먼저, 그 다음 메인 영역(확대)
+    const sorted = [...this.cabinHits].sort((a, b) => (a.action === 'expand' ? 1 : 0) - (b.action === 'expand' ? 1 : 0));
+    const h = sorted.find((q) => px >= q.x && px <= q.x + q.w && py >= q.y && py <= q.y + q.h);
+    if (!h) return null;
+    switch (h.action) {
+      case 'sensor':
+        this.onAction('sensorToggle');
+        break;
+      case 'sound':
+        this.onAction('soundToggle');
+        break;
+      case 'camera':
+        this.onAction('assistCamera');
+        break;
+      case 'settings':
+        this.pause();
+        this.menu.showSettings(() => this.menu.showPause());
+        break;
+      case 'content': {
+        const f = this.info.toggleContent(this.infoOut.content);
+        this.hud.toast(f ? `실내 화면: ${f === 'parking' ? '주차 보조' : '내비게이션'}` : '실내 화면: 자동');
+        break;
+      }
+      case 'expand':
+        this.info.setExpanded(!this.info.isExpanded);
+        this.hud.toast(this.info.isExpanded ? '확대 화면 (닫기: × 또는 B)' : '확대 화면 닫음');
+        break;
+    }
+    return h.action;
+  }
+
+  private gearCameraCycle(): ('auto' | AssistView)[] {
+    const base = cameraCycle(this.spec.assist);
+    if (!base.length) return base;
+    const rev = this.car.gear === 'R';
+    const pref: AssistView[] = rev ? ['rear', 'left', 'right', 'topRear', 'topFront', 'front'] : ['front', 'left', 'right', 'topFront', 'topRear', 'rear'];
+    const allowed = new Set(base);
+    return ['auto', ...pref.filter((v) => allowed.has(v))];
   }
 
   private allHits(): { x: number; z: number }[] {
@@ -995,7 +1062,7 @@ export class Game {
     const r = this.riskOut;
     if (!r) return undefined;
     const pick = <T,>(f: (g: RiskOutput['groups'][keyof RiskOutput['groups']]) => T): Record<'front' | 'rear' | 'left' | 'right', T> => ({ front: f(r.groups.front), rear: f(r.groups.rear), left: f(r.groups.left), right: f(r.groups.right) });
-    return { threat: pick((g) => g.threat), veryClose: pick((g) => g.veryClose), pillar: pick((g) => g.pillar), narrow: r.narrow, sideBlocked: { ...this.sideBlocked } };
+    return { threat: pick((g) => g.threat), veryClose: pick((g) => g.veryClose), pillar: pick((g) => g.pillar), narrow: r.narrow, gap: pick((g) => g.gap), sideBlocked: { ...this.sideBlocked } };
   }
 
   private sideObservation(snap: SensorSnapshot): SideObservation {
@@ -1132,7 +1199,8 @@ export class Game {
     const rng = this.settings.sensorRange;
     const crt = this.settings.sensorCritical;
     // 전/후방 카메라: 가로 6칸 독립 타일, 3D/탑뷰: 차량 근처 장애물 경계 셀 (같은 센서 스냅샷 사용)
-    let zones = !this.settings.sensorEnabled ? [] : isCar ? buildCameraTiles(this.sensorSnap, this.spec, body, view === 'rear' ? 'rear' : 'front', rng, crt) : buildBoundaryCells(this.sensorSnap, body, rng, crt);
+    let zones = !this.settings.sensorEnabled || !isCar ? [] : buildCameraTiles(this.sensorSnap, this.spec, body, view === 'rear' ? 'rear' : 'front', rng, crt);
+    const warnLines = !this.settings.sensorEnabled || isCar ? [] : buildWarnLines(this.sensorSnap, body, rng, crt);
     if (!isCar && zones.length) {
       const cbody = this.carBody();
       zones = zones.filter((z) => {
@@ -1147,10 +1215,58 @@ export class Game {
       steer: this.car.steer,
       dir: this.assistOut.focus === 'rear' ? -1 : 1,
       mirror,
-      showGuides: this.settings.assistGuides && view !== 'left' && view !== 'right',
+      showGuides: this.settings.assistGuides,
       zones,
-      guideMax: guideCutDistance(this.spec, this.car.steer, this.assistOut.focus === 'rear' ? -1 : 1, pose, this.colliders, this.spec.sensorHeight),
+      lines: warnLines,
+      groundY: this.map.terrain ? (x: number, z: number) => groundAt(this.map.terrain!, x, z, pose.y ?? 0, 1.2) ?? (pose.y ?? 0) : undefined,
+      guideMax: guideCutDistance(this.spec, this.car.steer, this.assistOut.focus === 'rear' ? -1 : 1, pose, this.colliders, (pose.y ?? 0) + this.spec.sensorHeight),
     });
+  }
+
+  private surAcc = 99;
+  /** 오른쪽 3D 서라운드뷰: 차량 중심 위에 고정된 카메라로 실제 장면을 렌더링하고, 외곽을 따라가는 경고선을 얹는다 */
+  private renderSurround(dt: number, pose: { x: number; z: number; heading: number; y?: number }): void {
+    this.surAcc += dt;
+    const fps = Math.max(8, this.settings.assistCameraFps * 0.6);
+    const dims = this.assistPanel.surroundSize();
+    const cam = this.rig.surroundCamera;
+    const tan = Math.tan((cam.fov * Math.PI) / 360);
+    const aspect = dims.w / dims.h;
+    const L = this.spec.length;
+    const W = this.spec.width;
+    // 차량 제원만으로 정한 고정 구도 (장애물/센서에 따라 움직이지 않음)
+    const H = Math.min(18, Math.max(7, Math.max((L + 5) / 2 / tan, (W + 4.4) / 2 / (tan * aspect))));
+    const gy = pose.y ?? 0;
+    cam.aspect = aspect;
+    cam.up.set(Math.sin(pose.heading), 0, Math.cos(pose.heading));
+    cam.position.set(pose.x, gy + H, pose.z);
+    cam.lookAt(pose.x, gy, pose.z);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+    if (this.surAcc >= 1 / fps) {
+      this.surAcc = 0;
+      const pr = this.renderer.getPixelRatio();
+      const vw = Math.min(dims.w, Math.floor(window.innerWidth));
+      const vh = Math.min(dims.h, Math.floor(window.innerHeight));
+      const m = this.model!;
+      const prevBody = m.bodyGroup.visible;
+      const prevCockpit = m.cockpit.visible;
+      m.bodyGroup.visible = true;
+      m.cockpit.visible = false;
+      const hidden: THREE.Object3D[] = [];
+      if (this.tower) for (const d of this.tower.decks) if (d.y > gy + 0.6 && d.mesh.visible) { d.mesh.visible = false; hidden.push(d.mesh); }
+      this.renderer.setScissorTest(true);
+      this.renderer.setViewport(0, 0, vw, vh);
+      this.renderer.setScissor(0, 0, vw, vh);
+      this.renderer.render(this.scene, cam);
+      this.renderer.setScissorTest(false);
+      for (const o of hidden) o.visible = true;
+      m.bodyGroup.visible = prevBody;
+      m.cockpit.visible = prevCockpit;
+      this.assistPanel.blitSurround(this.canvas, 0, this.canvas.height - Math.round(vh * pr), Math.round(vw * pr), Math.round(vh * pr));
+    }
+    const lines = this.settings.sensorEnabled ? buildWarnLines(this.sensorSnap, obbOf(this.car, this.spec), this.settings.sensorRange, this.settings.sensorCritical) : [];
+    this.assistPanel.drawWarnLines({ camera: cam, lines, y: gy });
   }
 
   /** 내비게이션 지도를 캔버스에 그린다 (10Hz) */
@@ -1171,13 +1287,15 @@ export class Game {
     this.cabinAcc = 0;
     const c = this.car;
     const slotName = this.navState.destination?.id ?? '';
-    drawCenterScreen(cab.center.ctx, cab.center.canvas.width, cab.center.canvas.height, {
+    this.cabinHits = drawCenterScreen(cab.center.ctx, cab.center.canvas.width, cab.center.canvas.height, {
       content: this.infoOut.content,
       cam: this.assistPanel.cam,
       guide: this.assistPanel.guide,
       navCanvas: this.assistPanel.navCanvas,
       spec: this.spec,
       pdc: this.pdcState,
+      surround: this.spec.assist.virtualSurround3D ? this.assistPanel.sur : null,
+      surroundOv: this.spec.assist.virtualSurround3D ? this.assistPanel.surOv : null,
       palette: this.settings.pdcPalette,
       viewName: ASSIST_VIEW_NAME[this.viewOut.view],
       gear: c.gear,

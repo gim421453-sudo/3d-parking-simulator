@@ -12,6 +12,9 @@ export interface CenterData {
   navCanvas: HTMLCanvasElement | null;
   spec: VehicleSpec;
   pdc: PdcState | null;
+  /** 3D 서라운드뷰 캔버스(+경고선) — 있으면 센서 PDC 대신 사용 */
+  surround?: HTMLCanvasElement | null;
+  surroundOv?: HTMLCanvasElement | null;
   palette: PdcPaletteId;
   viewName: string;
   gear: string;
@@ -24,17 +27,30 @@ export interface CenterData {
   rearOnly?: boolean;
 }
 
+/** 실내 디스플레이에서 눌러 조작할 수 있는 영역 (캔버스 좌표) */
+export type CabinAction = 'sensor' | 'sound' | 'camera' | 'settings' | 'content' | 'expand';
+export interface CabinHit {
+  action: CabinAction;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+const MENU_ACTION: Record<string, CabinAction> = { '주차 보조': 'sensor', '경고음': 'sound', '카메라 화면': 'camera', '설정': 'settings', '화면 전환': 'content' };
+
 const MENU = (d: CenterData): [string, string][] => {
   const m: [string, string][] = [
     ['주차 보조', d.sensorOn ? '켜짐' : '꺼짐'],
     ['경고음', d.soundOn ? '켜짐' : '꺼짐'],
     ['카메라 화면', d.cameraMode],
+    ['화면 전환', d.content === 'parking' ? '→ 내비' : '→ 주차'],
     ['설정', ''],
   ];
   return d.rearOnly ? m.filter((x) => x[0] !== '카메라 화면') : m;
 };
 
-export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: number, d: CenterData): void {
+export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: number, d: CenterData): CabinHit[] {
+  const hits: CabinHit[] = [];
   ctx.fillStyle = '#070a0e';
   ctx.fillRect(0, 0, w, h);
   // 상단 라인
@@ -73,7 +89,10 @@ export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: nu
   ctx.fillStyle = '#0b1017';
   ctx.fillRect(mainW, top, midW, bh);
   if (d.content === 'parking') {
-    drawPdcCanvas(ctx, mainW, top, midW, bh - 18, d.spec, d.pdc, d.palette);
+    if (d.surround && d.surround.width > 0) {
+      ctx.drawImage(d.surround, mainW, top, midW, bh - 18);
+      if (d.surroundOv) ctx.drawImage(d.surroundOv, mainW, top, midW, bh - 18);
+    } else drawPdcCanvas(ctx, mainW, top, midW, bh - 18, d.spec, d.pdc, d.palette);
     ctx.fillStyle = '#c6d1dc';
     ctx.font = `${Math.round(h * 0.055)}px sans-serif`;
     ctx.textAlign = 'center';
@@ -97,6 +116,7 @@ export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: nu
   const ih = bh / items.length;
   items.forEach(([a, b], i) => {
     const y = top + i * ih;
+    hits.push({ action: MENU_ACTION[a], x: mainW + midW, y, w: sideW, h: ih });
     ctx.strokeStyle = 'rgba(255,255,255,.08)';
     ctx.beginPath();
     ctx.moveTo(mainW + midW, y);
@@ -110,6 +130,8 @@ export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: nu
     ctx.font = `${Math.round(h * 0.05)}px sans-serif`;
     ctx.fillText(b, mainW + midW + 10, y + ih * 0.72);
   });
+  hits.push({ action: 'expand', x: 0, y: top, w: mainW + midW, h: bh });
+  return hits;
 }
 
 export interface ClusterData {

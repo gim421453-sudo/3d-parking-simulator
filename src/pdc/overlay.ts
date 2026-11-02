@@ -154,3 +154,74 @@ export function buildBoundaryCells(snap: SensorSnapshot | null, body: Obb, range
   }
   return out;
 }
+
+// ---------------------------------------------------------------- 서라운드/집중 뷰: 차량 외곽을 따라가는 경고선
+export const LINE_BIN = 0.4; // 외곽선을 나누는 구간 길이 (m)
+export const LINE_MAX_GAP = 1.8;
+export interface WarnLine {
+  id: string;
+  level: Exclude<ProximityLevel, 'none'>;
+  a: { x: number; z: number };
+  b: { x: number; z: number };
+  hits: number;
+  colliderIds: string[];
+}
+
+/**
+ * 실제 센서 히트점만으로 차량 외곽(직사각형)을 따라 놓이는 짧은 경고선(띠)을 만든다. (사각형 셀/세로 면 대신)
+ * - 각 히트점의 최근접 외곽 변과 변 위 위치(0.4m 구간)로 묶고, 구간마다 가장 가까운 간격으로 색 단계를 정한다.
+ * - 선은 차체 외곽에서 간격에 비례해(0.10 + gap×0.22 m) 바깥쪽에 놓여 접근할수록 차체에 붙는다.
+ * - 히트가 없는 구간, 1.8m 보다 먼 장애물은 만들지 않는다.
+ */
+export function buildWarnLines(snap: SensorSnapshot | null, body: Obb, range: number, critical: number): WarnLine[] {
+  if (!snap) return [];
+  const hw = body.hw;
+  const hl = body.hl;
+  const bins = new Map<string, { edge: 'F' | 'B' | 'L' | 'R'; k: number; gap: number; hits: number; ids: Set<string> }>();
+  for (const r of snap.readings) {
+    for (const h of r.hits) {
+      const gap = pointToObbGap(h.x, h.z, body);
+      if (gap > LINE_MAX_GAP || gap > range) continue;
+      const l = worldToLocal(body.x, body.z, body.rot, h.x, h.z);
+      const dx = Math.abs(l.x) - hw;
+      const dz = Math.abs(l.z) - hl;
+      let edge: 'F' | 'B' | 'L' | 'R';
+      let along: number;
+      if (dz >= dx) {
+        edge = l.z >= 0 ? 'F' : 'B';
+        along = Math.max(-hw, Math.min(hw, l.x));
+      } else {
+        edge = l.x >= 0 ? 'L' : 'R';
+        along = Math.max(-hl, Math.min(hl, l.z));
+      }
+      const k = Math.floor(along / LINE_BIN);
+      const key = `${edge}${k}`;
+      const b = bins.get(key) ?? { edge, k, gap: Infinity, hits: 0, ids: new Set<string>() };
+      b.hits++;
+      b.ids.add(h.colliderId);
+      if (gap < b.gap) b.gap = gap;
+      bins.set(key, b);
+    }
+  }
+  const out: WarnLine[] = [];
+  for (const [key, b] of bins) {
+    const level = proximityLevel(b.gap, range, critical);
+    if (level === 'none') continue;
+    const off = 0.1 + b.gap * 0.22;
+    const half = b.edge === 'F' || b.edge === 'B' ? hw : hl;
+    const c0 = Math.max(-half, b.k * LINE_BIN);
+    const c1 = Math.min(half, (b.k + 1) * LINE_BIN);
+    if (c1 <= c0) continue;
+    const P = (c: number): { x: number; z: number } => {
+      let lx = 0;
+      let lz = 0;
+      if (b.edge === 'F') { lx = c; lz = hl + off; }
+      else if (b.edge === 'B') { lx = c; lz = -hl - off; }
+      else if (b.edge === 'L') { lx = hw + off; lz = c; }
+      else { lx = -hw - off; lz = c; }
+      return localToWorld(body.x, body.z, body.rot, lx, lz);
+    };
+    out.push({ id: `wl-${key}`, level, a: P(c0), b: P(c1), hits: b.hits, colliderIds: [...b.ids] });
+  }
+  return out;
+}

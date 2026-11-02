@@ -1,5 +1,5 @@
 import { raycast, type Collider } from '../core/geometry';
-import { localToWorld, type Vec2 } from '../core/math';
+import { localToWorld, worldToLocal, type Vec2 } from '../core/math';
 import type { SensorGroup, SensorMount } from '../vehicle/spec';
 
 export interface SensorConfig {
@@ -98,7 +98,16 @@ export function readSensors(
           colliderId: hit?.collider.id,
         });
       }
-      if (hit) {
+      // 측면 센서는 시야가 넓어(기둥 사각지대 제거) 앞/뒤쪽 벽도 비스듬히 맞출 수 있다. 자기 담당 구간(차체 길이 ± zBound) 밖의 히트는
+      // 전/후방 센서의 몫이므로 이 센서의 감지로 치지 않는다 (앞 벽이 "옆 장애물"로 오경고되는 것을 방지).
+      let inZone = true;
+      if (hit && m.zBound !== undefined) {
+        const hx = o.x + dx * hit.t;
+        const hz = o.z + dz * hit.t;
+        const lz = worldToLocal(pose.x, pose.z, pose.heading, hx, hz).z;
+        inZone = Math.abs(lz) <= m.zBound;
+      }
+      if (hit && inZone) {
         const h: SensorHit = {
           x: o.x + dx * hit.t,
           z: o.z + dz * hit.t,

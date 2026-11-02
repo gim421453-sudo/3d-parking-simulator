@@ -34,6 +34,8 @@ export class CameraRig {
 
   /** 주차 보조 디스플레이용 가상 카메라 (실제 3D 장면을 렌더링: 후방/전방 카메라, 좌·우 3D 측면뷰, 3D 탑뷰, 3D 사선뷰) */
   readonly assistCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
+  /** 오른쪽 3D 서라운드뷰 전용 카메라 (차량 중심 위에 고정, 메인 보조 카메라와 독립) */
+  readonly surroundCamera = new THREE.PerspectiveCamera(42, 0.8, 0.3, 200);
   private aPos = new THREE.Vector3();
   private aLook = new THREE.Vector3();
   private aUp = new THREE.Vector3(0, 1, 0);

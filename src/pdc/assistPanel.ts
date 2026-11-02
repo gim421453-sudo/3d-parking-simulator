@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import type { ObstacleZone } from './overlay';
+import type { ObstacleZone, WarnLine } from './overlay';
 import { inFront, projectSegment } from './clip';
+import { onTap } from '../ui/tap';
 import { localToWorld } from '../core/math';
 import { ICON } from '../ui/icons';
 import type { VehicleSpec } from '../vehicle/spec';
@@ -34,6 +35,11 @@ export class AssistPanel {
   readonly cam: HTMLCanvasElement;
   readonly guide: HTMLCanvasElement;
   readonly navCanvas: HTMLCanvasElement;
+  /** 오른쪽 3D 서라운드뷰(실제 3D 장면) 캔버스와 그 위의 경고선 캔버스 */
+  sur!: HTMLCanvasElement;
+  surOv!: HTMLCanvasElement;
+  private sctx!: CanvasRenderingContext2D;
+  private octx!: CanvasRenderingContext2D;
   private svg: SVGSVGElement;
   private statusEl: HTMLElement;
   private gearEl: HTMLElement;
@@ -72,6 +78,8 @@ export class AssistPanel {
           <canvas class="pa-nav-canvas" width="${ASSIST_CAM_W}" height="${ASSIST_CAM_H}"></canvas>
         </div>
         <div class="pa-pdc">
+          <canvas class="pa-sur-canvas" role="img" aria-label="3D 서라운드뷰"></canvas>
+          <canvas class="pa-sur-ov"></canvas>
           <svg class="pa-svg" role="img" aria-label="차량 주변 주차거리감지(PDC)"></svg>
           <div class="pa-status">센서 대기</div>
           <div class="pa-guidance">
@@ -96,6 +104,10 @@ export class AssistPanel {
     this.el.dataset.content = 'parking';
     this.el.dataset.open = 'false';
     this.svg = q('.pa-svg');
+    this.sur = q('.pa-sur-canvas');
+    this.surOv = q('.pa-sur-ov');
+    this.sctx = this.sur.getContext('2d')!;
+    this.octx = this.surOv.getContext('2d')!;
     this.statusEl = q('.pa-status');
     this.gearEl = q('.pa-gear');
     this.chipEl = q('.pa-chip');
@@ -108,12 +120,12 @@ export class AssistPanel {
       settings: q('[data-pa="settings"]'),
       close: q('[data-pa="close"]'),
     };
-    this.btn.sensor.addEventListener('click', h.onToggleSensor);
-    this.btn.sound.addEventListener('click', h.onToggleSound);
-    this.btn.camera.addEventListener('click', h.onCycleCamera);
-    this.btn.settings.addEventListener('click', h.onSettings);
-    this.btn.close.addEventListener('click', h.onClose);
-    (this.el.querySelector('[data-pa="dest"]') as HTMLButtonElement).addEventListener('click', h.onCycleDestination);
+    onTap(this.btn.sensor, () => h.onToggleSensor());
+    onTap(this.btn.sound, () => h.onToggleSound());
+    onTap(this.btn.camera, () => h.onCycleCamera());
+    onTap(this.btn.settings, () => h.onSettings());
+    onTap(this.btn.close, () => h.onClose());
+    onTap(this.el.querySelector('[data-pa="dest"]') as HTMLButtonElement, () => h.onCycleDestination());
   }
 
   get visible(): boolean {
@@ -175,6 +187,7 @@ export class AssistPanel {
   /** 차량(제원) 변경 시 PDC 차량 그래픽과 구역을 다시 만든다 */
   setSpec(spec: VehicleSpec): void {
     this.spec = spec;
+    this.el.dataset.surround = String(spec.assist.virtualSurround3D);
     this.el.dataset.layout = spec.assist.panelLayout; // rear: 후방카메라 전용 컴팩트 / surround: 전·후방 + 3D
     const M = 1.45;
     const vbW = spec.width + M * 2;
@@ -350,9 +363,86 @@ export class AssistPanel {
   /** 조향각 기반 동적 가이드라인을 실제 카메라 투영으로 오버레이 */
   private zoneAnim = new Map<string, { c: { x: number; z: number }[]; a: number; target: number; level: ObstacleZone['level']; hits: number }>();
 
+  private surDimsAt = 0;
+  private surDims = { w: 200, h: 240 };
+  /** 서라운드 캔버스의 내부 해상도: 화면에 보이는 영역의 비율을 따르되 최대 300px (왜곡 방지 + 모바일 부하 제한) */
+  surroundSize(): { w: number; h: number } {
+    const now = performance.now();
+    if (now - this.surDimsAt > 700) {
+      this.surDimsAt = now;
+      const r = this.sur.getBoundingClientRect();
+      if (r.width > 20 && r.height > 20) {
+        const k = Math.min(1, 300 / Math.max(r.width, r.height));
+        const w = Math.max(80, Math.round(r.width * k));
+        const h = Math.max(80, Math.round(r.height * k));
+        if (w !== this.surDims.w || h !== this.surDims.h) this.surDims = { w, h };
+      }
+    }
+    if (this.sur.width !== this.surDims.w || this.sur.height !== this.surDims.h) {
+      this.sur.width = this.surOv.width = this.surDims.w;
+      this.sur.height = this.surOv.height = this.surDims.h;
+    }
+    return this.surDims;
+  }
+
+  /** 렌더한 서라운드 장면(메인 캔버스의 한 구역)을 복사 */
+  blitSurround(source: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number): void {
+    try {
+      this.sctx.drawImage(source, sx, sy, sw, sh, 0, 0, this.sur.width, this.sur.height);
+    } catch {
+      /* WebGL 캔버스 복사가 막히면 영상 갱신만 건너뜀 */
+    }
+  }
+
+  private mLineAnim = new Map<string, { a: { x: number; z: number }; b: { x: number; z: number }; al: number; target: number; level: WarnLine['level'] }>();
+  private lineAnim = new Map<string, { a: { x: number; z: number }; b: { x: number; z: number }; al: number; target: number; level: WarnLine['level'] }>();
+  /** 서라운드 경고선: 차량 외곽을 따라 놓인 선분을 서라운드 카메라로 투영해 그린다 (위치/투명도 보간, 미감지 구간은 그리지 않음) */
+  drawWarnLines(o: { camera: THREE.PerspectiveCamera; lines: WarnLine[]; y: number }): void {
+    const g = this.octx;
+    const W = this.surOv.width;
+    const H = this.surOv.height;
+    g.clearRect(0, 0, W, H);
+    const pal = PDC_PALETTES[this.palette].colors;
+    const seen = new Set<string>();
+    for (const l of o.lines) {
+      seen.add(l.id);
+      const st = this.lineAnim.get(l.id);
+      if (!st) this.lineAnim.set(l.id, { a: { ...l.a }, b: { ...l.b }, al: 0, target: 1, level: l.level });
+      else {
+        st.a.x += (l.a.x - st.a.x) * 0.45; st.a.z += (l.a.z - st.a.z) * 0.45;
+        st.b.x += (l.b.x - st.b.x) * 0.45; st.b.z += (l.b.z - st.b.z) * 0.45;
+        st.target = 1;
+        st.level = l.level;
+      }
+    }
+    g.lineCap = 'round';
+    for (const [id, st] of this.lineAnim) {
+      if (!seen.has(id)) st.target = 0;
+      st.al += (st.target - st.al) * 0.35;
+      if (st.target === 0 && st.al < 0.04) {
+        this.lineAnim.delete(id);
+        continue;
+      }
+      const seg = projectSegment({ x: st.a.x, y: o.y + 0.05, z: st.a.z }, { x: st.b.x, y: o.y + 0.05, z: st.b.z }, o.camera, W, H, false);
+      if (!seg) continue;
+      g.globalAlpha = Math.min(1, st.al);
+      g.beginPath();
+      g.moveTo(seg[0].x, seg[0].y);
+      g.lineTo(seg[1].x, seg[1].y);
+      g.strokeStyle = 'rgba(0,0,0,0.6)';
+      g.lineWidth = 7;
+      g.stroke();
+      g.strokeStyle = pal[st.level];
+      g.lineWidth = st.level === 'critical' ? 5.5 : 4.5;
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+
   /** 오버레이 상태 초기화 (시점/차량 변경 시) */
   resetOverlay(): void {
     this.zoneAnim.clear();
+    this.mLineAnim.clear();
   }
 
   /**
@@ -369,6 +459,10 @@ export class AssistPanel {
     zones: ObstacleZone[];
     /** 예측 경로를 장애물 직전에서 자를 거리(m). 생략하면 전체 */
     guideMax?: number;
+    /** 측면/집중 탑뷰용 외곽 경고선 (전/후방 카메라는 타일 사용) */
+    lines?: WarnLine[];
+    /** 경사/다층 지면 높이 (없으면 차량 지면 높이 고정) */
+    groundY?: (x: number, z: number) => number;
   }): void {
     const g = this.gctx;
     g.clearRect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
@@ -430,6 +524,44 @@ export class AssistPanel {
       g.restore();
     }
     g.globalAlpha = 1;
+    // ---- 외곽 경고선 (측면/집중 탑뷰): 실제 히트 구간만, 보간·페이드 ----
+    {
+      const seenL = new Set<string>();
+      for (const l of o.lines ?? []) {
+        seenL.add(l.id);
+        const st = this.mLineAnim.get(l.id);
+        if (!st) this.mLineAnim.set(l.id, { a: { ...l.a }, b: { ...l.b }, al: 0, target: 1, level: l.level });
+        else {
+          st.a.x += (l.a.x - st.a.x) * 0.45; st.a.z += (l.a.z - st.a.z) * 0.45;
+          st.b.x += (l.b.x - st.b.x) * 0.45; st.b.z += (l.b.z - st.b.z) * 0.45;
+          st.target = 1;
+          st.level = l.level;
+        }
+      }
+      g.lineCap = 'round';
+      const gy = (x: number, z: number): number => (o.groundY ? o.groundY(x, z) : (o.pose.y ?? 0)) + 0.06;
+      for (const [id, st] of this.mLineAnim) {
+        if (!seenL.has(id)) st.target = 0;
+        st.al += (st.target - st.al) * 0.35;
+        if (st.target === 0 && st.al < 0.04) {
+          this.mLineAnim.delete(id);
+          continue;
+        }
+        const seg = projectSegment({ x: st.a.x, y: gy(st.a.x, st.a.z), z: st.a.z }, { x: st.b.x, y: gy(st.b.x, st.b.z), z: st.b.z }, cam, ASSIST_CAM_W, ASSIST_CAM_H, o.mirror);
+        if (!seg) continue;
+        g.globalAlpha = Math.min(1, st.al);
+        g.beginPath();
+        g.moveTo(seg[0].x, seg[0].y);
+        g.lineTo(seg[1].x, seg[1].y);
+        g.strokeStyle = 'rgba(0,0,0,0.6)';
+        g.lineWidth = 8;
+        g.stroke();
+        g.strokeStyle = pal[st.level];
+        g.lineWidth = st.level === 'critical' ? 6 : 5;
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+    }
     if (!o.showGuides) return;
     // ---- 예측 조향 경로 ----
     const lines = buildGuideLines(spec, o.steer, o.dir, Math.max(0.25, o.guideMax ?? 4.5));
@@ -437,7 +569,7 @@ export class AssistPanel {
     const H = ASSIST_CAM_H;
     const world = (p: { x: number; z: number }): { x: number; y: number; z: number } => {
       const w = localToWorld(o.pose.x, o.pose.z, o.pose.heading, p.x, p.z);
-      return { x: w.x, y: (o.pose.y ?? 0) + 0.03, z: w.z };
+      return { x: w.x, y: (o.groundY ? o.groundY(w.x, w.z) : (o.pose.y ?? 0)) + 0.03, z: w.z };
     };
     g.lineCap = 'round';
     g.lineJoin = 'round';

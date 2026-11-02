@@ -9,7 +9,8 @@ import type { SensorGroup } from '../vehicle/spec';
  *  oblique    : 차량 뒤쪽 위 3D 사선뷰
  */
 export type AssistView = 'rear' | 'front' | 'left' | 'right' | 'top' | 'topZoom' | 'topFront' | 'topRear' | 'oblique';
-export const ASSIST_VIEW_ORDER: AssistView[] = ['rear', 'front', 'left', 'right', 'top', 'topZoom', 'topFront', 'topRear', 'oblique'];
+/** 메인 카메라(왼쪽 화면)에 쓸 수 있는 6가지 시점. 전체 탑뷰/사선은 오른쪽 3D 서라운드뷰 전용이라 여기에 없다 */
+export const ASSIST_VIEW_ORDER: AssistView[] = ['rear', 'front', 'left', 'right', 'topFront', 'topRear'];
 export const ASSIST_VIEW_NAME: Record<AssistView, string> = {
   rear: '후방 카메라',
   front: '전방 카메라',
@@ -30,6 +31,8 @@ export interface ViewRisk {
   veryClose: Record<SensorGroup, boolean>;
   pillar: Record<SensorGroup, boolean>;
   narrow: boolean;
+  /** 방향별 차체 외곽~장애물 간격(내부 계산용, 둘 다 위험할 때 더 가까운 쪽을 고르는 데 사용) */
+  gap?: Record<SensorGroup, number | null>;
   /** 해당 측면 3D 시점이 차체/장애물에 가려져 틈이 보이지 않는가 (프레이밍 검사 결과) */
   sideBlocked: { left: boolean; right: boolean };
 }
@@ -90,23 +93,21 @@ export class ViewPolicy {
   }
 
   /**
-   * 간격/접근속도 기반 + 진행 방향 우선.
-   *  - 진행 방향(D=전방, R=후방)의 위험이 있으면 항상 먼저 다룬다: 기본 카메라 유지, 매우 가까우면 그 방향 집중 탑뷰. 측면 위험은 그 뒤.
-   *  - 반대 방향(D 에서 후방 등)의 위험은 시점을 바꾸지 않는다.
-   *  - 진행 방향 위험이 없을 때만 측면: 양쪽/좁은 공간 → 전체 탑뷰, 한쪽 → 측면뷰(가려지거나 매우 가까우면 측면 집중 탑뷰/전체 탑뷰)
+   * 간격/접근속도 기반 + 진행 방향 우선 (메인 카메라 6종: 전방/후방/좌/우/전방 집중 탑/후방 집중 탑).
+   *  - 진행 방향(D=전방, R=후방)의 위험이 있으면 항상 먼저: 기본 카메라 유지, 매우 가까우면 그 방향 집중 탑뷰.
+   *  - 반대 방향의 위험은 시점을 바꾸지 않는다.
+   *  - 진행 방향 위험이 없을 때만 측면: 위험한 쪽의 측면뷰(양쪽이면 더 가까운 쪽, 가려진 쪽은 제외).
+   *    양쪽 전체 상황은 오른쪽 3D 서라운드뷰가 보여 주므로 메인 카메라는 전체 탑뷰로 가지 않는다.
    */
   private wantRisk(r: ViewRisk, base: AssistView): AssistView | null {
     const dir: 'front' | 'rear' = base === 'rear' ? 'rear' : 'front';
     if (r.threat[dir]) return r.veryClose[dir] ? (dir === 'front' ? 'topFront' : 'topRear') : null;
-    const L = r.threat.left;
-    const R = r.threat.right;
-    if (L && R) return 'top';
-    if (r.narrow) return 'top';
-    if (!L && !R) return null;
-    const side = L ? 'left' : 'right';
-    if (r.sideBlocked[side]) return 'top';
-    if (r.veryClose[side] || r.pillar[side]) return 'topZoom';
-    return side;
+    const cands = (['left', 'right'] as const).filter((sd) => r.threat[sd] && !r.sideBlocked[sd]);
+    if (!cands.length) return null;
+    if (cands.length === 1) return cands[0];
+    const gl = r.gap?.left ?? Infinity;
+    const gr = r.gap?.right ?? Infinity;
+    return gr < gl ? 'right' : 'left';
   }
 
   private want(obs: SideObservation, rank: number, base: AssistView = 'rear'): AssistView | null {
@@ -114,7 +115,7 @@ export class ViewPolicy {
     const side = (g: SensorGroup): boolean => RANK[obs.level[g]] >= rank && obs.hits[g] >= this.cfg.minHits;
     const l = side('left');
     const r = side('right');
-    if (l && r) return 'top';
+    if (l && r) return 'left';
     if (l) return 'left';
     if (r) return 'right';
     return null;

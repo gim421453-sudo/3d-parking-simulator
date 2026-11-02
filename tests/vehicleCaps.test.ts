@@ -17,8 +17,8 @@ describe('차량별 주차 보조 지원 기능', () => {
     expect(cameraCycle(m4.assist)).toEqual([]);
     expect(autoViewAllowed(m4.assist)).toBe(false);
   });
-  it('X6: 전/후방 + 가상 3D 서라운드 9시점', () => {
-    expect(allowedViews(x6.assist)).toEqual(['rear', 'front', 'left', 'right', 'top', 'topZoom', 'topFront', 'topRear', 'oblique']);
+  it('X6: 메인 카메라 6시점 (전체 탑뷰는 서라운드 전용)', () => {
+    expect(allowedViews(x6.assist)).toEqual(['rear', 'front', 'left', 'right', 'topFront', 'topRear']);
     expect(cameraCycle(x6.assist)[0]).toBe('auto');
     expect(autoViewAllowed(x6.assist)).toBe(true);
     expect(x6.assist.panelLayout).toBe('surround');

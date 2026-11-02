@@ -330,3 +330,28 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 /* ---------- 다층 주차장 현재 층 표시 ---------- */
 #floor-ind { width: fit-content; padding: 3px 12px; border-radius: 12px; background: var(--glass); border: 1px solid var(--hair); backdrop-filter: blur(8px); font-weight: 800; font-size: 20px; letter-spacing: .04em; color: var(--accent); pointer-events: none !important; }
 @media (max-height: 480px) { #floor-ind { font-size: 15px; padding: 2px 9px; } }
+
+/* ---------- v0.4.6 대형 조작부 (태블릿 중심, 화면이 작으면 겹치지 않게 제한) ----------
+   목표 크기: 핸들 396px(기존 132px 의 3배), 페달 ≈ 기존의 3배. 가용 폭 = 중앙 클러스터 양옆 공간. */
+#hud { --avail: calc((100vw - 480px) / 2 - 24px); }
+@media (max-height: 480px) { #hud { --avail: calc((100vw - 350px) / 2 - 18px); } }
+#hud.touch-on {
+  --wheel: max(104px, min(48vh, var(--avail), calc(396px * var(--touch))));
+  --pw: max(60px, min(calc((var(--avail) - 86px) / 1.9), calc(234px * var(--touch))));
+  --ped-total: calc(var(--pw) * 1.88 + 12px);
+}
+#hud button, #hud .tbtn, #hud #t-wheel, #hud #shifter { touch-action: none; -webkit-tap-highlight-color: transparent; }
+#t-wheel { width: var(--wheel); height: var(--wheel); }
+#t-steer { bottom: 10px; }
+#t-pedals { bottom: 10px; gap: 12px; align-items: flex-end; }
+#touch .tbtn.brk { width: calc(var(--pw) * .88); height: calc(min(var(--pw) * 1.76, 44vh)); border-radius: 22px; }
+#touch .tbtn.gas { width: var(--pw); height: calc(min(var(--pw) * 2.0, 50vh)); border-radius: 22px; }
+#touch .tbtn.brk, #touch .tbtn.gas { font-size: calc(var(--pw) * .17); display: grid; place-items: center; background-image: repeating-linear-gradient(180deg, rgba(255,255,255,.07) 0 3px, transparent 3px 14px); }
+#touch .tbtn.held { transform: scale(.97); }
+#hud.touch-on #shifter { right: calc(var(--ped-total) + 22px); bottom: 10px; }
+@media (max-height: 480px) { #hud.touch-on #shifter { right: calc(var(--ped-total) + 16px); bottom: 8px; } #t-steer, #t-pedals { bottom: 8px; } }
+/* 터치 대형 조작부가 켜져 있으면 좌측의 작은 3D 센서 화면(겹침 원인)은 숨긴다 — PDC 서라운드뷰가 같은 역할을 한다 */
+@media (max-height: 1000px) { #hud.touch-on .sensor-view.small, #hud.touch-on #sv-controls:not(.large) { display: none; } }
+
+/* 낮은 화면(≤480px): 핸들이 위쪽 주차 보조 패널과 겹치지 않도록 높이 상한을 낮춘다 */
+@media (max-height: 480px) { #hud.touch-on { --wheel: max(104px, min(40vh, var(--avail), calc(396px * var(--touch)))); } }

@@ -31,6 +31,10 @@ export interface InfoOutput {
   /** 상태 자체의 가시성(1인칭 여부와 무관) — 1인칭에서 3인칭으로 돌아올 때 복원 기준 */
   wantVisible: boolean;
   reason: string;
+  /** 1인칭에서 사용자가 "확대 화면"을 직접 열었는가 */
+  expanded: boolean;
+  /** 사용자가 고른 내용(null = 자동) */
+  forcedContent: InfoContent | null;
 }
 
 export class InfotainmentController {
@@ -39,8 +43,30 @@ export class InfotainmentController {
   private autoVisible = false;
   private hideT = 0;
   private reason = '';
+  private expanded = false;
+  private forced: InfoContent | null = null;
+
+  /** 1인칭 확대 화면 열기/닫기 (사용자가 직접). 3인칭으로 돌아가면 자동으로 닫힌다 */
+  setExpanded(on: boolean): void {
+    this.expanded = on;
+    if (on) {
+      this.override = true;
+      this.reason = '확대 화면';
+    }
+  }
+  get isExpanded(): boolean {
+    return this.expanded;
+  }
+  /** 표시 내용 수동 전환: 자동 → 반대 내용 → 자동 */
+  toggleContent(current: InfoContent): InfoContent | null {
+    this.forced = this.forced === null ? (current === 'parking' ? 'nav' : 'parking') : null;
+    this.reason = this.forced ? '내용 수동 전환' : '내용 자동';
+    return this.forced;
+  }
 
   reset(gear: Gear = 'P'): void {
+    this.expanded = false;
+    this.forced = null;
     this.lastGear = gear;
     this.override = null;
     this.autoVisible = false;
@@ -56,6 +82,7 @@ export class InfotainmentController {
     return this.override;
   }
   hide(): void {
+    this.expanded = false;
     this.override = false;
     this.reason = '수동 숨김';
   }
@@ -68,6 +95,7 @@ export class InfotainmentController {
     if (i.gear !== this.lastGear) {
       // 새 기어 선택: 이전에 수동으로 닫았더라도 자동 표시 규칙을 다시 적용
       this.override = null;
+      this.forced = null;
       this.hideT = 0;
       this.lastGear = i.gear;
     }
@@ -89,10 +117,13 @@ export class InfotainmentController {
         this.reason = '내비게이션 유지';
       }
     }
+    if (!i.firstPerson) this.expanded = false;
     const want = this.override ?? this.autoVisible;
     return {
-      floatingVisible: want && !i.firstPerson,
-      content: i.parkingActive ? 'parking' : 'nav',
+      floatingVisible: want && (!i.firstPerson || this.expanded),
+      expanded: this.expanded,
+      forcedContent: this.forced,
+      content: this.forced ?? (i.parkingActive ? 'parking' : 'nav'),
       override: this.override,
       wantVisible: want,
       reason: this.reason,

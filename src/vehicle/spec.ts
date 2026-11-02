@@ -11,6 +11,8 @@ export interface SensorMount {
   z: number; // 앞 +
   angle: number; // 정면(앞)에서 왼쪽으로 + (rad)
   fov: number; // rad
+  /** 측면 센서: 차체 중심 기준 |z| 가 이 값 이하인 히트만 이 센서의 감지로 인정 (앞/뒤 벽 오감지 방지) */
+  zBound?: number;
 }
 
 export interface VehicleVisual {
@@ -94,7 +96,8 @@ export function defaultSensorLayout(length: number, width: number): SensorMount[
   const hw = width / 2;
   const s: SensorMount[] = [];
   const mk = (id: string, group: SensorGroup, x: number, z: number, angDeg: number, fovDeg: number): void => {
-    s.push({ id, group, x, z, angle: angDeg * DEG, fov: fovDeg * DEG });
+    // 측면 센서(fov 140°)는 담당 구간을 차체 길이 안쪽(+0.35m)으로 제한한다
+    s.push({ id, group, x, z, angle: angDeg * DEG, fov: fovDeg * DEG, ...(group === 'left' || group === 'right' ? { zBound: hl + 0.35 } : {}) });
   };
   mk('F-L-out', 'front', hw - 0.12, hl, 45, 60);
   mk('F-L-in', 'front', hw * 0.35, hl, 12, 50);
@@ -104,10 +107,10 @@ export function defaultSensorLayout(length: number, width: number): SensorMount[
   mk('R-L-in', 'rear', hw * 0.35, -hl, 180 - 12, 50);
   mk('R-R-in', 'rear', -hw * 0.35, -hl, -180 + 12, 50);
   mk('R-R-out', 'rear', -(hw - 0.12), -hl, -180 + 45, 60);
-  mk('L-front', 'left', hw, hl * 0.45, 90, 60);
-  mk('L-rear', 'left', hw, -hl * 0.45, 90, 60);
-  mk('R-front', 'right', -hw, hl * 0.45, -90, 60);
-  mk('R-rear', 'right', -hw, -hl * 0.45, -90, 60);
+  mk('L-front', 'left', hw, hl * 0.45, 90, 140);
+  mk('L-rear', 'left', hw, -hl * 0.45, 90, 140);
+  mk('R-front', 'right', -hw, hl * 0.45, -90, 140);
+  mk('R-rear', 'right', -hw, -hl * 0.45, -90, 140);
   return s;
 }
 

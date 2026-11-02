@@ -51,6 +51,7 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 
 ## 변경 이력 (최근 순)
 
+- v0.4.6-dev: **모바일 조작·6시점 메인 카메라·서라운드뷰**. 규칙: HUD/주차 보조 버튼은 `ui/tap.ts` 의 `onTap` 으로 연결(멀티터치 중 click 합성에 의존 금지), 핸들/페달 크기는 `#hud.touch-on` 변수(`--wheel`,`--pw`)로만 조정하고 화면 크기별 겹침 E2E 유지, 메인 카메라는 `rear/front/left/right/topFront/topRear` 6개만(전체 탑뷰·사선은 서라운드 전용), 서라운드는 `rig.surroundCamera` 실제 3D 렌더 + `overlay.buildWarnLines` 선 경고(큰 사각형 금지), 측면 센서는 `zBound` 구간 필터 유지(기둥 감지 vs 앞/뒤벽 오경고), 캐빈 화면 클릭은 `cabinScreens.CabinHit` 영역을 통해 플로팅과 같은 컨트롤러 상태로.
 - v0.4.5-dev: **다층 주차타워** (`maps/mapTower.ts` = 검증용 임시 레이아웃, 최종 맵 아님). 규칙: 다층 맵은 `MapData.terrain` 이 있고, 차량 높이/피치는 `groundAt`(가장 높은 면 선택)으로만 정한다. **충돌/센서/카메라/판정은 반드시 차량 y 를 반영**(`findVehicleCollision(obb, colliders, y, height)`, `readSensors(pose.y)`, `pose.y`, `evaluateParking` 의 `y`). 맵 데이터(terrain/obstacles/slots)와 3D 에셋(`towerBuilder.ts`)을 섞지 말 것. 층 구분 없이 (x,z) 만으로 충돌/감지/성공 판정 금지. 다층 맵은 내비 미지원(noRoute).
 - v0.4.4-dev: PDC 카메라 안정화(`pdc/latch.ts` 구도 래치 — 시점 진입 시 1회 구도, 센서 히트마다 재계산 금지), 진행 방향 우선 정책(D 전방/R 후방, N/P 전환 없음), 방향 집중 탑뷰, 전/후방 6칸 타일(`buildCameraTiles`)·경계 셀(`buildBoundaryCells`), 추적 카메라 가림 보정.
 - v0.4.3-dev: PDC 정밀 개선(`docs/PDC_V043.md`). 규칙: **화면 전환 정책은 `pdc/risk.ts`(차체 외곽 간격/TTC)를 입력으로 하고 경고 색/음(`sensorRange/Critical`)과 독립**, 오버레이/예측선 투영은 반드시 `pdc/clip.ts`(근평면+화면 클리핑)를 거칠 것, 측면 시점은 `framing.ts` 가림 검사 필수, 조향 핸들은 `core/wheel.ts`(1080°=±540°), 자원(geometry/material/texture)을 교체·제거할 때 `disposeObject`, 패널 숨김 타이머는 한 번만 설정(프레임마다 재설정 금지), 기어 레버 영역의 레이아웃을 입력 중에 바꾸지 말 것.
