@@ -188,8 +188,8 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #shifter.reject-hint .sh-knob { border-color: var(--bad); }
 #shifter.reject { animation: shreject .32s; }
 @keyframes shreject { 0%, 100% { transform: none; } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
-.sh-lock { display: none; align-items: center; gap: 3px; font-size: 10px; color: var(--warn); white-space: nowrap; }
-.sh-lock.on { display: flex; }
+.sh-lock { display: flex; visibility: hidden; align-items: center; gap: 3px; font-size: 10px; color: var(--warn); white-space: nowrap; min-height: 14px; } /* 자리를 항상 확보: 브레이크를 밟을 때 레버가 움직이지 않게 */
+.sh-lock.on { visibility: visible; }
 #shifter { --sh: 38px; }
 
 /* 클러스터: 얇은 링 게이지 + 디지털 속도 + 기어 + 필수 조작 (항상 표시) */
@@ -305,3 +305,24 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 @media (max-width: 760px) {
   .split { grid-template-columns: 1fr; }
 }
+
+/* ---------- 좌측 상단 큰 기어 표시 (P R N D, 현재 기어만 크게) ---------- */
+#gear-big { display: flex; align-items: center; gap: 2px; width: fit-content; padding: 4px 10px; border-radius: 14px; background: var(--glass); border: 1px solid var(--hair); backdrop-filter: blur(8px); pointer-events: none !important; }
+#gear-big span { font-weight: 800; font-size: 15px; line-height: 1; color: var(--txt-3); min-width: 17px; text-align: center; transition: color .12s; }
+#gear-big[data-g="P"] span[data-g="P"], #gear-big[data-g="R"] span[data-g="R"], #gear-big[data-g="N"] span[data-g="N"], #gear-big[data-g="D"] span[data-g="D"] { font-size: 40px; min-width: 38px; color: #fff; text-shadow: 0 0 14px rgba(143, 184, 255, .55); }
+#gear-big[data-g="R"] span[data-g="R"] { color: #ff6a5f; text-shadow: 0 0 14px rgba(229, 55, 47, .7); }
+#gear-big[data-g="D"] span[data-g="D"] { color: #bcd6ff; }
+@media (max-height: 480px) {
+  #gear-big { padding: 3px 8px; }
+  #gear-big span { display: none; }
+  #gear-big[data-g="P"] span[data-g="P"], #gear-big[data-g="R"] span[data-g="R"], #gear-big[data-g="N"] span[data-g="N"], #gear-big[data-g="D"] span[data-g="D"] { display: block; font-size: 34px; min-width: 30px; }
+}
+
+/* ---------- 회전형 핸들 (터치) ---------- */
+#t-wheel { width: calc(132px * var(--touch)); height: calc(132px * var(--touch)); border-radius: 50%; color: rgba(222, 232, 246, .88); background: rgba(14, 19, 27, .5); border: 1px solid var(--hair-2); touch-action: none; backdrop-filter: blur(8px); position: relative; }
+#t-wheel.held { border-color: var(--accent); background: rgba(143, 184, 255, .14); }
+#t-wheel svg { width: 100%; height: 100%; display: block; }
+#t-wheel .w-rot { transform-origin: 0 0; }
+#touch[data-steer="wheel"] #t-steer .tbtn { display: none; }
+#touch[data-steer="buttons"] #t-wheel { display: none; }
+@media (max-height: 480px) { #t-wheel { width: calc(108px * var(--touch)); height: calc(108px * var(--touch)); } }

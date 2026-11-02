@@ -76,7 +76,7 @@
 #hud.assist-open .toast:not(:last-child) { display: none; } /* 패널과 겹치지 않도록 가장 최근 토스트 1개만 */
 
 @media (max-height: 480px) {
-  #parking-assist { left: 10px; transform: none; top: 8px; width: min(50vw, 464px); font-size: 11px; border-radius: 13px; }
+  #parking-assist { left: 76px; transform: none; top: 8px; width: min(44vw, 464px); font-size: 11px; border-radius: 13px; }
   .pa-head { height: 26px; }
   .pa-title { display: none; }
   .pa-body { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, .95fr); }

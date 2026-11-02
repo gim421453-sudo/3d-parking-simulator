@@ -2,6 +2,7 @@ import type { Action, HeldKey, Input } from '../game/input';
 import type { Gear } from '../vehicle/physics';
 import { ICON } from './icons';
 import { Minimap } from './minimap';
+import { WHEEL_LOCK_DEG, WheelModel } from '../core/wheel';
 import { Shifter, type ShifterHost } from './shifter';
 
 export interface MissionHud {
@@ -80,6 +81,10 @@ export class Hud {
   private minimapWrap!: HTMLDivElement;
   readonly sensorSlot: HTMLDivElement;
   private touchEl: HTMLDivElement;
+  /** 1080° 회전 핸들 (터치). 조향 입력은 Game 이 wheel.steer() 로 읽는다 */
+  readonly wheel = new WheelModel();
+  private wheelEl!: HTMLDivElement;
+  private wheelShown = NaN;
   private lastMissionKey = '';
 
   constructor(
@@ -92,6 +97,7 @@ export class Hud {
     const ab = (a: string, title: string, icon: string, extra = ''): string => `<button class="ab" data-a="${a}" title="${title}" aria-label="${title}">${icon}${extra}</button>`;
     this.root.innerHTML = `
       <div id="left-col">
+        <div id="gear-big" role="status" aria-label="현재 기어 P" data-g="P"><span data-g="P">P</span><span data-g="R">R</span><span data-g="N">N</span><span data-g="D">D</span></div>
         <div id="mission-panel" class="glass"></div>
         <div id="sv-controls"></div>
         <div id="sensor-slot"></div>
@@ -117,7 +123,6 @@ export class Hud {
         <div class="cl-main">
           <div id="steer-box" title="조향">${STEER_SVG}<b id="steer-text">0°</b></div>
           <div id="speedo">${speedRing()}<div class="digital"><span id="spd">0</span><small>km/h</small></div></div>
-          <div id="gear-ind" aria-label="현재 기어" data-g="P">P</div>
         </div>
         <div id="actionbar" role="group" aria-label="차량 조작">
           ${ab('signalLeft', '좌 방향지시등 (Q)', ICON.left)}
@@ -147,7 +152,7 @@ export class Hud {
     this.sensorSlot = q('#sensor-slot');
     this.touchEl = q('#touch');
     this.minimap = new Minimap(q('#minimap'));
-    this.gearInd = q('#gear-ind');
+    this.gearInd = q('#gear-big');
     this.shifter = new Shifter(this.root, this.h.shifter);
     this.root.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => {
       this.btns.set(b.dataset.a!, b);
@@ -159,6 +164,8 @@ export class Hud {
     svc.innerHTML = `<button data-sv="small">작게</button><button data-sv="large">크게</button><button data-sv="hidden">숨김</button><button data-sv="reset" title="시점 초기화" aria-label="시점 초기화">${ICON.reset}</button>`;
     this.svControls = svc;
     this.buildTouch();
+    window.addEventListener('blur', () => this.releaseWheel());
+    document.addEventListener('visibilitychange', () => document.hidden && this.resetTouchInputs());
   }
 
   svControls: HTMLDivElement;
@@ -204,8 +211,77 @@ export class Hud {
       return b;
     };
     steer.append(mk('', 'left'), mk('', 'right'));
+    // ---- 회전형 핸들 (포인터 캡처, 첫 손가락만 추적 → 가속/브레이크/기어 손가락을 가로채지 않음) ----
+    const wheel = document.createElement('div');
+    wheel.id = 't-wheel';
+    wheel.setAttribute('role', 'slider');
+    wheel.setAttribute('aria-label', '핸들 (좌우 540°, 총 1080°)');
+    wheel.setAttribute('aria-valuemin', String(-WHEEL_LOCK_DEG));
+    wheel.setAttribute('aria-valuemax', String(WHEEL_LOCK_DEG));
+    wheel.innerHTML = `<svg viewBox="-50 -50 100 100" aria-hidden="true"><g class="w-rot"><circle r="43" fill="none" stroke="currentColor" stroke-width="7"/><path d="M-43 0H-9M43 0H9M0 8V43" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle r="9" fill="currentColor" opacity=".35"/><path d="M-6 -43H6" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"/></g></svg>`;
+    let wid: number | null = null;
+    const ang = (e: PointerEvent): { deg: number; frac: number } => {
+      const r = wheel.getBoundingClientRect();
+      const dx = e.clientX - (r.left + r.width / 2);
+      const dy = e.clientY - (r.top + r.height / 2);
+      return { deg: (Math.atan2(dy, dx) * 180) / Math.PI, frac: Math.hypot(dx, dy) / (r.width / 2) };
+    };
+    wheel.addEventListener('pointerdown', (e) => {
+      if (wid !== null) return;
+      e.preventDefault();
+      wid = e.pointerId;
+      wheel.setPointerCapture(e.pointerId);
+      this.wheel.begin(ang(e).deg);
+      wheel.classList.add('held');
+    });
+    wheel.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== wid) return;
+      const a = ang(e);
+      this.wheel.move(a.deg, a.frac);
+    });
+    const wend = (e: PointerEvent): void => {
+      if (e.pointerId !== wid) return;
+      wid = null;
+      this.wheel.end();
+      wheel.classList.remove('held');
+    };
+    wheel.addEventListener('pointerup', wend);
+    wheel.addEventListener('pointercancel', wend);
+    wheel.addEventListener('lostpointercapture', wend);
+    wheel.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.releaseWheel = (): void => {
+      wid = null;
+      this.wheel.end();
+      wheel.classList.remove('held');
+    };
+    this.wheelEl = wheel;
+    steer.append(wheel);
     pedals.append(mk('브레이크', 'brake', 'brk'), mk('가속', 'throttle', 'gas'));
     this.touchEl.append(steer, pedals);
+  }
+
+  private releaseWheel: () => void = () => {};
+
+  /** 조향 방식: wheel = 회전 핸들, buttons = 좌/우 버튼 */
+  setSteerControl(mode: 'wheel' | 'buttons'): void {
+    this.touchEl.dataset.steer = mode;
+    if (mode !== 'wheel') this.releaseWheel();
+  }
+
+  /** 앱 전환/일시정지/창 이탈 시 터치 입력을 안전하게 초기화 */
+  resetTouchInputs(): void {
+    this.releaseWheel();
+    this.wheel.reset();
+    this.shifter.cancel();
+  }
+
+  /** 핸들 회전 표시 (매 프레임, 값이 바뀔 때만 DOM 갱신) */
+  renderWheel(): void {
+    const a = this.wheel.angle;
+    if (a === this.wheelShown) return;
+    this.wheelShown = a;
+    (this.wheelEl.querySelector('.w-rot') as SVGGElement).style.transform = `rotate(${-a}deg)`;
+    this.wheelEl.setAttribute('aria-valuenow', String(Math.round(a)));
   }
 
   setTouchVisible(v: boolean, scale: number): void {
@@ -265,8 +341,10 @@ export class Hud {
     this.digital.textContent = String(Math.round(d.speedKmh));
     this.swheel.setAttribute('transform', `rotate(${d.steerWheelDeg.toFixed(1)} 24 24)`);
     this.steerText.textContent = `${Math.abs(Math.round(d.steerDeg))}°`;
-    this.gearInd.textContent = d.gear;
-    this.gearInd.dataset.g = d.gear;
+    if (this.gearInd.dataset.g !== d.gear) {
+      this.gearInd.dataset.g = d.gear;
+      this.gearInd.setAttribute('aria-label', `현재 기어 ${d.gear}`);
+    }
     this.shifter.update();
     const on = (a: string, v: boolean): void => {
       this.btns.get(a)?.classList.toggle('on', v);

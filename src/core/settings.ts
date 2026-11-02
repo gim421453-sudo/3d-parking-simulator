@@ -31,6 +31,9 @@ export interface Settings {
   mirrorFps: number; // 사이드미러/룸미러 갱신 FPS (0 = 끔, 부하 조절)
   touchControls: 'auto' | 'on' | 'off';
   touchScale: number; // 0.8 ~ 1.4
+  steerControl: 'wheel' | 'buttons'; // 터치 조향 방식 (회전 핸들 1080° / 좌우 버튼)
+  steerSensitivity: number; // 핸들 감도 0.6~1.6
+  steerReturn: number; // 핸들 복귀 속도 0.5~2
   vehicleId: string;
   mapId: string;
   missionId: string; // 'free' = 자유주행
@@ -68,6 +71,9 @@ export const DEFAULT_SETTINGS: Settings = {
   mirrorFps: 15,
   touchControls: 'auto',
   touchScale: 1,
+  steerControl: 'wheel',
+  steerSensitivity: 1,
+  steerReturn: 1,
   vehicleId: 'sedan',
   mapId: 'lot',
   missionId: 'lot-front',
@@ -80,6 +86,9 @@ export function sanitizeSettings(raw: Partial<Settings>): Settings {
   s.sensorCritical = Math.min(s.sensorRange - 0.2, Math.max(0.1, Number(s.sensorCritical) || 0.5));
   s.sensorVolume = Math.min(1, Math.max(0, Number(s.sensorVolume)));
   s.touchScale = Math.min(1.5, Math.max(0.7, Number(s.touchScale) || 1));
+  s.steerControl = s.steerControl === 'buttons' ? 'buttons' : 'wheel';
+  s.steerSensitivity = Math.min(1.6, Math.max(0.6, Number(s.steerSensitivity) || 1));
+  s.steerReturn = Math.min(2, Math.max(0.5, Number(s.steerReturn) || 1));
   s.sensorViewFps = Math.min(60, Math.max(5, Number(s.sensorViewFps) || 24));
   s.assistFrontMaxKmh = Math.min(30, Math.max(3, Number(s.assistFrontMaxKmh) || 10));
   s.assistExitSec = Math.min(10, Math.max(0, Number.isFinite(Number(s.assistExitSec)) ? Number(s.assistExitSec) : 3));

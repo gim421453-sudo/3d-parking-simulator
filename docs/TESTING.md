@@ -8,9 +8,9 @@
 |---|---|---|
 | 의존성 설치 | `npm install` | ✅ 성공 |
 | TypeScript 검사 | `npm run typecheck` | ✅ 오류 0 |
-| 단위 테스트 | `npm test` | ✅ **175/175 PASS** (14개 파일, v0.4.2: 장애물 구역 overlay 추가) |
+| 단위 테스트 | `npm test` | ✅ **232/232 PASS** (19개 파일, v0.4.3: 위험/프레이밍/클리핑/핸들/경고음/정책 추가) |
 | 프로덕션 빌드 | `npm run build` | ✅ 성공 (dist, JS ~750KB / gzip ~200KB) |
-| 브라우저 통합(E2E) | `node scripts/e2e-smoke.cjs` | ✅ **199/199 PASS** (v0.4.2: 자원 누수 4개 + 장애물 구역 1개 추가) |
+| 브라우저 통합(E2E) | `node scripts/e2e-smoke.cjs` | ✅ **240/240 PASS** (v0.4.3: 18개 시나리오·핸들 540°/멀티터치·번호판·경고음·예측선·기어 표시 추가) |
 | Pages 하위 경로 로컬 검증 | `npm run verify:pages` | ✅ **7/7 PASS** (Pages 와 같은 하위 경로 조건, 실제 Pages 배포는 미실행) |
 | Android APK 빌드 | GitHub Actions `assembleDebug` | ✅ **성공 (run 1, run 2)** — APK ≈ 4.0MB 아티팩트, versionCode=run 번호, 고정 디버그 서명 확인. 기기 설치는 ❌ 미검증 |
 | CI (타입검사/단위/빌드) | GitHub Actions `ci.yml` | ✅ **success** (`feature/pdc-display-v2`) |

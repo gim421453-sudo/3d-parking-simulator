@@ -125,8 +125,8 @@ export function frameView(inp: FrameInput): FrameResult {
   const obstacleRef = toWorld(pose, s * (W / 2 + gapMin), 0.6, zc);
   const ignore = new Set(colliders.filter((c) => Math.hypot(c.x - obstacleRef.x, c.z - obstacleRef.z) < 2.5).map((c) => c.id));
   const xs = [W / 2 - 0.15, W / 2 + gapMin / 2];
-  for (const h of [2.4, 3.0, 3.8, 4.8, 6.0]) {
-    for (const back of [2.4, 3.2, 4.2]) {
+  for (const h of [3.2, 4.0, 5.0, 6.0]) {
+    for (const back of [2.2, 3.2, 4.2]) {
       for (const lx of xs) {
         const pos = toWorld(pose, s * lx, h, zc - back);
         if (pointInsideSolid(pos, colliders, body)) continue;

@@ -132,8 +132,9 @@ export class AssistPanel {
       this.el.classList.remove('pa-leave');
       this.el.dataset.open = 'true';
       requestAnimationFrame(() => this.el.classList.remove('pa-enter'));
-    } else if (this.el.dataset.open !== 'false' || !this.el.classList.contains('hidden')) {
-      if (this.el.dataset.open === 'false' && this.el.classList.contains('hidden')) return;
+    } else if (this.el.dataset.open !== 'false') {
+      // 퇴장 시작은 한 번만: 매 프레임 호출돼도 숨김 타이머를 다시 걸지 않는다
+      // (이전에는 프레임 간격이 190ms 보다 짧으면 타이머가 계속 초기화되어 패널이 영원히 닫히지 않았다)
       this.el.dataset.open = 'false';
       this.el.classList.add('pa-leave');
       clearTimeout(this.hideTimer);

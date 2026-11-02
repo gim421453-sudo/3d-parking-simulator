@@ -70,6 +70,8 @@ export class Shifter {
     });
     const finish = (e: PointerEvent): void => {
       if (e.pointerId !== this.pointerId) return;
+      // 손을 뗀 최종 위치를 반영한다 (마지막 pointermove 가 합쳐지거나 늦게 도착해도 놓은 자리의 노치로 변속)
+      this.moveTo(e.clientY);
       this.release(true);
     };
     t.addEventListener('pointerup', finish);
@@ -81,6 +83,11 @@ export class Shifter {
     });
     window.addEventListener('blur', () => this.pointerId !== null && this.release(false));
     t.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /** 외부(일시정지/앱 전환)에서 드래그를 안전하게 취소 */
+  cancel(): void {
+    if (this.pointerId !== null) this.release(false);
   }
 
   private detentH(): number {

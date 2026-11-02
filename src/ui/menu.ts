@@ -278,7 +278,10 @@ export class Menu {
             ${pane(
               'input',
               `${sel('touchControls', '터치 버튼', '자동=터치 기기에서만 표시', [['auto', '자동'], ['on', '항상 표시'], ['off', '숨김']], s.touchControls)}
-               ${rng('touchScale', '터치 버튼 크기', '', 0.7, 1.5, 0.05, s.touchScale)}`,
+               ${rng('touchScale', '터치 버튼 크기', '', 0.7, 1.5, 0.05, s.touchScale)}
+               ${sel('steerControl', '터치 조향 방식', '핸들: 손가락으로 돌림(좌우 540°, 총 1080°) / 버튼: 좌·우 버튼', [['wheel', '회전 핸들 (1080°)'], ['buttons', '좌우 버튼']], s.steerControl)}
+               ${rng('steerSensitivity', '핸들 감도', '같은 회전각에서 바퀴가 꺾이는 정도 (최대 조향각은 차량 제원)', 0.6, 1.6, 0.05, s.steerSensitivity)}
+               ${rng('steerReturn', '핸들 복귀 속도', '손을 뗐을 때 중앙으로 돌아오는 속도', 0.5, 2, 0.1, s.steerReturn)}`,
             )}
             ${pane('data', `<div class="setting"><div><label>미션 기록</label><small>저장된 최고 점수/시간을 삭제합니다</small></div><button class="danger" id="reset-rec">기록 초기화</button></div>
                <div class="setting"><div><label>설정</label><small>기본값으로 되돌립니다 (맵·미션·차량 선택은 유지)</small></div><button id="reset-set">기본값으로</button></div>`)}
@@ -410,6 +413,8 @@ const FMT: Record<string, (v: number) => string> = {
   sensorRange: (v) => `${v.toFixed(1)} m`,
   sensorCritical: (v) => `${v.toFixed(2)} m`,
   touchScale: (v) => `${Math.round(v * 100)}%`,
+  steerSensitivity: (v) => `${Math.round(v * 100)}%`,
+  steerReturn: (v) => `${v.toFixed(1)}배`,
   assistFrontMaxKmh: (v) => `${v} km/h`,
   assistExitSec: (v) => `${v}초`,
   assistCameraFps: (v) => `${v} FPS`,

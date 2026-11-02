@@ -13,7 +13,6 @@ import {
   DEFAULT_SENSOR_CONFIG,
   activeGroupsFor,
   beepIntervalMs,
-  minDistance,
   readSensors,
   type SensorConfig,
   type SensorSnapshot,
@@ -24,6 +23,8 @@ import { LIGHT_MODE_NAME, computeLighting, nextLightMode, stepLeveling, type Lig
 import { AssistController, type AssistOutput, type AssistSettings } from '../pdc/assistPolicy';
 import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
 import { buildPdcState, type PdcState } from '../pdc/pdcModel';
+import { WHEEL_LOCK_DEG } from '../core/wheel';
+import { chooseBeepTarget } from '../sensors/beepPlan';
 import { buildObstacleZones } from '../pdc/overlay';
 import { RiskTracker, type RiskOutput } from '../pdc/risk';
 import { frameView, type FrameResult } from '../pdc/framing';
@@ -73,6 +74,7 @@ export class Game {
   readonly showroom: Showroom;
   readonly assist = new AssistController();
   readonly assistPanel: AssistPanel;
+  private beepGroup: 'front' | 'rear' | 'left' | 'right' = 'rear';
   private risk = new RiskTracker();
   riskOut: RiskOutput | null = null;
   private assistFrame: FrameResult | null = null;
@@ -220,7 +222,7 @@ export class Game {
     if (before.resolutionScale !== this.settings.resolutionScale) this.applyQuality();
     if (before.quality !== this.settings.quality) this.loadedMapId = ''; // 텍스처 해상도는 맵을 다시 만들 때 적용
     if (before.shadows !== this.settings.shadows) this.applyShadows();
-    if (before.touchControls !== this.settings.touchControls || before.touchScale !== this.settings.touchScale) this.applyTouch();
+    if (before.touchControls !== this.settings.touchControls || before.touchScale !== this.settings.touchScale || before.steerControl !== this.settings.steerControl) this.applyTouch();
     this.beeper.volume = this.settings.sensorVolume;
     this.beeper.enabled = this.settings.sensorSound && this.settings.sensorEnabled;
     if (!this.settings.sensorSound || !this.settings.sensorEnabled) this.beeper.silence();
@@ -266,6 +268,7 @@ export class Game {
     const coarse = window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
     const show = this.settings.touchControls === 'on' || (this.settings.touchControls === 'auto' && coarse);
     this.hud.setTouchVisible(show, this.settings.touchScale);
+    this.hud.setSteerControl(this.settings.steerControl);
   }
 
   private onResize(): void {
@@ -380,6 +383,7 @@ export class Game {
     this.state = 'paused';
     this.input.enabled = false;
     this.input.clear();
+    this.hud.resetTouchInputs();
     this.beeper.silence();
     this.menu.showPause();
   }
@@ -627,7 +631,11 @@ export class Game {
     this.brake = ramp(this.brake, Math.max(h.brake ? 1 : 0, this.input.pad.brake ?? 0), 6, 8);
     const kb = (h.left ? 1 : 0) - (h.right ? 1 : 0);
     const st = this.input.pad.steer ? this.input.pad.steer : kb;
-    this.steerIn = ramp(this.steerIn, st, 5, 7);
+    // 회전 핸들(터치): 손가락이 닿아 있거나 아직 중앙 복귀 중이면 핸들 각도가 조향 입력이 된다
+    const w = this.hud.wheel;
+    w.update(dt, this.car.v, this.settings.steerReturn);
+    if (this.settings.steerControl === 'wheel' && (w.dragging || w.angle !== 0) && st === 0) this.steerIn = w.steer(this.settings.steerSensitivity);
+    else this.steerIn = ramp(this.steerIn, st, 5, 7);
     return { throttle: this.throttle, brake: this.brake, steerInput: this.steerIn };
   }
 
@@ -693,9 +701,11 @@ export class Game {
     let interval: number | null = null;
     if (this.sensorSnap) {
       const groups = activeGroupsFor(this.car.gear, Math.abs(this.car.v) * 3.6);
-      interval = beepIntervalMs(minDistance(this.sensorSnap, groups), cfg.range, cfg.critical);
+      const tgt = chooseBeepTarget(this.sensorSnap, groups, this.beepGroup);
+      if (tgt) this.beepGroup = tgt.group;
+      interval = beepIntervalMs(tgt ? tgt.distance : null, cfg.range, cfg.critical);
     }
-    this.beeper.update(dt, interval);
+    this.beeper.update(dt, interval, this.beepGroup);
 
     // 미션
     if (this.mission) {
@@ -749,6 +759,7 @@ export class Game {
     this.state = 'result';
     this.input.enabled = false;
     this.input.clear();
+    this.hud.resetTouchInputs();
     this.beeper.silence();
     this.car.handbrake = true;
     const key = `${this.map.id}/${m.def.id}`;
@@ -835,6 +846,7 @@ export class Game {
     this.rig.frontCamera.updateProjectionMatrix();
     this.renderer.render(this.scene, this.rig.active);
 
+    this.hud.renderWheel();
     // HUD / 미니맵 / 센서 화면은 낮은 빈도로 갱신
     this.hudAcc += dt;
     if (this.hudAcc >= 1 / 20) {
@@ -992,11 +1004,23 @@ export class Game {
       m.bodyGroup.visible = true;
       m.cockpit.visible = false;
     }
+    // 전/후방 카메라는 차체 안쪽(범퍼 위치)에 있어 자기 번호판의 뒷면이 영상 아래에 보이므로 이 패스에서만 숨긴다
+    const platesHidden: THREE.Object3D[] = [];
+    if (view === 'rear' || view === 'front') {
+      for (const n of ['Plate_Front', 'Plate_Rear']) {
+        const o = m.bodyGroup.getObjectByName(n);
+        if (o && o.visible) {
+          o.visible = false;
+          platesHidden.push(o);
+        }
+      }
+    }
     this.renderer.setScissorTest(true);
     this.renderer.setViewport(0, 0, vw, vh);
     this.renderer.setScissor(0, 0, vw, vh);
     this.renderer.render(this.scene, cam);
     this.renderer.setScissorTest(false);
+    for (const o of platesHidden) o.visible = true;
     m.bodyGroup.visible = prevBody;
     m.cockpit.visible = prevCockpit;
     const sw = Math.max(1, Math.round(vw * pr));
@@ -1108,7 +1132,7 @@ export class Game {
       speedKmh: Math.abs(car.v) * 3.6,
       gear: car.gear,
       steerDeg: car.steer / DEG,
-      steerWheelDeg: -(car.steer / DEG) * 6,
+      steerWheelDeg: -(car.steer / this.spec.maxSteer) * WHEEL_LOCK_DEG,
       handbrake: car.handbrake,
       signalLeft: (this.sigLeft || this.hazard) && this.blinkOn,
       signalRight: (this.sigRight || this.hazard) && this.blinkOn,

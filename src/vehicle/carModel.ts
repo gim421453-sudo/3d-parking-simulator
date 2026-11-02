@@ -414,7 +414,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
         // 핸들 회전: 로컬 z축 기준 (기울어진 상태에서 자연스럽게)
         const sw = model.steeringWheel;
         sw.rotation.set(-0.9, 0, 0);
-        sw.rotateZ(s.steer * 6);
+        sw.rotateZ((s.steer / spec.maxSteer) * (540 * Math.PI) / 180); // 실제 핸들 회전(바퀴 최대 조향 = 핸들 540°)
       }
       const l = model.lights;
       if (!l) return;

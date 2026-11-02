@@ -119,3 +119,46 @@ describe('탑뷰 프레이밍 (전체 / 확대)', () => {
     expect(zoom.look.x).toBeLessThan(0);
   });
 });
+
+describe('프레이밍 계산 비용 (모바일 부하 관리: 10Hz 재계산)', () => {
+  it('충돌체 400개 장면에서 측면 프레이밍 평균 < 8ms (이 서버 CPU 기준, 실기기 수치 아님)', () => {
+    const cols: Collider[] = [];
+    for (let i = 0; i < 400; i++) cols.push(box(30 + (i % 20) * 3, -40 + Math.floor(i / 20) * 4, 2, 2, 1.4, 0, 'c' + i));
+    cols.push(box(W / 2 + 0.9 + 0.25, 0, 0.5, 8, 1.4, 0, 'wall'));
+    const hits = [-1, 0, 1].map((z) => ({ x: W / 2 + 0.9, z }));
+    const t0 = performance.now();
+    for (let i = 0; i < 30; i++) frameView({ view: 'left', pose, spec, hits, colliders: cols, aspect: 16 / 9 });
+    const avg = (performance.now() - t0) / 30;
+    // eslint-disable-next-line no-console
+    console.log('frameView 평균', avg.toFixed(2), 'ms');
+    expect(avg).toBeLessThan(8);
+  });
+});
+
+import { buildGuideLines } from '../src/pdc/guidelines';
+describe('예측 조향선 방향/물리 일치', () => {
+  const sp = getVehicle('suv-x6');
+  it('전진은 +z(앞), 후진은 -z(뒤)로 뻗는다 (차체 외곽에서 시작)', () => {
+    const f = buildGuideLines(sp, 0, 1);
+    const r = buildGuideLines(sp, 0, -1);
+    expect(f.left[0].z).toBeCloseTo(sp.length / 2, 5);
+    expect(f.left[f.left.length - 1].z).toBeGreaterThan(sp.length / 2 + 4);
+    expect(r.left[0].z).toBeCloseTo(-sp.length / 2, 5);
+    expect(r.left[r.left.length - 1].z).toBeLessThan(-sp.length / 2 - 4);
+  });
+  it('조향 0: 좌우 경로는 차체 폭 그대로 직선, 핸들 중앙 복귀 시 직선으로 복귀', () => {
+    const l = buildGuideLines(sp, 0, 1);
+    expect(l.left.every((p) => Math.abs(p.x - sp.width / 2) < 1e-6)).toBe(true);
+    expect(l.right.every((p) => Math.abs(p.x + sp.width / 2) < 1e-6)).toBe(true);
+  });
+  it('왼쪽 조향(+)으로 전진하면 경로가 왼쪽(+x)으로, 후진하면 같은 조향에서 뒤가 왼쪽으로 휜다', () => {
+    const f = buildGuideLines(sp, 0.4, 1);
+    expect(f.left[f.left.length - 1].x).toBeGreaterThan(sp.width / 2 + 0.3);
+    const r = buildGuideLines(sp, 0.4, -1);
+    expect(r.left[r.left.length - 1].x).toBeGreaterThan(sp.width / 2 + 0.3);
+  });
+  it('경로 폭(좌우 간격)이 이동 중 차체 폭과 같다 (강체 이동)', () => {
+    const f = buildGuideLines(sp, 0.5, 1);
+    for (let i = 0; i < f.left.length; i++) expect(Math.hypot(f.left[i].x - f.right[i].x, f.left[i].z - f.right[i].z)).toBeCloseTo(sp.width, 4);
+  });
+});
