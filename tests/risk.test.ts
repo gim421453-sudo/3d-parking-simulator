@@ -116,6 +116,6 @@ describe('경고가 늦는 문제 / 화면 전환이 늦는 문제 측정 (벽�
     expect(stop(3.7)).toBeGreaterThan(0.45);
     expect(stop(3.7)).toBeLessThan(0.55);
     expect(stop(2.7)).toBeLessThan(0.4); // 이전 0.3m 는 약 2.2km/h 수준에서만 충분
-    expect(DEFAULT_RISK.veryCloseEnter).toBe(0.5);
+    expect(DEFAULT_RISK.veryCloseEnter).toBe(0.75); // 측면 3D 뷰로 틈이 보이는 최소 간격(화면 검수 기준)
   });
 });

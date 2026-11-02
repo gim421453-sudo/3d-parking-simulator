@@ -42,3 +42,12 @@ Sketchfab 다운로드는 로그인한 계정의 API 토큰이 있어야 하며,
 1. **직접 다운로드(권장, 가장 단순)**: Sketchfab 로그인 → 각 모델 Download 3D model → glTF(또는 GLB) 선택. 받은 파일을 로컬 PC 의 Codex 작업 폴더에 둔다(이 저장소에는 아직 커밋하지 말 것). 다운로드 화면의 라이선스 표기를 캡처.
 2. **클라우드 세션에서 직접 받기**: Environment secrets 에 `SKETCHFAB_API_TOKEN` 을 등록(코드/저장소에 넣지 말 것) + 네트워크 허용 목록에 Sketchfab 다운로드 호스트(토큰 인증 후 응답에 나오는 호스트, 및 `media.sketchfab.com`)를 추가. 그러면 `GET /v3/models/{uid}/download` 로 받아 로컬(저장소 밖)에서 품질만 검사한다.
 3. BlendSwap 은 로그인 필요 — 직접 받아 주거나 계정 쿠키를 넘기지 말고 파일만 제공.
+
+## v0.4.4 재시도 (2026-11-02)
+- 세션 환경에 `SKETCHFAB_API_TOKEN` 등 인증 정보가 **없다**(환경 변수 확인). 인증을 우회하지 않으므로 파일은 여전히 확보하지 못했다. 저장소에 추가한 모델 파일 없음.
+- 사용자 측 다운로드 절차(가장 간단):
+  1. 브라우저에서 Sketchfab 로그인 → 해당 모델 페이지 → **Download 3D model** → **glTF** 또는 **GLB** 선택 → 다운로드.
+  2. 같은 화면의 라이선스 문구(CC BY 4.0, 제작자 이름)를 캡처한다.
+  3. 파일은 이 저장소에 커밋하지 말고 로컬 PC 의 Codex 작업 폴더(예: `C:\dev\car-assets\raw\`)에 둔다.
+- 후보 우선순위(메타데이터 기준 추정): **M4** — Rosemarin "BMW M4 G82"(104k faces, 실내 단순)를 감량 기준으로, SABLE "BMW M4"(534k faces, 텍스처 18개)는 실내 품질 확인용. **X6** — ItsDiyor "BMW X6 2020"(213k faces). 실제 파일을 열어 본 뒤 비교 보고서를 작성한다.
+- 클라우드 세션에서 직접 받게 하려면: 환경 시크릿에 `SKETCHFAB_API_TOKEN` 등록 + 네트워크 허용 목록에 `media.sketchfab.com` 과 토큰 인증 후 응답에 나오는 다운로드 호스트를 추가(호스트명은 인증 후에야 알 수 있음).

@@ -171,7 +171,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       case 'car': {
         const spec = parkedSpec(o.carSpec ?? 0);
         const car = createCarModel(spec, { lite: true, color: o.color, blobTexture: tex.blob });
-        car.root.position.set(o.x, 0, o.z);
+        car.root.position.set(o.x, o.y0 ?? 0, o.z);
         car.root.rotation.y = o.rot ?? 0;
         group.add(car.root);
         break;
@@ -215,7 +215,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
           // 하단 경고 띠
           const band = new THREE.Mesh(boxGeo, bandMat);
           band.scale.set((o.w ?? 1) + 0.02, 0.7, (o.d ?? 1) + 0.02);
-          band.position.set(o.x, 0.35, o.z);
+          band.position.set(o.x, (o.y0 ?? 0) + 0.35, o.z);
           group.add(band);
         }
       }

@@ -8,15 +8,17 @@ import type { SensorGroup } from '../vehicle/spec';
  *  top        : 차량 바로 위 탑뷰 (실제 장면, 센서 PDC 아이콘과 별개)
  *  oblique    : 차량 뒤쪽 위 3D 사선뷰
  */
-export type AssistView = 'rear' | 'front' | 'left' | 'right' | 'top' | 'topZoom' | 'oblique';
-export const ASSIST_VIEW_ORDER: AssistView[] = ['rear', 'front', 'left', 'right', 'top', 'topZoom', 'oblique'];
+export type AssistView = 'rear' | 'front' | 'left' | 'right' | 'top' | 'topZoom' | 'topFront' | 'topRear' | 'oblique';
+export const ASSIST_VIEW_ORDER: AssistView[] = ['rear', 'front', 'left', 'right', 'top', 'topZoom', 'topFront', 'topRear', 'oblique'];
 export const ASSIST_VIEW_NAME: Record<AssistView, string> = {
   rear: '후방 카메라',
   front: '전방 카메라',
   left: '좌측 3D 뷰',
   right: '우측 3D 뷰',
   top: '3D 탑뷰',
-  topZoom: '확대 탑뷰',
+  topZoom: '측면 집중 탑뷰',
+  topFront: '전방 집중 탑뷰',
+  topRear: '후방 집중 탑뷰',
   oblique: '3D 사선뷰',
 };
 
@@ -87,14 +89,19 @@ export class ViewPolicy {
     this.lastSwitch = -Infinity;
   }
 
-  /** 간격/접근속도 기반: 좁은 곳·다방향 위험·가림 → 전체 탑뷰, 아주 가까운 측면/기둥 → 확대 탑뷰, 그 외 측면은 해당 3D 측면뷰 */
-  private wantRisk(r: ViewRisk): AssistView | null {
+  /**
+   * 간격/접근속도 기반 + 진행 방향 우선.
+   *  - 진행 방향(D=전방, R=후방)의 위험이 있으면 항상 먼저 다룬다: 기본 카메라 유지, 매우 가까우면 그 방향 집중 탑뷰. 측면 위험은 그 뒤.
+   *  - 반대 방향(D 에서 후방 등)의 위험은 시점을 바꾸지 않는다.
+   *  - 진행 방향 위험이 없을 때만 측면: 양쪽/좁은 공간 → 전체 탑뷰, 한쪽 → 측면뷰(가려지거나 매우 가까우면 측면 집중 탑뷰/전체 탑뷰)
+   */
+  private wantRisk(r: ViewRisk, base: AssistView): AssistView | null {
+    const dir: 'front' | 'rear' = base === 'rear' ? 'rear' : 'front';
+    if (r.threat[dir]) return r.veryClose[dir] ? (dir === 'front' ? 'topFront' : 'topRear') : null;
     const L = r.threat.left;
     const R = r.threat.right;
-    const FB = r.threat.front || r.threat.rear;
     if (L && R) return 'top';
     if (r.narrow) return 'top';
-    if ((L || R) && FB) return 'top';
     if (!L && !R) return null;
     const side = L ? 'left' : 'right';
     if (r.sideBlocked[side]) return 'top';
@@ -102,8 +109,8 @@ export class ViewPolicy {
     return side;
   }
 
-  private want(obs: SideObservation, rank: number): AssistView | null {
-    if (obs.risk) return this.wantRisk(obs.risk);
+  private want(obs: SideObservation, rank: number, base: AssistView = 'rear'): AssistView | null {
+    if (obs.risk) return this.wantRisk(obs.risk, base);
     const side = (g: SensorGroup): boolean => RANK[obs.level[g]] >= rank && obs.hits[g] >= this.cfg.minHits;
     const l = side('left');
     const r = side('right');
@@ -127,7 +134,7 @@ export class ViewPolicy {
     }
     const held = this.t - this.since >= this.cfg.minHoldSec;
     const cool = this.t - this.lastSwitch >= this.cfg.cooldownSec;
-    const enterWant = this.want(obs, this.cfg.enterRank);
+    const enterWant = this.want(obs, this.cfg.enterRank, base);
 
     if (this.cur === null) {
       // 후보 확인 (연속 유지)
@@ -148,7 +155,7 @@ export class ViewPolicy {
     }
 
     // 자동 시점 중: 같은 쪽이 아직 가까우면 유지, 다른 조합이면(좌→양측 등) 전환 후보
-    const stillWant = this.want(obs, this.cfg.exitRank); // 낮은 임계(히스테리시스)
+    const stillWant = this.want(obs, this.cfg.exitRank, base); // 낮은 임계(히스테리시스)
     if (stillWant) {
       this.relT = 0;
       if (stillWant !== this.cur && held && cool && enterWant && enterWant !== this.cur) {

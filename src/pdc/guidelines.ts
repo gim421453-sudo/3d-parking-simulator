@@ -1,4 +1,7 @@
 import type { VehicleSpec } from '../vehicle/spec';
+import type { Collider } from '../core/geometry';
+import { localToWorld } from '../core/math';
+import { insideFootprint } from './visibility';
 
 /**
  * 조향각 기반 동적 주차 가이드라인 (지면 위 경로, 차량 로컬 좌표).
@@ -56,7 +59,7 @@ export function buildGuideLines(spec: VehicleSpec, steer: number, dir: 1 | -1, m
   const right = pathOfPoint(spec, steer, dir, -hw, zEdge, maxDist, 0.25);
   const straightLeft = pathOfPoint(spec, 0, dir, hw, zEdge, maxDist, maxDist);
   const straightRight = pathOfPoint(spec, 0, dir, -hw, zEdge, maxDist, maxDist);
-  const marks = GUIDE_ZONES.map((s) => {
+  const marks = GUIDE_ZONES.filter((z) => z <= maxDist + 1e-9).map((s) => {
     const l = pathOfPoint(spec, steer, dir, hw, zEdge, s, s).pop()!;
     const r = pathOfPoint(spec, steer, dir, -hw, zEdge, s, s).pop()!;
     return { s, left: l, right: r };
@@ -67,4 +70,21 @@ export function buildGuideLines(spec: VehicleSpec, steer: number, dir: 1 | -1, m
 /** 진행 거리에 따른 선 색 (가까움=빨강) */
 export function guideColor(s: number): 'critical' | 'mid' | 'far' {
   return s < GUIDE_ZONES[0] ? 'critical' : s < GUIDE_ZONES[1] ? 'mid' : 'far';
+}
+
+/**
+ * 예측 경로가 실제 장애물(센서 높이에서 감지되는 충돌체)과 처음 만나는 진행 거리(m).
+ * 이 이후는 그리지 않아 선이 다른 차량/벽 차체를 통과하는 것처럼 보이지 않게 한다. 장애물이 없으면 maxDist.
+ * pose: 차체 중심 pose. 경로는 물리와 같은 기구학(buildGuideLines) 그대로이며 모양을 바꾸지 않고 길이만 자른다.
+ */
+export function guideCutDistance(spec: VehicleSpec, steer: number, dir: 1 | -1, pose: { x: number; z: number; heading: number }, colliders: readonly Collider[], sensorY = 0.55, maxDist = 4.5): number {
+  const lines = buildGuideLines(spec, steer, dir, maxDist);
+  const solid = colliders.filter((c) => sensorY >= c.y0 && sensorY <= c.y0 + c.h);
+  for (let i = 0; i < lines.left.length; i++) {
+    for (const p of [lines.left[i], lines.right[i]]) {
+      const w = localToWorld(pose.x, pose.z, pose.heading, p.x, p.z);
+      if (solid.some((c) => insideFootprint(c, w.x, w.z))) return Math.max(0, lines.left[Math.max(0, i - 1)].s);
+    }
+  }
+  return maxDist;
 }

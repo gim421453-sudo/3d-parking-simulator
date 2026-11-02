@@ -148,7 +148,7 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #mission-panel .bar { height: 3px; background: rgba(255, 255, 255, .1); border-radius: 2px; margin-top: 8px; overflow: hidden; }
 #mission-panel .bar > i { display: block; height: 100%; width: 0%; background: var(--ok); transition: width .1s linear; }
 
-#fps { position: absolute; left: max(10px, env(safe-area-inset-left)); bottom: 6px; font-size: 11px; color: var(--txt-2); background: rgba(0, 0, 0, .45); padding: 2px 8px; border-radius: 6px; z-index: 6; }
+#fps { position: absolute; left: 50%; transform: translateX(-50%); bottom: 134px; font-size: 11px; color: var(--txt-2); background: rgba(0, 0, 0, .45); padding: 2px 8px; border-radius: 6px; z-index: 6; }
 #toasts { position: absolute; left: 50%; top: 96px; transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; pointer-events: none !important; z-index: 8; }
 .toast { background: var(--glass-strong); border: 1px solid var(--hair-2); padding: 7px 14px; border-radius: 999px; font-size: 13px; animation: toastin .18s ease-out; backdrop-filter: blur(8px); }
 .toast.warn { border-color: rgba(241, 209, 58, .6); color: var(--warn); }
@@ -326,3 +326,7 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #touch[data-steer="wheel"] #t-steer .tbtn { display: none; }
 #touch[data-steer="buttons"] #t-wheel { display: none; }
 @media (max-height: 480px) { #t-wheel { width: calc(108px * var(--touch)); height: calc(108px * var(--touch)); } }
+
+/* ---------- 다층 주차장 현재 층 표시 ---------- */
+#floor-ind { width: fit-content; padding: 3px 12px; border-radius: 12px; background: var(--glass); border: 1px solid var(--hair); backdrop-filter: blur(8px); font-weight: 800; font-size: 20px; letter-spacing: .04em; color: var(--accent); pointer-events: none !important; }
+@media (max-height: 480px) { #floor-ind { font-size: 15px; padding: 2px 9px; } }

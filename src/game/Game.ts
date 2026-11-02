@@ -24,10 +24,14 @@ import { AssistController, type AssistOutput, type AssistSettings } from '../pdc
 import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
 import { buildPdcState, type PdcState } from '../pdc/pdcModel';
 import { WHEEL_LOCK_DEG } from '../core/wheel';
+import { ceilingAbove, groundAt, levelAt } from '../maps/terrain';
+import { buildTowerVisual, type TowerVisual } from '../maps/towerBuilder';
 import { chooseBeepTarget } from '../sensors/beepPlan';
-import { buildObstacleZones } from '../pdc/overlay';
-import { RiskTracker, type RiskOutput } from '../pdc/risk';
-import { frameView, type FrameResult } from '../pdc/framing';
+import { buildBoundaryCells, buildCameraTiles } from '../pdc/overlay';
+import { guideCutDistance } from '../pdc/guidelines';
+import { pointToObbGap, RiskTracker, type RiskOutput } from '../pdc/risk';
+import { frameView } from '../pdc/framing';
+import { fromLocalFrame, RelatchGate, toLocalFrame, type LocalFrame } from '../pdc/latch';
 import { segmentBlocked } from '../pdc/visibility';
 import { allowedViews, autoViewAllowed, cameraCycle, clampView, restrictAssist } from '../pdc/capabilities';
 import { ASSIST_VIEW_NAME, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
@@ -77,9 +81,12 @@ export class Game {
   private beepGroup: 'front' | 'rear' | 'left' | 'right' = 'rear';
   private risk = new RiskTracker();
   riskOut: RiskOutput | null = null;
-  private assistFrame: FrameResult | null = null;
-  private frameAcc = 99;
-  private frameForView = '';
+  private tower: TowerVisual | null = null;
+  private overlayView = '';
+  private latch: LocalFrame | null = null;
+  private relatchGate = new RelatchGate();
+  private outAcc = 0;
+  private nearOut = false;
   private sideBlocked = { left: false, right: false };
   private blockedAcc = 99;
   private lastHits: { x: number; z: number }[] = [];
@@ -289,6 +296,11 @@ export class Game {
       this.scene.remove(this.built.group);
       this.built.dispose();
     }
+    if (this.tower) {
+      this.scene.remove(this.tower.group);
+      this.tower.dispose();
+      this.tower = null;
+    }
     const tier = this.settings.quality;
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
     this.built = buildMap(map, {
@@ -297,10 +309,17 @@ export class Game {
       shadows: this.shadowMapSize() > 0,
     });
     this.scene.add(this.built.group);
+    if (map.terrain) {
+      this.tower = buildTowerVisual(map, map.terrain);
+      this.scene.add(this.tower.group);
+    }
     this.scene.background = new THREE.Color(map.env.sky);
     this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : new THREE.Fog(map.env.sky, 100, 320);
     this.colliders = mapColliders(map);
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
+    this.rig.colliders = this.colliders;
+    // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이
+    this.rig.ceilingFn = map.terrain ? (x, z, y) => ceilingAbove(map.terrain!, x, z, y) : map.env.indoor ? () => map.env.ceilingHeight ?? 2.9 : null;
     this.hud.minimap.setMap(map);
     this.loadedMapId = map.id;
     this.map = map;
@@ -344,6 +363,15 @@ export class Game {
 
     const sp = this.missionDef?.spawn ?? map.spawn;
     this.car = createVehicleState(this.spec, sp.x, sp.z, sp.heading);
+    if (map.terrain) {
+      // 다층 맵: 시작 위치의 지면 높이/피치 (스폰 y 가 층을 정한다)
+      const wb = this.spec.wheelbase;
+      const yR = groundAt(map.terrain, this.car.x, this.car.z, sp.y ?? 0) ?? sp.y ?? 0;
+      const yF = groundAt(map.terrain, this.car.x + Math.sin(sp.heading) * wb, this.car.z + Math.cos(sp.heading) * wb, yR) ?? yR;
+      this.car.y = yR;
+      this.car.pitch = Math.atan2(yF - yR, wb);
+      this.car.slope = Math.sin(this.car.pitch);
+    }
     this.lightMode = 'auto'; // 어두운 곳(지하)에서는 자동으로 하향등
     this.levelPitch = 0;
     this.lastV = 0;
@@ -373,9 +401,10 @@ export class Game {
     );
   }
 
-  private poseNow(): { x: number; z: number; heading: number } {
+  private poseNow(): { x: number; z: number; heading: number; y: number } {
     const c = centerOf(this.car, this.spec);
-    return { x: c.x, z: c.z, heading: this.car.heading };
+    const off = this.spec.length / 2 - this.spec.rearOverhang;
+    return { x: c.x, z: c.z, heading: this.car.heading, y: this.car.y + off * Math.tan(this.car.pitch) };
   }
 
   pause(): void {
@@ -421,6 +450,14 @@ export class Game {
   resetCar(): void {
     const sp = this.missionDef?.spawn ?? this.map.spawn;
     this.car = createVehicleState(this.spec, sp.x, sp.z, sp.heading);
+    if (this.map.terrain) {
+      const wb = this.spec.wheelbase;
+      const yR = groundAt(this.map.terrain, this.car.x, this.car.z, sp.y ?? 0) ?? sp.y ?? 0;
+      const yF = groundAt(this.map.terrain, this.car.x + Math.sin(sp.heading) * wb, this.car.z + Math.cos(sp.heading) * wb, yR) ?? yR;
+      this.car.y = yR;
+      this.car.pitch = Math.atan2(yF - yR, wb);
+      this.car.slope = Math.sin(this.car.pitch);
+    }
     this.rig.snap();
     this.hud.toast('차량을 초기 위치로 되돌렸습니다');
   }
@@ -620,7 +657,16 @@ export class Game {
     }
   }
 
+  /** 자동 테스트 전용: 설정되면 키보드/터치 대신 이 입력으로 주행한다 (E2E 자동 주행) */
+  debugInput: VehicleInput | null = null;
+
   private readInput(dt: number): VehicleInput {
+    if (this.debugInput) {
+      this.throttle = this.debugInput.throttle;
+      this.brake = this.debugInput.brake;
+      this.steerIn = this.debugInput.steerInput;
+      return this.debugInput;
+    }
     const h = this.input.held;
     const ramp = (cur: number, target: number, up: number, down: number): number => {
       const d = target - cur;
@@ -689,7 +735,7 @@ export class Game {
       clampView(this.assistOut.camera, caps),
       this.assistOut.manualView && allowedViews(caps).includes(this.assistOut.manualView) ? this.assistOut.manualView : null,
       this.sensorSnap ? this.sideObservation(this.sensorSnap) : null,
-      this.settings.assistAutoView && autoViewAllowed(caps) && this.assistOut.active && this.settings.sensorEnabled,
+      this.settings.assistAutoView && autoViewAllowed(caps) && this.assistOut.active && this.settings.sensorEnabled && (this.car.gear === 'R' || this.car.gear === 'D'), // N/P 에서는 자동 시점 전환을 하지 않는다
     );
     const infoSet: InfoSettings = { autoShow: this.settings.infoAutoShow, autoHide: this.settings.infoAutoHide, autoHideSec: this.settings.infoAutoHideSec };
     this.infoOut = this.info.update({ dt, gear: this.car.gear, parkingActive: this.assistOut.active, firstPerson: this.rig.mode === 'driver' }, infoSet);
@@ -709,7 +755,7 @@ export class Game {
 
     // 미션
     if (this.mission) {
-      this.mission.update(dt, { x: pose.x, z: pose.z, heading: pose.heading, length: this.spec.length, width: this.spec.width }, this.car.v);
+      this.mission.update(dt, { x: pose.x, z: pose.z, heading: pose.heading, length: this.spec.length, width: this.spec.width, y: this.map.terrain ? this.car.y : undefined }, this.car.v);
       if (this.mission.status !== 'running') this.finishMission();
     }
 
@@ -728,15 +774,36 @@ export class Game {
     const pz = car.z;
     const ph = car.heading;
     const pv = car.v;
+    const py = car.y;
+    const ppitch = car.pitch;
+    const pslope = car.slope;
     stepVehicle(car, vin, this.spec, dt);
+    // 다층/경사: 앞·뒤 차축 아래의 지면 높이로 차량 높이와 피치를 정한다 (올라설 면이 없으면 이동 불가 = 충돌처럼 처리)
+    let offGround = false;
+    if (this.map.terrain) {
+      const wb = this.spec.wheelbase;
+      const fx = car.x + Math.sin(car.heading) * wb;
+      const fz = car.z + Math.cos(car.heading) * wb;
+      const yR = groundAt(this.map.terrain, car.x, car.z, py);
+      const yF = groundAt(this.map.terrain, fx, fz, py);
+      if (yR === null || yF === null) offGround = true;
+      else {
+        car.y = yR;
+        car.pitch = Math.atan2(yF - yR, wb);
+        car.slope = Math.sin(car.pitch);
+      }
+    }
     const c = centerOf(car, this.spec);
     const b = this.map.bounds;
-    const outside = c.x < b.minX || c.x > b.maxX || c.z < b.minZ || c.z > b.maxZ;
-    const hit = outside ? null : findVehicleCollision(obbOf(car, this.spec), this.colliders);
+    const outside = c.x < b.minX || c.x > b.maxX || c.z < b.minZ || c.z > b.maxZ || offGround;
+    const hit = outside ? null : findVehicleCollision(obbOf(car, this.spec), this.colliders, this.map.terrain ? car.y : undefined, this.map.terrain ? this.spec.height : undefined);
     if (hit || outside) {
       car.x = px;
       car.z = pz;
       car.heading = ph;
+      car.y = py;
+      car.pitch = ppitch;
+      car.slope = pslope;
       car.v = 0;
       this.contactClear = 0;
       if (!this.inContact && Math.abs(pv) > 0.1) {
@@ -796,8 +863,10 @@ export class Game {
     const model = this.model!;
     this.rig.update(dt, pose, this.spec);
 
-    model.root.position.set(pose.x, 0, pose.z);
+    model.root.position.set(pose.x, pose.y, pose.z);
+    model.root.rotation.order = 'YXZ';
     model.root.rotation.y = pose.heading;
+    model.root.rotation.x = -car.pitch; // 앞이 높으면 코가 위로
     model.setState({
       steer: car.steer,
       roll: car.wheelRoll,
@@ -878,9 +947,9 @@ export class Game {
     return out;
   }
 
-  private carBody(): { x: number; z: number; rot: number; hw: number; hl: number; height: number } {
+  private carBody(): { x: number; z: number; rot: number; hw: number; hl: number; height: number; base: number } {
     const o = obbOf(this.car, this.spec);
-    return { ...o, height: this.spec.height };
+    return { ...o, height: this.spec.height, base: this.poseNow().y };
   }
 
   /** 방향별 위험(차체 외곽~장애물 간격, 접근 속도) + 측면 3D 시점의 시야 가림 검사 (화면 전환 정책의 입력) */
@@ -907,6 +976,19 @@ export class Game {
   /** 프레이밍에 쓰는 히트점: 현재 감지 + 짧은 유지(해제 대기 중 카메라가 튀지 않게) */
   private frameHits(): { x: number; z: number }[] {
     return this.lastHitsAge < 1.5 ? this.lastHits : [];
+  }
+
+  /** 차체 가까이(1.2m 이내)의 감지 장애물이 현재 보조 카메라 화면 밖에 있는가 */
+  private nearHitsOutOfView(): boolean {
+    const cam = this.rig.assistCamera;
+    const body = obbOf(this.car, this.spec);
+    const v = new THREE.Vector3();
+    for (const h of this.allHits()) {
+      if (pointToObbGap(h.x, h.z, body) > 1.2) continue;
+      v.set(h.x, this.poseNow().y + 0.3, h.z).project(cam);
+      if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.0 || Math.abs(v.y) > 1.0) return true;
+    }
+    return false;
   }
 
   private viewRisk(): SideObservation['risk'] {
@@ -959,23 +1041,30 @@ export class Game {
   }
 
   private assistRenderCount = 0;
-  private renderAssist(dt: number, pose: { x: number; z: number; heading: number }): void {
+  private renderAssist(dt: number, pose: { x: number; z: number; heading: number; y?: number }): void {
     const view = this.viewOut.view;
-    // 측면/탑/확대 탑뷰는 차량과 실제 장애물 경계로 프레이밍한다 (10Hz 재계산, 카메라는 매 프레임 보간)
-    let frame: FrameResult | null = null;
-    if (view === 'left' || view === 'right' || view === 'top' || view === 'topZoom') {
-      this.frameAcc += dt;
-      if (this.frameAcc >= 0.1 || this.frameForView !== view) {
-        this.frameAcc = 0;
-        this.frameForView = view;
+    // 측면/탑/집중 탑뷰: 시점에 "진입할 때" 실제 장애물 경계로 구도를 한 번 정하고 차량 기준 좌표로 고정한다(래치).
+    // 이후에는 센서 히트점이 바뀌어도 위치/높이/FOV 를 다시 계산하지 않고 차량만 따라간다.
+    // 재구성은 (1) 시점이 바뀔 때 (2) 가까운 감지 장애물이 0.6초 이상 화면 밖일 때(쿨다운 2초)만 한다.
+    let frame: { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; fov: number } | null = null;
+    if (view === 'left' || view === 'right' || view === 'top' || view === 'topZoom' || view === 'topFront' || view === 'topRear') {
+      this.outAcc += dt;
+      if (this.outAcc >= 0.1) {
+        this.outAcc = 0;
+        this.nearOut = this.latch ? this.nearHitsOutOfView() : false;
+      }
+      const relatch = this.relatchGate.update(dt, this.nearOut);
+      if (!this.latch || this.latch.view !== view || relatch) {
         const g = this.riskOut?.groups;
         const focusSide = g ? (g.left.veryClose || g.left.pillar ? 'left' : g.right.veryClose || g.right.pillar ? 'right' : g.left.threat ? 'left' : g.right.threat ? 'right' : null) : null;
-        this.assistFrame = frameView({ view, pose, spec: this.spec, hits: this.frameHits(), colliders: this.colliders, aspect: ASSIST_CAM_W / ASSIST_CAM_H, focusSide });
+        const f = frameView({ view, pose, spec: this.spec, hits: this.frameHits(), colliders: this.colliders, aspect: ASSIST_CAM_W / ASSIST_CAM_H, focusSide });
+        this.latch = toLocalFrame(view, f, pose);
+        this.relatchGate.reset();
+        this.rig.beginTransition();
       }
-      frame = this.assistFrame;
+      frame = fromLocalFrame(this.latch, pose);
     } else {
-      this.assistFrame = null;
-      this.frameForView = '';
+      this.latch = null;
     }
     this.rig.updateAssistCamera(dt, view, pose, this.spec, frame);
     const switched = this.assistLastCamera !== view;
@@ -999,7 +1088,7 @@ export class Game {
     const m = this.model!;
     const prevBody = m.bodyGroup.visible;
     const prevCockpit = m.cockpit.visible;
-    const show3d = view === 'left' || view === 'right' || view === 'top' || view === 'topZoom' || view === 'oblique';
+    const show3d = view === 'left' || view === 'right' || view === 'top' || view === 'topZoom' || view === 'topFront' || view === 'topRear' || view === 'oblique';
     if (show3d) {
       m.bodyGroup.visible = true;
       m.cockpit.visible = false;
@@ -1015,11 +1104,15 @@ export class Game {
         }
       }
     }
+    // 다층: 현재 층보다 위의 바닥 슬래브는 보조 카메라(3D/탑뷰) 패스에서만 숨겨 천장에 가리지 않게 한다
+    const decksHidden: THREE.Object3D[] = [];
+    if (this.tower) for (const d of this.tower.decks) if (d.y > (pose.y ?? 0) + 0.6 && d.mesh.visible) { d.mesh.visible = false; decksHidden.push(d.mesh); }
     this.renderer.setScissorTest(true);
     this.renderer.setViewport(0, 0, vw, vh);
     this.renderer.setScissor(0, 0, vw, vh);
     this.renderer.render(this.scene, cam);
     this.renderer.setScissorTest(false);
+    for (const o of decksHidden) o.visible = true;
     for (const o of platesHidden) o.visible = true;
     m.bodyGroup.visible = prevBody;
     m.cockpit.visible = prevCockpit;
@@ -1030,14 +1123,22 @@ export class Game {
     // 오버레이: 실제 감지된 장애물 구역(전 시점) + 예측 조향 경로. 장애물 구역은 3D 시점에서 가려지는 부분을 제외한다.
     const camPos = cam.position;
     const isCar = view === 'rear' || view === 'front';
-    const groups: ('front' | 'rear' | 'left' | 'right')[] = view === 'rear' ? ['rear'] : view === 'front' ? ['front'] : ['front', 'rear', 'left', 'right'];
-    let zones = this.settings.sensorEnabled ? buildObstacleZones(this.sensorSnap, this.spec, pose, groups) : [];
+    if (this.overlayView !== view) {
+      // 시점이 바뀌면 이전 시점의 경고 타일/셀 보간 상태를 버린다 (다른 투영의 잔상 방지)
+      this.overlayView = view;
+      this.assistPanel.resetOverlay();
+    }
+    const body = obbOf(this.car, this.spec);
+    const rng = this.settings.sensorRange;
+    const crt = this.settings.sensorCritical;
+    // 전/후방 카메라: 가로 6칸 독립 타일, 3D/탑뷰: 차량 근처 장애물 경계 셀 (같은 센서 스냅샷 사용)
+    let zones = !this.settings.sensorEnabled ? [] : isCar ? buildCameraTiles(this.sensorSnap, this.spec, body, view === 'rear' ? 'rear' : 'front', rng, crt) : buildBoundaryCells(this.sensorSnap, body, rng, crt);
     if (!isCar && zones.length) {
-      const body = this.carBody();
+      const cbody = this.carBody();
       zones = zones.filter((z) => {
         const cx = z.corners.reduce((a, c) => a + c.x, 0) / 4;
         const cz = z.corners.reduce((a, c) => a + c.z, 0) / 4;
-        return !segmentBlocked({ x: camPos.x, y: camPos.y, z: camPos.z }, { x: cx, y: 0.25, z: cz }, this.colliders, body, { ignoreIds: new Set(z.colliderIds), endMargin: 0.3, step: 0.3 });
+        return !segmentBlocked({ x: camPos.x, y: camPos.y, z: camPos.z }, { x: cx, y: (pose.y ?? 0) + 0.25, z: cz }, this.colliders, cbody, { ignoreIds: new Set(z.colliderIds), endMargin: 0.3, step: 0.3 });
       });
     }
     this.assistPanel.drawOverlay({
@@ -1048,6 +1149,7 @@ export class Game {
       mirror,
       showGuides: this.settings.assistGuides && view !== 'left' && view !== 'right',
       zones,
+      guideMax: guideCutDistance(this.spec, this.car.steer, this.assistOut.focus === 'rear' ? -1 : 1, pose, this.colliders, this.spec.sensorHeight),
     });
   }
 
@@ -1146,6 +1248,11 @@ export class Game {
       mission: mh,
       fpsText: this.settings.showFps ? `FPS ${this.fpsInstant.toFixed(0)} · 평균 ${this.avgFps().toFixed(0)}` : null,
     };
+    if (this.map.terrain) {
+      const lv = levelAt(this.map.terrain, this.car.y);
+      this.hud.setFloor(lv.name);
+      this.hud.minimap.setLevel(lv.y);
+    } else this.hud.setFloor(null);
     this.hud.update(d);
     // PDC 상태는 항상 계산 (패널, 실내 화면, 계기판이 공유). 일반 화면에 거리 숫자는 포함되지 않는다.
     this.pdcState = buildPdcState(this.spec, this.sensorSnap, this.settings.sensorEnabled, this.assistOut.focus);

@@ -7,7 +7,7 @@ import { buildBestRoadGraph, distToCollider, isClear } from '../src/nav/roadGrap
 import { dijkstra, findRoute, simplify } from '../src/nav/router';
 
 describe('도로 그래프 (맵의 실제 충돌체에서 계산)', () => {
-  for (const map of MAPS) {
+  for (const map of MAPS.filter((m) => !m.terrain)) {
     describe(map.name, () => {
       const g = buildBestRoadGraph(map);
       const solids = mapColliders(map).filter(colliderIsSolidForCar);
@@ -122,5 +122,16 @@ describe('Navigator', () => {
     nav.setDestination(slot, map.spawn);
     nav.setDestination(null, map.spawn);
     expect(nav.update(0.1, map.spawn).status).toBe('idle');
+  });
+});
+
+import { MAP_TOWER } from '../src/maps/mapTower';
+describe('다층 맵 내비게이션', () => {
+  it('주차타워는 층 이동 경로 계산을 지원하지 않음을 명시적으로 알린다(noRoute, 가짜 경로 없음)', () => {
+    const nav = new Navigator();
+    nav.setMap(MAP_TOWER);
+    nav.setDestination(MAP_TOWER.slots[0], { x: -33, z: 0 });
+    expect(nav.state.status).toBe('noRoute');
+    expect(nav.state.route).toBeNull();
   });
 });

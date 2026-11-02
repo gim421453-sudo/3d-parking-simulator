@@ -17,6 +17,12 @@ export interface VehicleState {
   gear: Gear;
   handbrake: boolean;
   wheelRoll: number; // 바퀴 회전 누적(rad)
+  /** 뒷축 위치의 지면 높이(m). 평면 맵에서는 항상 0 */
+  y: number;
+  /** 차체 피치(rad, 앞이 높으면 +) */
+  pitch: number;
+  /** sin(pitch): 경사로에서 중력 성분 (평면 0) */
+  slope: number;
 }
 
 export interface VehicleInput {
@@ -32,7 +38,7 @@ export const PARK_SPEED_LIMIT = 0.3; // m/s ≈ 1 km/h
 export function createVehicleState(spec: VehicleSpec, cx: number, cz: number, heading: number): VehicleState {
   const half = spec.length / 2 - spec.rearOverhang;
   const rear = localToWorld(cx, cz, heading, 0, -half);
-  return { x: rear.x, z: rear.z, heading, v: 0, steer: 0, gear: 'P', handbrake: false, wheelRoll: 0 };
+  return { x: rear.x, z: rear.z, heading, v: 0, steer: 0, gear: 'P', handbrake: false, wheelRoll: 0, y: 0, pitch: 0, slope: 0 };
 }
 
 /** 차체 중심(충돌 OBB의 중심) */
@@ -114,6 +120,8 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
         a -= dirSign * 0.8; // 엔진 브레이크
       }
     }
+    // 경사로: 중력의 진행 방향 성분 (앞이 높으면 앞으로 갈수록 감속, 뒤로 구르면 가속). 풋브레이크/주차브레이크/P 가 잡는다.
+    if (s.slope !== 0) a -= 9.81 * s.slope;
     // 구름저항 + 공기저항
     if (s.v !== 0) a -= Math.sign(s.v) * (0.22 + 0.012 * s.v * s.v);
     // 풋 브레이크

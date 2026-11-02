@@ -105,9 +105,24 @@ describe('간격/접근속도 기반 시점 정책 (risk)', () => {
     expect(settle(new VP2(), mk({ threat: { left: true, right: true } })).view).toBe('top');
     expect(settle(new VP2(), mk({ narrow: true, threat: { left: true } })).view).toBe('top');
   });
-  it('한쪽 측면 + 전/후방 동시 위험 → 전체 탑뷰', () => {
-    expect(settle(new VP2(), mk({ threat: { left: true, front: true } })).view).toBe('top');
-    expect(settle(new VP2(), mk({ threat: { right: true, rear: true } }), 'rear').view).toBe('top');
+  it('진행 방향 우선: D 에서 전방+측면 위험이면 전방을 먼저(전방 카메라 유지), R 에서 후방+측면이면 후방 먼저', () => {
+    expect(settle(new VP2(), mk({ threat: { left: true, front: true } }), 'front').view).toBe('front');
+    expect(settle(new VP2(), mk({ threat: { right: true, rear: true } }), 'rear').view).toBe('rear');
+    expect(settle(new VP2(), mk({ threat: { left: true, right: true, front: true } }), 'front').view).toBe('front');
+  });
+  it('진행 방향이 아주 가까우면 그 방향 집중 탑뷰 (전방/후방)', () => {
+    expect(settle(new VP2(), mk({ threat: { front: true }, veryClose: { front: true } }), 'front').view).toBe('topFront');
+    expect(settle(new VP2(), mk({ threat: { rear: true }, veryClose: { rear: true } }), 'rear').view).toBe('topRear');
+  });
+  it('반대 방향 위험은 시점을 바꾸지 않는다 (D 에서 후방만 위험 → 전방 카메라 유지, 측면은 그대로 처리)', () => {
+    expect(settle(new VP2(), mk({ threat: { rear: true } }), 'front').view).toBe('front');
+    expect(settle(new VP2(), mk({ threat: { rear: true, left: true } }), 'front').view).toBe('left');
+  });
+  it('자동 전환 꺼짐(N/P 등 enabled=false)이면 위험이 있어도 기본 시점', () => {
+    const p = new VP2();
+    let d = p.update(0.05, 'front', null, obs(mk({ threat: { left: true, right: true } })), false);
+    for (let i = 0; i < 80; i++) d = p.update(0.05, 'front', null, obs(mk({ threat: { left: true, right: true } })), false);
+    expect(d.view).toBe('front');
   });
   it('매우 가까운 측면 / 기둥 옆 → 확대 탑뷰', () => {
     expect(settle(new VP2(), mk({ threat: { left: true }, veryClose: { left: true } })).view).toBe('topZoom');

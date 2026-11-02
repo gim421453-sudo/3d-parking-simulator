@@ -33,8 +33,17 @@ export class Minimap {
     this.ctx = canvas.getContext('2d')!;
   }
 
+  /** 다층 맵: 현재 층(높이)에 해당하는 장애물/주차칸만 그린다. null 이면 전부(평면 맵) */
+  private levelY: number | null = null;
+  setLevel(y: number | null): void {
+    if (y === this.levelY) return;
+    this.levelY = y;
+    this.base = null;
+  }
+
   setMap(map: MapData): void {
     this.map = map;
+    this.levelY = null;
     this.base = null;
   }
 
@@ -77,9 +86,38 @@ export class Minimap {
     // 주차선
     g.strokeStyle = 'rgba(255,255,255,0.55)';
     g.lineWidth = Math.max(1, this.scale * 0.1);
-    for (const s of map.slots) this.slotPath(g, s);
+    const ly = this.levelY;
+    const onLevel = (y0: number, h: number): boolean => ly === null || (y0 + h > ly + 0.2 && y0 < ly + 1.7);
+    for (const s of map.slots) if (ly === null || s.y === undefined || Math.abs(s.y - ly) < 0.6) this.slotPath(g, s);
+    // 경사로(항상 표시: 층 연결 위치 안내)
+    if (map.terrain) {
+      g.fillStyle = 'rgba(120,150,190,0.35)';
+      for (const t of map.terrain.surfaces) {
+        if (t.kind === 'ramp') {
+          g.save();
+          const fx = Math.sin(t.rot);
+          const fz = Math.cos(t.rot);
+          const [x, y] = P(t.x + (fx * t.length) / 2, t.z + (fz * t.length) / 2);
+          g.translate(x, y);
+          g.rotate(t.rot + Math.PI / 2);
+          g.fillRect(-(t.length * this.scale) / 2, -(t.width * this.scale) / 2, t.length * this.scale, t.width * this.scale);
+          g.restore();
+        } else if (t.kind === 'spiral') {
+          g.save();
+          g.strokeStyle = 'rgba(120,150,190,0.45)';
+          g.lineWidth = (t.r1 - t.r0) * this.scale;
+          g.beginPath();
+          const [cx, cy] = P(t.cx, t.cz);
+          // 화면 y 는 z 와 반대 방향이므로 각도 부호 반전
+          g.arc(cx, cy, ((t.r0 + t.r1) / 2) * this.scale, -t.th0, -t.th1, t.th1 > t.th0);
+          g.stroke();
+          g.restore();
+        }
+      }
+    }
     // 장애물
     for (const o of map.obstacles) {
+      if (!onLevel(o.y0 ?? 0, o.h)) continue;
       g.fillStyle = TAG_COLOR[o.tag] ?? '#999';
       if (o.shape === 'cyl') {
         const [x, y] = P(o.x, o.z);

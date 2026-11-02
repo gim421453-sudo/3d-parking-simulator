@@ -98,6 +98,7 @@ export class Hud {
     this.root.innerHTML = `
       <div id="left-col">
         <div id="gear-big" role="status" aria-label="현재 기어 P" data-g="P"><span data-g="P">P</span><span data-g="R">R</span><span data-g="N">N</span><span data-g="D">D</span></div>
+        <div id="floor-ind" class="hidden" role="status" aria-label="현재 층"></div>
         <div id="mission-panel" class="glass"></div>
         <div id="sv-controls"></div>
         <div id="sensor-slot"></div>
@@ -261,6 +262,22 @@ export class Hud {
   }
 
   private releaseWheel: () => void = () => {};
+
+  private floorEl: HTMLElement | null = null;
+  /** 다층 맵: 현재 층 표시 (평면 맵은 null 로 숨김) */
+  setFloor(name: string | null): void {
+    if (!this.floorEl) this.floorEl = this.root.querySelector('#floor-ind');
+    const el = this.floorEl!;
+    if (name === null) {
+      if (!el.classList.contains('hidden')) el.classList.add('hidden');
+      return;
+    }
+    el.classList.remove('hidden');
+    if (el.textContent !== name) {
+      el.textContent = name;
+      el.setAttribute('aria-label', `현재 층 ${name}`);
+    }
+  }
 
   /** 조향 방식: wheel = 회전 핸들, buttons = 좌/우 버튼 */
   setSteerControl(mode: 'wheel' | 'buttons'): void {

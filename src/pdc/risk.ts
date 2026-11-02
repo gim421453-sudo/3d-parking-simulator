@@ -30,8 +30,8 @@ export interface RiskConfig {
 export const DEFAULT_RISK: RiskConfig = {
   enterGap: { front: 1.6, rear: 1.6, left: 1.3, right: 1.3 },
   exitGap: { front: 2.0, rear: 2.0, left: 1.7, right: 1.7 },
-  veryCloseEnter: 0.5,
-  veryCloseExit: 0.8,
+  veryCloseEnter: 0.75, // 측면 3D 뷰로는 틈이 잘 안 보이는 간격
+  veryCloseExit: 1.0,
   ttcEnter: 2.5,
   ttcMaxGap: 2.4,
   minClosing: 0.3,
@@ -55,8 +55,10 @@ export interface RiskOutput {
   narrow: boolean;
 }
 
-/** 전후 통로 폭 / 측면 길이에 더하는 여유 (m) */
-const REGION_MARGIN = 0.5;
+/** 전/후방 진행 통로의 좌우 여유 (m): 차체 폭 + 이만큼 안쪽의 물체만 "앞/뒤 위험"으로 본다 (옆 차량/벽은 측면 위험) */
+const CORRIDOR_MARGIN = 0.2;
+/** 측면 판정이 차체 길이 앞뒤로 더 보는 길이 (m) */
+const SIDE_MARGIN = 0.5;
 const GROUPS: SensorGroup[] = ['front', 'rear', 'left', 'right'];
 const empty = (): GroupRisk => ({ gap: null, closing: 0, ttc: null, threat: false, veryClose: false, hits: 0, pillar: false });
 
@@ -100,10 +102,10 @@ export class RiskTracker {
       for (const h of r.hits) {
         const l = worldToLocal(body.x, body.z, body.rot, h.x, h.z);
         let g: SensorGroup | null = null;
-        if (Math.abs(l.x) <= hw + REGION_MARGIN && l.z > hl) g = 'front';
-        else if (Math.abs(l.x) <= hw + REGION_MARGIN && l.z < -hl) g = 'rear';
-        else if (l.x > hw && Math.abs(l.z) <= hl + REGION_MARGIN) g = 'left';
-        else if (l.x < -hw && Math.abs(l.z) <= hl + REGION_MARGIN) g = 'right';
+        if (Math.abs(l.x) <= hw + CORRIDOR_MARGIN && l.z > hl) g = 'front';
+        else if (Math.abs(l.x) <= hw + CORRIDOR_MARGIN && l.z < -hl) g = 'rear';
+        else if (l.x > hw && Math.abs(l.z) <= hl + SIDE_MARGIN) g = 'left';
+        else if (l.x < -hw && Math.abs(l.z) <= hl + SIDE_MARGIN) g = 'right';
         if (!g) continue;
         hits[g]++;
         const d = pointToObbGap(h.x, h.z, body);

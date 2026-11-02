@@ -99,7 +99,7 @@ async function waitServer(url, tries = 50) {
   await shot('03-vehicles');
   await page.click('#back');
   await page.click('#m-map');
-  check('맵 선택 화면 (3종)', (await page.locator('#maps .option').count()) === 3);
+  check('맵 선택 화면 (평면 3종 + 다층 주차타워)', (await page.locator('#maps .option').count()) === 4);
   await sleep(400);
   await shot('04-maps');
   await page.click('#back');
@@ -901,7 +901,7 @@ async function waitServer(url, tries = 50) {
   const Ws = await g(() => window.__game.spec.width);
   const Ls = await g(() => window.__game.spec.length);
   const SX = 0, SZ = -6; // 열린 공간 (heading 0: 앞 +z, 왼쪽 +x)
-  const clearTest = () => g(() => { const G = window.__game; G.colliders = G.colliders.filter((c) => !String(c.id).startsWith('t-')); for (const k of [...G.colliderById.keys()]) if (String(k).startsWith('t-')) G.colliderById.delete(k); });
+  const clearTest = () => g(() => { const G = window.__game; G.colliders = G.colliders.filter((c) => !String(c.id).startsWith('t-')); for (const k of [...G.colliderById.keys()]) if (String(k).startsWith('t-')) G.colliderById.delete(k); G.rig.colliders = G.colliders; });
   const addBox = (id, x, z, w, d, h = 1.4, tag = 'wall') => g(([id, x, z, w, d, h, tag]) => { const c = { kind: 'box', id: 't-' + id, tag, x, z, w, d, rot: 0, y0: 0, h }; window.__game.colliders.push(c); window.__game.colliderById.set(c.id, c); }, [id, x, z, w, d, h, tag]);
   const addCyl = (id, x, z, r, tag = 'pillar') => g(([id, x, z, r, tag]) => { const c = { kind: 'cyl', id: 't-' + id, tag, x, z, r, y0: 0, h: 3 }; window.__game.colliders.push(c); window.__game.colliderById.set(c.id, c); }, [id, x, z, r, tag]);
   const viewIs = (v) => until((v) => window.__game.viewOut.view === v, v, 45000);
@@ -909,7 +909,7 @@ async function waitServer(url, tries = 50) {
     await clearTest();
     await g(() => window.__game.rig.setMode('chase'));
     await placeHold(SX, SZ, 0, gear);
-    await g(() => window.__game.info.show && window.__game.info.show());
+    await g(() => { const G = window.__game; G.risk.reset(); G.viewPolicy.reset(); G.assistPanel.resetOverlay(); G.info.show && G.info.show(); });
   };
   const sideX = (gap) => Ws / 2 + gap + 0.25; // 벽 중심 x (벽 두께 0.5)
   const carX = (gap) => Ws / 2 + gap + 0.95; // 주차 차량(폭 1.9) 중심 x
@@ -938,14 +938,23 @@ async function waitServer(url, tries = 50) {
   const topCam = await g(() => window.__game.rig.assistCamera.position.y);
   const topFit = (await g(() => { const G = window.__game; const c = G.rig.assistCamera; const pts = G.colliders.filter((q) => String(q.id).startsWith('t-')).map((q) => [q.x, q.z - 0, q.w / 2, q.d / 2]); return pts.every(([x, z, hw, hd]) => [[x - hw, z - hd], [x + hw, z + hd]].every(([px, pz]) => { const v = new c.position.constructor(px, 0.5, pz).project(c); return Math.abs(v.x) <= 1.15 && Math.abs(v.y) <= 1.15; })); })) && topCam !== 12.5;
   check('시나리오3: 전체 탑뷰는 차량과 양쪽 장애물이 모두 보이고 높이가 고정값(12.5)이 아님', topFit, String(topCam));
+  // 카메라 안정화: 전환 완료 후에는 센서 히트가 바뀌어도 구도(차량 기준 위치/높이/FOV)가 변하지 않고 차량만 따라간다
+  const camLocal = () => g(() => { const G = window.__game; const c = G.rig.assistCamera; const p = G.poseNow(); const dx = c.position.x - p.x; const dz = c.position.z - p.z; const cs = Math.cos(p.heading); const sn = Math.sin(p.heading); return { lx: dx * cs - dz * sn, lz: dx * sn + dz * cs, y: c.position.y, fov: c.fov, settled: G.rig.assistSettled }; });
+  await until(() => window.__game.rig.assistSettled, undefined, 20000);
+  const cl0 = await camLocal();
+  await addBox('extra', SX, SZ - Ls / 2 - 1.2, 3, 0.5); // 후방 장애물(진행 방향이 아니므로 시점을 바꾸지 않음)
+  await g(() => { const c = window.__game.car; c.z += 0.6; });
+  await sleep(2500);
+  const cl1 = await camLocal();
+  const stable = cl0.settled && Math.abs(cl0.lx - cl1.lx) < 0.05 && Math.abs(cl0.lz - cl1.lz) < 0.05 && Math.abs(cl0.y - cl1.y) < 0.02 && Math.abs(cl0.fov - cl1.fov) < 0.01;
+  check('카메라 안정화: 전환 후 새 장애물/차량 이동에도 구도(차량 기준 위치·높이·FOV)가 고정되고 차량만 추적', stable, JSON.stringify({ cl0, cl1 }));
   await clearTest();
   await viewIs('front');
   // 4. 좁은 주차칸 후진 진입 (R, 양쪽 + 뒤 벽)
   await startAt('R');
   await addBox('n1', SX + sideX(0.5), SZ, 0.5, 9);
   await addBox('n2', SX - sideX(0.5), SZ, 0.5, 9);
-  await addBox('nb', SX, SZ - Ls / 2 - 0.9 - 0.25, 6, 0.5);
-  check('시나리오4 좁은 주차칸 후진 진입(양측+후방) → 전체 탑뷰', await viewIs('top'));
+  check('시나리오4 좁은 주차칸 후진 진입(양측 근접, 후방은 아직 여유) → 전체 탑뷰', await viewIs('top'));
   await shot('122-s4-narrow-reverse');
   await clearTest();
   await viewIs('rear');
@@ -977,7 +986,10 @@ async function waitServer(url, tries = 50) {
   await addBox('a1', SX + sideX(0.8), SZ, 0.5, 9);
   await addBox('a2', SX - sideX(0.8), SZ, 0.5, 9);
   await addBox('a3', SX, SZ + Ls / 2 + 0.9 + 0.25, 6, 0.5);
-  check('시나리오8 양측 및 전방 동시 장애물 → 전체 탑뷰', await viewIs('top'));
+  await until(() => window.__game.riskOut.groups.front.threat && window.__game.riskOut.groups.left.threat && window.__game.riskOut.groups.right.threat, undefined, 45000);
+  const s8ok = await until(() => window.__game.viewOut.view === 'front', undefined, 45000);
+  await sleep(2500);
+  check('시나리오8 양측 및 전방 동시 장애물 → 진행 방향(D=전방) 위험을 먼저: 전방 카메라 유지', s8ok && (await g(() => window.__game.viewOut.view)) === 'front');
   await clearTest();
   await viewIs('front');
   // 9. 매우 가까운 장애물
@@ -986,6 +998,65 @@ async function waitServer(url, tries = 50) {
   check('시나리오9 매우 가까운 측면 장애물(0.3m) → 탑뷰 계열로 전환(측면뷰 금지)', v9 && (await g(() => window.__game.viewOut.view)) !== 'left');
   await clearTest();
   await viewIs('front');
+
+  // 11. N 기어: 자동 시점 전환 없음
+  await startAt('N');
+  await addBox('n1', SX + sideX(0.6), SZ, 0.5, 9);
+  await addBox('n2', SX - sideX(0.6), SZ, 0.5, 9);
+  await sleep(4000);
+  const vN = await g(() => ({ v: window.__game.viewOut.view, auto: window.__game.viewOut.auto }));
+  check('N 기어: 양측 장애물이 있어도 자동 시점 전환을 하지 않음', vN.auto === false && !['top', 'left', 'right', 'topZoom'].includes(vN.v), JSON.stringify(vN));
+  await clearTest();
+  // 12. D: 매우 가까운 전방 → 전방 집중 탑뷰, R: 매우 가까운 후방 → 후방 집중 탑뷰
+  await startAt('D');
+  await addBox('ff', SX, SZ + Ls / 2 + 0.45 + 0.25, 6, 0.5);
+  await addBox('fl', SX + sideX(0.8), SZ, 0.5, 9);
+  check('시나리오12a D: 전방이 아주 가깝고 측면도 위험 → 전방 집중 탑뷰(전방 우선)', await viewIs('topFront'));
+  await sleep(1800);
+  await shot('125-s12-top-front');
+  await clearTest();
+  await startAt('R');
+  await addBox('rb', SX, SZ - Ls / 2 - 0.45 - 0.25, 6, 0.5);
+  check('시나리오12b R: 후방이 아주 가까움 → 후방 집중 탑뷰', await viewIs('topRear'));
+  await sleep(1800);
+  await shot('126-s12-top-rear');
+  await clearTest();
+  await startAt('R');
+  await addBox('rb2', SX, SZ - Ls / 2 - 1.3 - 0.25, 6, 0.5);
+  await addBox('rr', SX - sideX(0.8), SZ, 0.5, 9);
+  await until(() => window.__game.riskOut.groups.rear.threat && window.__game.riskOut.groups.right.threat, undefined, 45000);
+  const s13ok = await until(() => window.__game.viewOut.view === 'rear', undefined, 45000);
+  await sleep(2500);
+  check('시나리오13 R: 후방+우측 위험 → 후방 카메라 먼저(후방 우선)', s13ok && (await g(() => window.__game.viewOut.view)) === 'rear');
+  await clearTest();
+  // 후방 카메라 타일: 가로 독립 구역, 실제 히트만
+  await startAt('R');
+  await addBox('rw', SX, SZ - Ls / 2 - 1.3 - 0.25, 0.7, 0.5);
+  await until(() => window.__game.viewOut.view === 'rear' && window.__game.infoOut.content === 'parking', undefined, 30000);
+  await until(() => { const k = [...window.__game.assistPanel.zoneAnim.keys()]; return k.length > 0 && k.every((x) => x.startsWith('tile-')); }, undefined, 30000);
+  await sleep(500);
+  const tiles = await g(() => [...window.__game.assistPanel.zoneAnim.keys()]);
+  check('후방카메라 경고 타일: 좁은 장애물은 일부 칸(1~4)만 점등, 이름은 tile-rear-*', tiles.length >= 1 && tiles.length <= 4 && tiles.every((k) => k.startsWith('tile-rear-')), JSON.stringify(tiles));
+  await clearTest();
+  // 추적 카메라 가림 보정 (기둥이 카메라와 차 사이)
+  await startAt('N');
+  await g(() => window.__game.rig.setMode('chase'));
+  await addCyl('chp', SX, SZ - 4.2, 0.35);
+  const pulled = await until(() => window.__game.rig.chaseCand !== 0 || window.__game.rig.chaseFree < 0.99, undefined, 30000);
+  await sleep(2500);
+  const chase2 = await g(([sx, sz]) => {
+    const G = window.__game; const cam = G.rig.camera.position; const c = G.car;
+    let minD = 1e9;
+    for (let i = 0; i <= 60; i++) { const t = i / 60; const x = c.x + (cam.x - c.x) * t; const z = c.z + (cam.z - c.z) * t; minD = Math.min(minD, Math.hypot(x - sx, z - (sz - 4.2))); }
+    return { free: G.rig.chaseFree, cand: G.rig.chaseCand, lineToPillar: minD, camDist: Math.hypot(cam.x - c.x, cam.z - c.z), camY: cam.y };
+  }, [SX, SZ]);
+  await shot('127-chase-pillar');
+  check('일반 추적 카메라: 기둥이 가리면 옆/위쪽의 트인 위치로 이동 — 시선이 기둥을 지나지 않고 카메라가 차체에 붙지 않음', pulled && chase2.lineToPillar > 0.35 + 0.3 && chase2.camDist > 4.0, JSON.stringify(chase2));
+  const f1 = await g(() => ({ y: window.__game.rig.camera.position.y, x: window.__game.rig.camera.position.x, z: window.__game.rig.camera.position.z }));
+  await sleep(1500);
+  const f2 = await g(() => ({ y: window.__game.rig.camera.position.y, x: window.__game.rig.camera.position.x, z: window.__game.rig.camera.position.z }));
+  check('추적 카메라 가림 보정이 안정적(계속 흔들리지 않음)', Math.hypot(f1.x - f2.x, f1.y - f2.y, f1.z - f2.z) < 0.15, JSON.stringify({ f1, f2 }));
+  await clearTest();
 
   // ---- 위험 단계 기준 (이전 near 진입보다 이른 시점) ----
   const crit = await g(() => ({ range: window.__game.settings.sensorRange, critical: window.__game.settings.sensorCritical }));
@@ -1093,9 +1164,10 @@ async function waitServer(url, tries = 50) {
   await addBox('sy', SX + sideX(0.8), SZ, 0.5, 9);
   await viewIs('left');
   const pd = () => g(() => JSON.stringify({ o: window.__game.pdcState.overall, z: window.__game.pdcState.zones.map((q) => q.level) }));
+  await sleep(1500);
   const p3 = await pd();
   await g(() => window.__game.rig.setMode('driver'));
-  await sleep(1200);
+  await sleep(1500);
   const p1 = await pd();
   const cabHas = await g(() => { const cab = window.__game.model.cabin.center; const d = cab.ctx.getImageData(0, 0, cab.canvas.width, cab.canvas.height).data; let n = 0; for (let i = 0; i < d.length; i += 16) if (d[i] > 60 || d[i + 1] > 60 || d[i + 2] > 60) n++; return n; });
   check('3인칭/1인칭 PDC 상태(구역 단계)와 시점이 일치하고 실내 화면이 그려짐', p3 === p1 && cabHas > 800 && (await g(() => window.__game.viewOut.view)) === 'left', JSON.stringify({ p3: p3.slice(0, 60), cabHas }));
@@ -1131,6 +1203,93 @@ async function waitServer(url, tries = 50) {
   }
   check('맵 교체 반복 시에도 자원 증가 없음', mapA[5].geo <= mapA[2].geo + 2 && mapA[5].tex <= mapA[2].tex + 2, JSON.stringify(mapA));
   await g(() => { window.__game.updateSettings({ mapId: 'lot', missionId: 'lot-front' }); window.__game.startRun(); });
+
+  // ---------- 16. v0.4.5 다층 주차타워 (실제 주행: 경사로 → 2F → 나선 램프 → 3F, 층별 판정) ----------
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await g(() => { const G = window.__game; G.updateSettings({ vehicleId: 'suv-x6', mapId: 'tower', missionId: 'tw-2', infoAutoHide: false, assistAutoView: true, sensorSound: false }); G.startRun(); });
+  await sleep(1200);
+  const tw0 = await g(() => ({ id: window.__game.map.id, prov: window.__game.map.provisional, y: window.__game.car.y, floor: document.getElementById('floor-ind').textContent, floorHidden: document.getElementById('floor-ind').classList.contains('hidden'), name: window.__game.map.name }));
+  check('주차타워: 맵 로드 + 임시 배치로 명시 + 현재 층(1F) 표시', tw0.id === 'tower' && tw0.prov === true && /임시/.test(tw0.name) && tw0.floor === '1F' && !tw0.floorHidden, JSON.stringify(tw0));
+  await shot('130-tower-1f');
+  await g(() => {
+    window.__apStart = (path, speed) => {
+      const G = window.__game;
+      let idx = 0;
+      clearInterval(window.__apT);
+      window.__apMax = { pitch: 0, y: 0 };
+      window.__apT = setInterval(() => {
+        const c = G.car; const sp = G.spec; const off = sp.length / 2 - sp.rearOverhang;
+        const cx = c.x + Math.sin(c.heading) * off; const cz = c.z + Math.cos(c.heading) * off;
+        while (idx < path.length - 1 && Math.hypot(path[idx][0] - cx, path[idx][1] - cz) < 3) idx++;
+        const [tx, tz] = path[idx];
+        let err = Math.atan2(tx - c.x, tz - c.z) - c.heading; err = Math.atan2(Math.sin(err), Math.cos(err));
+        G.debugInput = { throttle: c.v < speed ? 1 : 0, brake: 0, steerInput: Math.max(-1, Math.min(1, (err * 1.6) / sp.maxSteer)) };
+        window.__apMax.pitch = Math.max(window.__apMax.pitch, c.pitch); window.__apMax.y = Math.max(window.__apMax.y, c.y);
+      }, 16);
+    };
+    window.__apStop = () => { clearInterval(window.__apT); window.__game.debugInput = null; };
+  });
+  const rampPath = []; for (let x = -33; x <= 8; x += 1) rampPath.push([x, 0]);
+  await g(([path]) => { const c = window.__game.car; c.gear = 'D'; c.handbrake = false; window.__apStart(path, 2.2); }, [rampPath]);
+  const onRamp = await until(() => window.__game.car.y > 1.4 && window.__game.car.x > -22 && window.__game.car.x < -16, undefined, 120000);
+  const rampSt = await g(() => ({ y: window.__game.car.y, pitch: window.__game.car.pitch, rootX: window.__game.model.root.rotation.x, floor: document.getElementById('floor-ind').textContent }));
+  await shot('131-tower-ramp');
+  check('경사로 주행: 차량 높이가 실제로 상승하고 차체 피치(코가 위)가 모델에 반영', onRamp && rampSt.y > 1.4 && rampSt.pitch > 0.1 && rampSt.rootX < -0.1, JSON.stringify(rampSt));
+  const on2f = await until(() => window.__game.car.y > 3.15 && window.__game.car.x > 2, undefined, 120000);
+  await g(() => window.__apStop());
+  const st2 = await g(() => ({ y: window.__game.car.y, col: window.__game.collisions, floor: document.getElementById('floor-ind').textContent, pitch: window.__apMax.pitch }));
+  await sleep(1000);
+  await shot('132-tower-2f');
+  check('직선 경사로로 2F 도달(충돌 0, 층 표시 2F)', on2f && st2.col === 0 && st2.floor === '2F' && Math.abs(st2.y - 3.2) < 0.05, JSON.stringify(st2));
+  // 센서: 2F 에서는 2F 주차 차량만 감지 (1F/3F 같은 평면 좌표 차량은 감지되지 않음)
+  await g(() => { const c = window.__game.car; c.v = 0; c.handbrake = true; });
+  const sensors2 = await g(() => { const sn = window.__game.sensorSnap; const ids = new Set(); for (const r of sn.readings) for (const h of r.hits) ids.add(h.colliderId); return [...ids]; });
+  check('2F 센서 동작: 감지된 장애물이 모두 2F 물체이며 1F/3F 의 같은 평면 좌표 차량은 감지되지 않음', sensors2.length > 0 && sensors2.every((id) => !/^tw[13]-/.test(id)) && sensors2.some((id) => /^tw2-/.test(id)), JSON.stringify(sensors2.slice(0, 8)));
+  // 나선 램프
+  const spPath = []; for (let x = 4; x <= 24; x += 1) spPath.push([x, 0]);
+  const sp = { cx: 24, cz: 5.2, rm: 5.2, th0: -Math.PI / 2, th1: Math.PI };
+  for (let th = sp.th0 + 0.05; th <= sp.th1; th += 0.06) spPath.push([sp.cx + sp.rm * Math.cos(th), sp.cz + sp.rm * Math.sin(th)]);
+  spPath.push([sp.cx - sp.rm, sp.cz - 1.2]); spPath.push([sp.cx - sp.rm + 0.2, sp.cz - 3.2]);
+  await g(([path]) => { const c = window.__game.car; c.gear = 'D'; c.handbrake = false; window.__apStart(path, 2.0); }, [spPath]);
+  const midSpiral = await until(() => window.__game.car.y > 4.6 && window.__game.car.y < 5.4, undefined, 160000);
+  await shot('133-tower-spiral');
+  const spSt = await g(() => ({ y: window.__game.car.y, pitch: window.__game.car.pitch, view: window.__game.viewOut.view, floor: document.getElementById('floor-ind').textContent }));
+  check('나선형 램프 주행: 회전하며 높이가 연속 상승 (2F→3F 사이 높이)', midSpiral && spSt.y > 4.5 && spSt.pitch > 0.05, JSON.stringify(spSt));
+  const on3f = await until(() => window.__game.car.y > 6.35 && window.__game.car.z < 4, undefined, 160000);
+  await g(() => window.__apStop());
+  await g(() => { const c = window.__game.car; c.v = 0; c.handbrake = true; });
+  await sleep(1000);
+  await shot('134-tower-3f');
+  const st3 = await g(() => ({ y: window.__game.car.y, col: window.__game.collisions, floor: document.getElementById('floor-ind').textContent }));
+  check('나선 램프로 3F(옥상) 도달 (충돌 0, 층 표시 3F)', on3f && st3.col === 0 && st3.floor === '3F' && Math.abs(st3.y - 6.4) < 0.05, JSON.stringify(st3));
+  // 층별 주차 성공 판정
+  await g(() => { const G = window.__game; G.updateSettings({ missionId: 'tw-2' }); G.startRun(); });
+  await sleep(600);
+  const placeAtSlot = (slotId, yy) => g(([id, y]) => { const G = window.__game; const sl = G.map.slots.find((q) => q.id === id); const h = sl.dir; const spec = G.spec; const off = spec.length / 2 - spec.rearOverhang; const c = G.car; c.x = sl.x - Math.sin(h) * off; c.z = sl.z - Math.cos(h) * off; c.heading = h; c.v = 0; c.y = y; c.pitch = 0; c.slope = 0; c.gear = 'P'; c.handbrake = true; }, [slotId, yy]);
+  await placeAtSlot('tw2-s-4', 0);
+  await sleep(5000);
+  const wrongLevel = await g(() => ({ status: window.__game.mission.status, lvl: window.__game.mission.check && window.__game.mission.check.levelOk }));
+  check('주차 판정: 1F 에서 2F 주차칸의 평면 위치에 있어도 성공이 아니다 (층 조건)', wrongLevel.status === 'running' && wrongLevel.lvl === false, JSON.stringify(wrongLevel));
+  await placeAtSlot('tw2-s-4', 3.2);
+  const okLevel = await until(() => window.__game.mission.status === 'success', undefined, 60000);
+  check('주차 판정: 2F 에서 2F 주차칸에 맞게 정차하면 성공', okLevel);
+  await shot('135-tower-park-success');
+  // 층별 카메라/PDC: 3F 에서 후방카메라/측면 위험 시점
+  await g(() => { const G = window.__game; G.updateSettings({ missionId: 'tw-3' }); G.startRun(); });
+  await sleep(800);
+  const tw3 = await g(() => ({ y: window.__game.car.y, floor: document.getElementById('floor-ind').textContent }));
+  check('미션 tw-3 스폰: 2F 높이에서 시작, 층 표시 2F', Math.abs(tw3.y - 3.2) < 0.05 && tw3.floor === '2F', JSON.stringify(tw3));
+  await g(() => { const G = window.__game; const c = G.car; c.gear = 'R'; c.handbrake = true; });
+  await until(() => window.__game.infoOut.floatingVisible && window.__game.infoOut.content === 'parking', undefined, 30000);
+  await sleep(1500);
+  const cam2f = await g(() => { const G = window.__game; return { view: G.viewOut.view, camY: G.rig.assistCamera.position.y, carY: G.car.y }; });
+  check('2F 후방카메라: 보조 카메라 높이가 현재 층 높이를 따른다 (1F 높이 아님)', cam2f.view === 'rear' && cam2f.camY > 3.5, JSON.stringify(cam2f));
+  // 반복 시작 자원 안정 (타워)
+  const swp = [];
+  for (let i = 0; i < 6; i++) { await g(() => { const G = window.__game; G.updateSettings({ missionId: 'tw-2' }); G.startRun(); }); await sleep(250); swp.push(await mem()); }
+  check('주차타워 반복 시작 시 geometry/texture 증가 없음', swp[5].geo <= swp[1].geo + 1 && swp[5].tex <= swp[1].tex + 1, JSON.stringify(swp.map((x) => x.geo + '/' + x.tex)));
+  await g(() => { window.__game.updateSettings({ vehicleId: 'sedan', mapId: 'lot', missionId: 'lot-front' }); window.__game.startRun(); });
+  await sleep(600);
 
   // ---------- 11. 모바일(터치/가로 화면) ----------
   {

@@ -42,8 +42,10 @@ export class MirrorSystem {
     }
   }
 
-  private aim(cam: THREE.PerspectiveCamera, pose: { x: number; z: number; heading: number }, lx: number, ly: number, lz: number, yaw: number): void {
+  private aim(cam: THREE.PerspectiveCamera, pose: { x: number; z: number; heading: number; y?: number }, lx: number, ly: number, lz: number, yaw: number): void {
     const p = localToWorld(pose.x, pose.z, pose.heading, lx, lz);
+    const gy = pose.y ?? 0; // 다층 맵: 차량 지면 높이
+    ly += gy;
     cam.position.set(p.x, ly, p.z);
     // 차량 뒤쪽(-z)을 향하고, yaw 만큼 바깥쪽으로 틀어 사각지대를 보여 준다 (좌측 +x)
     const d = localToWorld(0, 0, pose.heading, Math.sin(yaw), -Math.cos(yaw));
@@ -52,7 +54,7 @@ export class MirrorSystem {
   }
 
   /** 설정 FPS 에 맞춰 3개 거울을 다시 렌더링한다. 렌더한 경우 true. */
-  update(renderer: THREE.WebGLRenderer, scene: THREE.Scene, model: CarModel, pose: { x: number; z: number; heading: number }, spec: VehicleSpec, dt: number, fps: number): boolean {
+  update(renderer: THREE.WebGLRenderer, scene: THREE.Scene, model: CarModel, pose: { x: number; z: number; heading: number; y?: number }, spec: VehicleSpec, dt: number, fps: number): boolean {
     if (fps <= 0 || !model.mirrors) return false;
     this.bind(model);
     this.acc += dt;

@@ -8,6 +8,8 @@ export interface Pt3 {
 }
 export interface CarBody extends Obb {
   height: number;
+  /** 차체 바닥 높이 (다층) */
+  base?: number;
 }
 
 /** 월드 (x,z) 가 충돌체 평면 영역 안인가 */
@@ -52,7 +54,7 @@ export function segmentBlocked(
       if (y < c.y0 || y > c.y0 + c.h) continue;
       if (insideFootprint(c, x, z)) return true;
     }
-    if (car && y >= 0.1 && y <= car.height && insideCar(car, x, z)) return true;
+    if (car && y >= (car.base ?? 0) + 0.1 && y <= (car.base ?? 0) + car.height && insideCar(car, x, z)) return true;
   }
   return false;
 }
@@ -60,5 +62,43 @@ export function segmentBlocked(
 /** 점이 (높이 포함) 충돌체/차체 내부에 있는가 — 카메라 위치 검증용 */
 export function pointInsideSolid(p: Pt3, colliders: readonly Collider[], car: CarBody | null): boolean {
   for (const c of colliders) if (p.y >= c.y0 && p.y <= c.y0 + c.h && insideFootprint(c, p.x, p.z)) return true;
-  return !!(car && p.y <= car.height && insideCar(car, p.x, p.z));
+  return !!(car && p.y >= (car.base ?? 0) && p.y <= (car.base ?? 0) + car.height && insideCar(car, p.x, p.z));
+}
+
+/** 점(x,z)에서 충돌체 평면 영역까지의 거리 (내부면 0) */
+export function distToFootprint(c: Collider, x: number, z: number): number {
+  if (c.kind === 'cyl') return Math.max(0, Math.hypot(x - c.x, z - c.z) - c.r);
+  const l = worldToLocal(c.x, c.z, c.rot, x, z);
+  return Math.hypot(Math.max(Math.abs(l.x) - c.w / 2, 0), Math.max(Math.abs(l.z) - c.d / 2, 0));
+}
+
+/** 카메라 위치가 어떤 충돌체에든 margin 이내로 붙어 있는가 (높이가 충돌체 위 +0.5m 이내일 때) */
+export function tooCloseToSolid(p: Pt3, colliders: readonly Collider[], margin: number): boolean {
+  for (const c of colliders) {
+    if (p.y > c.y0 + c.h + 0.5 || p.y < c.y0 - 0.2) continue;
+    if (distToFootprint(c, p.x, p.z) < margin) return true;
+  }
+  return false;
+}
+
+/**
+ * 추적 카메라 가림 보정: look 에서 desired 쪽으로 가다가 처음 막히는 지점 직전까지만 간다.
+ * 반환 t(0..1) 는 look→desired 선분에서 허용되는 비율 (minT 이하로는 줄이지 않음).
+ */
+export function freeFraction(look: Pt3, desired: Pt3, colliders: readonly Collider[], margin = 0.5, minT = 0.3): number {
+  const len = Math.hypot(desired.x - look.x, desired.y - look.y, desired.z - look.z);
+  if (len < 1e-6) return 1;
+  const step = 0.25;
+  const n = Math.ceil(len / step);
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const x = look.x + (desired.x - look.x) * t;
+    const y = look.y + (desired.y - look.y) * t;
+    const z = look.z + (desired.z - look.z) * t;
+    for (const c of colliders) {
+      if (y < c.y0 - 0.1 || y > c.y0 + c.h + 0.1) continue;
+      if (distToFootprint(c, x, z) < margin) return Math.max(minT, ((i - 1) / n) * 1);
+    }
+  }
+  return 1;
 }

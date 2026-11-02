@@ -22,7 +22,7 @@ export interface AssistPanelHandlers {
 export const ASSIST_CAM_W = 480;
 export const ASSIST_CAM_H = 270;
 
-const MODE_NAME: Record<'auto' | AssistView, string> = { auto: '자동', rear: '후방', front: '전방', left: '좌측', right: '우측', top: '탑뷰', topZoom: '확대', oblique: '사선' };
+const MODE_NAME: Record<'auto' | AssistView, string> = { auto: '자동', rear: '후방', front: '전방', left: '좌측', right: '우측', top: '탑뷰', topZoom: '측면집중', topFront: '전방집중', topRear: '후방집중', oblique: '사선' };
 
 /**
  * 주차 보조 디스플레이(차량 디스플레이 시스템의 한 화면).
@@ -361,12 +361,14 @@ export class AssistPanel {
    */
   drawOverlay(o: {
     camera: THREE.PerspectiveCamera;
-    pose: { x: number; z: number; heading: number };
+    pose: { x: number; z: number; heading: number; y?: number };
     steer: number;
     dir: 1 | -1;
     mirror: boolean;
     showGuides: boolean;
     zones: ObstacleZone[];
+    /** 예측 경로를 장애물 직전에서 자를 거리(m). 생략하면 전체 */
+    guideMax?: number;
   }): void {
     const g = this.gctx;
     g.clearRect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
@@ -401,7 +403,7 @@ export class AssistPanel {
       const pts: { x: number; y: number }[] = [];
       let allFront = true;
       for (const c of st.c) {
-        const p = { x: c.x, y: 0.03, z: c.z };
+        const p = { x: c.x, y: (o.pose.y ?? 0) + 0.03, z: c.z };
         if (!inFront(p, cam)) {
           allFront = false;
           break;
@@ -430,12 +432,12 @@ export class AssistPanel {
     g.globalAlpha = 1;
     if (!o.showGuides) return;
     // ---- 예측 조향 경로 ----
-    const lines = buildGuideLines(spec, o.steer, o.dir);
+    const lines = buildGuideLines(spec, o.steer, o.dir, Math.max(0.25, o.guideMax ?? 4.5));
     const W = ASSIST_CAM_W;
     const H = ASSIST_CAM_H;
     const world = (p: { x: number; z: number }): { x: number; y: number; z: number } => {
       const w = localToWorld(o.pose.x, o.pose.z, o.pose.heading, p.x, p.z);
-      return { x: w.x, y: 0.03, z: w.z };
+      return { x: w.x, y: (o.pose.y ?? 0) + 0.03, z: w.z };
     };
     g.lineCap = 'round';
     g.lineJoin = 'round';

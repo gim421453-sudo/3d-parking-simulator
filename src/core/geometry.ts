@@ -93,10 +93,12 @@ export function colliderIsSolidForCar(c: Collider): boolean {
 }
 
 /** 차량 OBB가 충돌체와 겹치는지. 겹치면 해당 충돌체를 반환. */
-export function findVehicleCollision(car: Obb, colliders: readonly Collider[]): Collider | null {
+export function findVehicleCollision(car: Obb, colliders: readonly Collider[], y?: number, height?: number): Collider | null {
   const reach = Math.hypot(car.hw, car.hl);
   for (const c of colliders) {
     if (!colliderIsSolidForCar(c)) continue;
+    // 다층: 차량의 현재 높이 구간 [y+지상고, y+차고] 와 충돌체의 높이 구간이 겹쳐야 충돌 (다른 층 물체는 무시)
+    if (y !== undefined && height !== undefined && (c.y0 + c.h <= y + GROUND_CLEARANCE || c.y0 >= y + height)) continue;
     if (c.kind === 'box') {
       const br = Math.hypot(c.w / 2, c.d / 2) + reach;
       const dx = c.x - car.x;

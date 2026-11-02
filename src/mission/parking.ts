@@ -10,6 +10,8 @@ export interface ParkingSlot {
   w: number;
   l: number;
   dir: number;
+  /** 다층 주차장: 이 주차칸 바닥 높이(m). 없으면 높이 조건 없음 */
+  y?: number;
 }
 
 export interface CarFootprint {
@@ -18,7 +20,12 @@ export interface CarFootprint {
   heading: number;
   length: number;
   width: number;
+  /** 차체 바닥(지면) 높이 — 다층 주차장 */
+  y?: number;
 }
+
+/** 다층: 차량이 주차칸 층에 있다고 보는 높이 허용 오차(m) */
+export const LEVEL_TOLERANCE = 0.6;
 
 export const HEADING_TOLERANCE: Record<MissionKind, number> = {
   'perpendicular-front': 10 * DEG,
@@ -32,6 +39,8 @@ export const HOLD_SECONDS = 1.5;
 export interface ParkingCheck {
   corners: boolean[]; // 4개 모서리가 구획 안에 있는지
   allInside: boolean;
+  /** 다층: 주차칸과 같은 층인가 (평면 맵은 항상 true) */
+  levelOk: boolean;
   headingErrorRad: number;
   headingOk: boolean;
   lateralOffset: number; // 구획 중심선에서 가로로 벗어난 거리(차 중심)
@@ -67,7 +76,9 @@ export function evaluateParking(car: CarFootprint, slot: ParkingSlot, kind: Miss
     const s = worldToLocal(slot.x, slot.z, slot.dir, w.x, w.z);
     return Math.abs(s.x) <= slot.w / 2 + CORNER_EPS && Math.abs(s.z) <= slot.l / 2 + CORNER_EPS;
   });
-  const allInside = corners.every(Boolean);
+  // 다층 주차장: 주차칸의 층(높이)과 같은 층이어야 한다. 위/아래 층의 같은 평면 좌표는 성공이 아니다.
+  const levelOk = slot.y === undefined || car.y === undefined || Math.abs(car.y - slot.y) <= LEVEL_TOLERANCE;
+  const allInside = corners.every(Boolean) && levelOk;
 
   const exp = expectedHeadings(kind, slot);
   let headingErr = Infinity;
@@ -86,6 +97,7 @@ export function evaluateParking(car: CarFootprint, slot: ParkingSlot, kind: Miss
   return {
     corners,
     allInside,
+    levelOk,
     headingErrorRad: headingErr,
     headingOk,
     lateralOffset: c.x,

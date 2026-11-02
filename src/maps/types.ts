@@ -1,5 +1,6 @@
 import type { Collider } from '../core/geometry';
 import type { MissionDef, ParkingSlot } from '../mission/parking';
+import type { Terrain } from './terrain';
 
 export type ObstacleTag =
   | 'wall'
@@ -53,7 +54,7 @@ export interface SurfaceRect {
 }
 
 export interface MapMission extends MissionDef {
-  spawn?: { x: number; z: number; heading: number };
+  spawn?: { x: number; z: number; heading: number; y?: number };
 }
 
 export interface MapData {
@@ -67,7 +68,13 @@ export interface MapData {
     ceilingHeight?: number;
     ambient: number;
   };
-  spawn: { x: number; z: number; heading: number };
+  spawn: { x: number; z: number; heading: number; y?: number };
+  /** 다층/경사 지형 (없으면 평면 맵). 맵 데이터와 3D 에셋(towerBuilder)은 분리되어 있다 */
+  terrain?: Terrain;
+  /** 상층 바닥 도색 등 층별 시각 데이터 (terrain 이 있을 때) */
+  levelPaint?: (PaintRect & { y: number })[];
+  /** 최종 확정된 맵이 아니라 검증용 임시 레이아웃인가 */
+  provisional?: boolean;
   surfaces: SurfaceRect[];
   paint: PaintRect[];
   obstacles: ObstacleDef[];

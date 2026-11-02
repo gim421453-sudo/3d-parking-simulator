@@ -51,6 +51,8 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 
 ## 변경 이력 (최근 순)
 
+- v0.4.5-dev: **다층 주차타워** (`maps/mapTower.ts` = 검증용 임시 레이아웃, 최종 맵 아님). 규칙: 다층 맵은 `MapData.terrain` 이 있고, 차량 높이/피치는 `groundAt`(가장 높은 면 선택)으로만 정한다. **충돌/센서/카메라/판정은 반드시 차량 y 를 반영**(`findVehicleCollision(obb, colliders, y, height)`, `readSensors(pose.y)`, `pose.y`, `evaluateParking` 의 `y`). 맵 데이터(terrain/obstacles/slots)와 3D 에셋(`towerBuilder.ts`)을 섞지 말 것. 층 구분 없이 (x,z) 만으로 충돌/감지/성공 판정 금지. 다층 맵은 내비 미지원(noRoute).
+- v0.4.4-dev: PDC 카메라 안정화(`pdc/latch.ts` 구도 래치 — 시점 진입 시 1회 구도, 센서 히트마다 재계산 금지), 진행 방향 우선 정책(D 전방/R 후방, N/P 전환 없음), 방향 집중 탑뷰, 전/후방 6칸 타일(`buildCameraTiles`)·경계 셀(`buildBoundaryCells`), 추적 카메라 가림 보정.
 - v0.4.3-dev: PDC 정밀 개선(`docs/PDC_V043.md`). 규칙: **화면 전환 정책은 `pdc/risk.ts`(차체 외곽 간격/TTC)를 입력으로 하고 경고 색/음(`sensorRange/Critical`)과 독립**, 오버레이/예측선 투영은 반드시 `pdc/clip.ts`(근평면+화면 클리핑)를 거칠 것, 측면 시점은 `framing.ts` 가림 검사 필수, 조향 핸들은 `core/wheel.ts`(1080°=±540°), 자원(geometry/material/texture)을 교체·제거할 때 `disposeObject`, 패널 숨김 타이머는 한 번만 설정(프레임마다 재설정 금지), 기어 레버 영역의 레이아웃을 입력 중에 바꾸지 말 것.
 - v0.4.2-dev: 자원 누수 수정(`core/dispose.ts` — 모델/목업을 교체·제거할 때 **반드시 disposeObject 호출**, 공유 캐시는 skip), 카메라 영상 위 장애물 구역(`pdc/overlay.ts`, 실제 센서 히트점만, 거리 필드 금지), BMW 에셋 재조사(`docs/ASSET_RESEARCH_V041.md`: 전부 CC BY, 파일은 인증 필요로 미확보 — 저장소에 추가 금지).
 - v0.4.1-dev (`feature/pdc-display-v2`): 차량별 기능 분리. **주차 보조 기능은 `VehicleSpec.assist`(AssistCaps) 로만 판단**하고 `pdc/capabilities.ts` 를 거칠 것(전방카메라가 없는 차량에서 전방 화면/3D 시점 호출 금지). 프로필 차량 `coupe-m4`(후방 전용), `suv-x6`(서라운드)는 임시 절차 형상. 한국형 번호판 `vehicle/plate.ts`. Blender 명세 `docs/vehicles/`. 승인되지 않은 BMW 에셋/권한 미확인 파일은 저장소에 넣지 말 것.

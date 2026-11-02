@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { clamp, forwardOf, localToWorld } from '../core/math';
+import type { Collider } from '../core/geometry';
+import { freeFraction } from '../pdc/visibility';
 import type { AssistView } from '../pdc/viewPolicy';
 import type { VehicleSpec } from '../vehicle/spec';
 
@@ -18,6 +20,8 @@ export interface CarPose {
   x: number; // 차체 중심
   z: number;
   heading: number;
+  /** 차체 중심의 지면 높이 (다층 맵). 없으면 0 */
+  y?: number;
 }
 
 export class CameraRig {
@@ -45,6 +49,15 @@ export class CameraRig {
   private smoothPos = new THREE.Vector3();
   private smoothLook = new THREE.Vector3();
   private needSnap = true;
+  /** 추적 카메라 가림 보정에 쓰는 충돌체 (맵 로드 시 설정) */
+  colliders: readonly Collider[] = [];
+  /** 다층: (x,z,y) 위쪽 천장 아랫면 높이 (없으면 Infinity). 추적 카메라가 천장을 뚫지 않게 한다 */
+  ceilingFn: ((x: number, z: number, y: number) => number) | null = null;
+  /** 마지막 추적 카메라 가림 보정 비율 (1 = 보정 없음) — 테스트/디버그용 */
+  chaseFree = 1;
+  /** 현재 선택된 추적 카메라 후보 (0 = 기본 뒤쪽 위치) */
+  chaseCand = 0;
+  private chaseBackT = 0;
   private drag: { id: number; x: number; y: number } | null = null;
 
   /** 시점별 목표 자세 (월드 좌표) */
@@ -54,29 +67,32 @@ export class CameraRig {
     const W = spec.width;
     const wp = (lx: number, y: number, lz: number): THREE.Vector3 => {
       const w = localToWorld(pose.x, pose.z, pose.heading, lx, lz);
-      return new THREE.Vector3(w.x, y, w.z);
+      return new THREE.Vector3(w.x, y + (pose.y ?? 0), w.z);
     };
+    const gy = pose.y ?? 0;
     const up = new THREE.Vector3(0, 1, 0);
     switch (view) {
       case 'rear': {
         const rc = spec.rearCam;
         const pos = wp(rc.x, rc.y, rc.z);
-        return { pos, look: new THREE.Vector3(pos.x - f.x * Math.cos(rc.pitch), rc.y - Math.sin(rc.pitch), pos.z - f.z * Math.cos(rc.pitch)), up, fov: 100 };
+        return { pos, look: new THREE.Vector3(pos.x - f.x * Math.cos(rc.pitch), gy + rc.y - Math.sin(rc.pitch), pos.z - f.z * Math.cos(rc.pitch)), up, fov: 100 };
       }
       case 'front': {
         const fc = spec.frontCam;
         const pos = wp(fc.x, fc.y, fc.z);
-        return { pos, look: new THREE.Vector3(pos.x + f.x * Math.cos(fc.pitch), fc.y - Math.sin(fc.pitch), pos.z + f.z * Math.cos(fc.pitch)), up, fov: 100 };
+        return { pos, look: new THREE.Vector3(pos.x + f.x * Math.cos(fc.pitch), gy + fc.y - Math.sin(fc.pitch), pos.z + f.z * Math.cos(fc.pitch)), up, fov: 100 };
       }
       case 'left':
       case 'right': {
         const sx = view === 'left' ? 1 : -1; // 로컬 +x = 왼쪽
         return { pos: wp(sx * (W / 2 + 2.3), 2.3, -L * 0.62), look: wp(sx * 0.1, 0.45, L * 0.12), up, fov: 64 };
       }
+      case 'topFront':
+      case 'topRear':
       case 'topZoom':
-        return { pos: new THREE.Vector3(pose.x, 7, pose.z), look: new THREE.Vector3(pose.x, 0, pose.z), up: new THREE.Vector3(f.x, 0, f.z), fov: 52 };
+        return { pos: new THREE.Vector3(pose.x, gy + 7, pose.z), look: new THREE.Vector3(pose.x, gy, pose.z), up: new THREE.Vector3(f.x, 0, f.z), fov: 52 };
       case 'top':
-        return { pos: new THREE.Vector3(pose.x, 12.5, pose.z), look: new THREE.Vector3(pose.x, 0, pose.z), up: new THREE.Vector3(f.x, 0, f.z), fov: 52 };
+        return { pos: new THREE.Vector3(pose.x, gy + 12.5, pose.z), look: new THREE.Vector3(pose.x, gy, pose.z), up: new THREE.Vector3(f.x, 0, f.z), fov: 52 };
       case 'oblique':
         return { pos: wp(0, 4.8, -(L * 0.5 + 4.4)), look: wp(0, 0.5, L * 0.3), up, fov: 58 };
     }
@@ -88,15 +104,23 @@ export class CameraRig {
     const t = frame
       ? { pos: new THREE.Vector3(frame.pos.x, frame.pos.y, frame.pos.z), look: new THREE.Vector3(frame.look.x, frame.look.y, frame.look.z), up: new THREE.Vector3(frame.up.x, frame.up.y, frame.up.z), fov: frame.fov }
       : CameraRig.assistTarget(view, pose, spec);
+    if (this.aView !== view) this.aT = 0;
+    this.aT += dt;
     const cut = this.aView === null || (this.aView === 'rear' && view === 'front') || (this.aView === 'front' && view === 'rear');
     if (cut) {
       this.aPos.copy(t.pos);
       this.aLook.copy(t.look);
       this.aUp.copy(t.up);
       this.aFov = t.fov;
+    } else if (frame && this.aT >= 0.7) {
+      // 전환 완료: 구도 고정. 차량 기준 좌표로 저장된 구도이므로 보간 없이 그대로(= 차량만 정확히 따라감)
+      this.aPos.copy(t.pos);
+      this.aLook.copy(t.look);
+      this.aUp.copy(t.up);
+      this.aFov = t.fov;
     } else {
-      // 3D 시점은 차를 따라 움직이므로 실시간 추적(빠른 보간), 시점 변경 직후에는 부드럽게 이동
-      const k = 1 - Math.exp(-(frame ? 5 : 7) * dt);
+      // 시점 변경 직후 약 0.7초 동안만 부드럽게 이동
+      const k = 1 - Math.exp(-(frame ? 6 : 7) * dt);
       this.aPos.lerp(t.pos, k);
       this.aLook.lerp(t.look, k);
       this.aUp.lerp(t.up, k).normalize();
@@ -110,6 +134,16 @@ export class CameraRig {
     c.lookAt(this.aLook);
     c.updateProjectionMatrix();
     c.updateMatrixWorld();
+  }
+
+  private aT = 99;
+  /** 시점 전환/구도 재구성 직후의 짧은 전환 애니메이션을 시작한다 */
+  beginTransition(): void {
+    this.aT = 0;
+  }
+  /** 전환 애니메이션이 끝나 구도가 고정(차량만 추적)된 상태인가 */
+  get assistSettled(): boolean {
+    return this.aT >= 0.7;
   }
 
   /** 보간이 거의 끝났는가 (테스트/로그용) */
@@ -200,16 +234,17 @@ export class CameraRig {
 
   update(dt: number, pose: CarPose, spec: VehicleSpec): void {
     const f = forwardOf(pose.heading);
+    const gy = pose.y ?? 0;
     // 후방 카메라는 항상 갱신 (보조 화면용)
     const rc = spec.rearCam;
     const rp = localToWorld(pose.x, pose.z, pose.heading, rc.x, rc.z);
-    this.rearCamera.position.set(rp.x, rc.y, rp.z);
-    this.rearCamera.lookAt(rp.x - f.x * Math.cos(rc.pitch), rc.y - Math.sin(rc.pitch), rp.z - f.z * Math.cos(rc.pitch));
+    this.rearCamera.position.set(rp.x, gy + rc.y, rp.z);
+    this.rearCamera.lookAt(rp.x - f.x * Math.cos(rc.pitch), gy + rc.y - Math.sin(rc.pitch), rp.z - f.z * Math.cos(rc.pitch));
     this.rearCamera.updateMatrixWorld();
     const fc = spec.frontCam;
     const fp = localToWorld(pose.x, pose.z, pose.heading, fc.x, fc.z);
-    this.frontCamera.position.set(fp.x, fc.y, fp.z);
-    this.frontCamera.lookAt(fp.x + f.x * Math.cos(fc.pitch), fc.y - Math.sin(fc.pitch), fp.z + f.z * Math.cos(fc.pitch));
+    this.frontCamera.position.set(fp.x, gy + fc.y, fp.z);
+    this.frontCamera.lookAt(fp.x + f.x * Math.cos(fc.pitch), gy + fc.y - Math.sin(fc.pitch), fp.z + f.z * Math.cos(fc.pitch));
     this.frontCamera.updateMatrixWorld();
 
     const cam = this.camera;
@@ -217,8 +252,49 @@ export class CameraRig {
     switch (this.mode) {
       case 'chase': {
         const d = this.chaseDist + (spec.length - 4.6) * 0.5;
-        const desired = new THREE.Vector3(pose.x - f.x * d, this.chaseHeight, pose.z - f.z * d);
-        const look = new THREE.Vector3(pose.x + f.x * 2.0, 1.0, pose.z + f.z * 2.0);
+        const ceil = this.ceilingFn ? this.ceilingFn(pose.x, pose.z, gy) : Infinity;
+        const look = new THREE.Vector3(pose.x + f.x * 2.0, gy + 1.0, pose.z + f.z * 2.0);
+        // 가림 보정: 기둥/벽/차량이 카메라와 차 사이에 있으면 (1) 좌우로 돌거나 높이를 올린 후보 위치 중 시야가 트인 곳을 고르고,
+        // (2) 모두 막히면 차체 바로 뒤(차 길이/2+1.6m)까지만 당긴다. 직전에 고른 후보가 계속 트여 있으면 유지해 흔들리지 않는다.
+        const probe = (yaw: number, hm: number, back = 1): { pos: THREE.Vector3; free: number } => {
+          const dx = Math.sin(pose.heading + yaw);
+          const dz = Math.cos(pose.heading + yaw);
+          const pos = new THREE.Vector3(pose.x - dx * d * back, Math.min(gy + this.chaseHeight * hm, ceil - 0.25), pose.z - dz * d * back);
+          return { pos, free: freeFraction({ x: pose.x, y: gy + 1.2, z: pose.z }, pos, this.colliders, 0.6, 0.05) };
+        };
+        // [좌우 회전(rad), 높이 배율, 뒤쪽 거리 배율] — 마지막은 차 바로 위쪽에서 내려다보는 최후 후보
+        const CAND: [number, number, number][] = [[0, 1, 1], [0.5, 1, 1], [-0.5, 1, 1], [0, 1.7, 1], [0.8, 1.35, 1], [-0.8, 1.35, 1], [0, 2.3, 1], [0, 2.1, 0.3]];
+        let pick = this.chaseCand;
+        let pr = probe(CAND[pick][0], CAND[pick][1], CAND[pick][2]);
+        if (pr.free < 0.99) {
+          pick = -1;
+          for (let i = 0; i < CAND.length; i++) {
+            const q = probe(CAND[i][0], CAND[i][1], CAND[i][2]);
+            if (q.free >= 0.99) {
+              pick = i;
+              pr = q;
+              break;
+            }
+          }
+          if (pick < 0) {
+            pick = 0;
+            pr = probe(0, 1);
+          }
+        } else if (pick !== 0) {
+          // 원래 위치(0)가 다시 트였으면 복귀 (히스테리시스: 0.6초 이상 트여 있을 때)
+          const base = probe(0, 1);
+          this.chaseBackT = base.free >= 0.99 ? this.chaseBackT + dt : 0;
+          if (this.chaseBackT > 0.6) {
+            pick = 0;
+            pr = base;
+            this.chaseBackT = 0;
+          }
+        }
+        this.chaseCand = pick;
+        const minT = Math.min(1, (spec.length / 2 + 1.6) / d);
+        const tgt = pr.free >= 0.99 ? 1 : Math.max(minT, pr.free);
+        this.chaseFree += (tgt - this.chaseFree) * (this.needSnap ? 1 : 1 - Math.exp(-6 * dt));
+        const desired = new THREE.Vector3(pose.x + (pr.pos.x - pose.x) * this.chaseFree, gy + 1.2 + (pr.pos.y - gy - 1.2) * (0.55 + 0.45 * this.chaseFree), pose.z + (pr.pos.z - pose.z) * this.chaseFree);
         if (this.needSnap) {
           this.smoothPos.copy(desired);
           this.smoothLook.copy(look);
@@ -236,15 +312,15 @@ export class CameraRig {
         const e = spec.driverEye;
         const p = localToWorld(pose.x, pose.z, pose.heading, e.x, e.z);
         cam.fov = 78;
-        cam.position.set(p.x, e.y, p.z);
-        cam.lookAt(p.x + f.x * 10, e.y - 0.5, p.z + f.z * 10);
+        cam.position.set(p.x, gy + e.y, p.z);
+        cam.lookAt(p.x + f.x * 10, gy + e.y - 0.5, p.z + f.z * 10);
         break;
       }
       case 'top': {
         cam.fov = 50;
-        cam.position.set(pose.x, this.topHeight, pose.z);
+        cam.position.set(pose.x, gy + this.topHeight, pose.z);
         cam.up.set(f.x, 0, f.z); // 차량 진행 방향이 화면 위쪽
-        cam.lookAt(pose.x, 0, pose.z);
+        cam.lookAt(pose.x, gy, pose.z);
         break;
       }
       case 'rear':

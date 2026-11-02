@@ -162,3 +162,49 @@ describe('예측 조향선 방향/물리 일치', () => {
     for (let i = 0; i < f.left.length; i++) expect(Math.hypot(f.left[i].x - f.right[i].x, f.left[i].z - f.right[i].z)).toBeCloseTo(sp.width, 4);
   });
 });
+
+describe('방향 집중 탑뷰 (전방/후방)', () => {
+  const corners = (zMin: number, zMax: number) => [
+    [W / 2, zMax],
+    [-W / 2, zMax],
+    [-W / 2, zMin],
+    [W / 2, zMin],
+  ].map(([x, z]) => ({ x, z }));
+  it('전방 집중: 차량 앞부분과 전방 장애물이 화면 안, 중심이 앞쪽, 위쪽=진행 방향', () => {
+    const hits = [{ x: 0.2, z: spec.length / 2 + 0.7 }];
+    const f = frameView({ view: 'topFront', pose, spec, hits, colliders: [], aspect: 16 / 9 });
+    const c = camOf(f);
+    for (const p of [...corners(spec.length / 2 - spec.length * 0.4, spec.length / 2), ...hits]) expect(onScreen(ndc(c, { x: p.x, y: 0, z: p.z }))).toBe(true);
+    expect(f.look.z).toBeGreaterThan(0);
+    expect(f.up.z).toBeGreaterThan(0.99); // heading 0 → 위쪽 = +z
+    expect(f.pos.y).toBeGreaterThanOrEqual(5);
+  });
+  it('후방 집중: 중심이 뒤쪽이고 위쪽은 여전히 차량 진행 방향(일관성)', () => {
+    const hits = [{ x: -0.3, z: -spec.length / 2 - 0.6 }];
+    const f = frameView({ view: 'topRear', pose, spec, hits, colliders: [], aspect: 16 / 9 });
+    expect(f.look.z).toBeLessThan(0);
+    expect(f.up.z).toBeGreaterThan(0.99);
+    const c = camOf(f);
+    expect(onScreen(ndc(c, { x: hits[0].x, y: 0, z: hits[0].z }))).toBe(true);
+  });
+});
+
+import { freeFraction, tooCloseToSolid } from '../src/pdc/visibility';
+describe('카메라 가림 보정 (추적 카메라 / 측면 카메라)', () => {
+  const pil: Collider = { kind: 'cyl', id: 'pil', tag: 'pillar', x: 0, z: -3, r: 0.3, y0: 0, h: 3 };
+  it('look→desired 사이에 기둥이 있으면 기둥 직전까지만 허용 (최소 비율 유지)', () => {
+    const t = freeFraction({ x: 0, y: 1, z: 0 }, { x: 0, y: 2, z: -7 }, [pil], 0.5, 0.3);
+    expect(t).toBeLessThan(0.55);
+    expect(t).toBeGreaterThanOrEqual(0.3);
+  });
+  it('막힘이 없으면 1', () => {
+    expect(freeFraction({ x: 0, y: 1, z: 0 }, { x: 5, y: 2, z: 5 }, [pil], 0.5, 0.3)).toBe(1);
+  });
+  it('높이 위쪽을 지나가면(기둥보다 높음) 막지 않는다', () => {
+    expect(freeFraction({ x: 0, y: 5, z: 0 }, { x: 0, y: 6, z: -7 }, [pil], 0.5, 0.3)).toBe(1);
+  });
+  it('장애물 표면에 0.7m 이내로 붙은 카메라 위치는 거부', () => {
+    expect(tooCloseToSolid({ x: 0.7, y: 1.5, z: -3 }, [pil], 0.7)).toBe(true);
+    expect(tooCloseToSolid({ x: 2.0, y: 1.5, z: -3 }, [pil], 0.7)).toBe(false);
+  });
+});

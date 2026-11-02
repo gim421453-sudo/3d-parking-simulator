@@ -20,6 +20,8 @@ export interface SensorPose {
   x: number; // 차체 중심
   z: number;
   heading: number;
+  /** 차체 바닥 높이(다층). 센서 레이는 y + sensorHeight 에서 발사된다 */
+  y?: number;
 }
 
 export interface SensorHit {
@@ -84,7 +86,7 @@ export function readSensors(
       const ldz = Math.cos(a);
       const dx = ldx * c + ldz * s;
       const dz = -ldx * s + ldz * c;
-      const hit = raycast(colliders, o.x, o.z, dx, dz, cfg.range, sensorHeight);
+      const hit = raycast(colliders, o.x, o.z, dx, dz, cfg.range, (pose.y ?? 0) + sensorHeight);
       if (cfg.collectRays) {
         rays.push({
           ox: o.x,
