@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ObstacleZone, WarnLine } from './overlay';
-import { inFront, projectSegment } from './clip';
+import { inFront, projectPolygon, projectSegment } from './clip';
 import { onTap } from '../ui/tap';
 import { localToWorld } from '../core/math';
 import { ICON } from '../ui/icons';
@@ -79,10 +79,6 @@ export class AssistPanel {
           <canvas class="pa-nav-canvas" width="${ASSIST_CAM_W}" height="${ASSIST_CAM_H}"></canvas>
         </div>
         <div class="pa-pdc">
-          <div class="pa-mode" role="group" aria-label="오른쪽 화면 표시 방식">
-            <button type="button" data-pa="modeSurround" aria-pressed="true">3D 서라운드</button>
-            <button type="button" data-pa="modeSensor" aria-pressed="false">센서</button>
-          </div>
           <canvas class="pa-sur-canvas" role="img" aria-label="3D 서라운드뷰"></canvas>
           <canvas class="pa-sur-ov"></canvas>
           <svg class="pa-svg" role="img" aria-label="차량 주변 주차거리감지(PDC)"></svg>
@@ -98,6 +94,7 @@ export class AssistPanel {
           <button type="button" data-pa="sensor"><i>${ICON.parkAssist}</i><span>주차 보조<em class="v-sensor">켜짐</em></span></button>
           <button type="button" data-pa="sound"><i>${ICON.volume}</i><span>경고음<em class="v-sound">켜짐</em></span></button>
           <button type="button" data-pa="camera"><i>${ICON.cameraSwitch}</i><span>카메라 화면<em class="v-camera">자동</em></span></button>
+          <button type="button" data-pa="pdcMode"><i>${ICON.display}</i><span>표시 방식<em class="v-pdcmode">3D 서라운드</em></span></button>
           <button type="button" data-pa="settings"><i>${ICON.settings}</i><span>설정</span></button>
         </nav>
       </div>`;
@@ -130,8 +127,8 @@ export class AssistPanel {
     onTap(this.btn.camera, () => h.onCycleCamera());
     onTap(this.btn.settings, () => h.onSettings());
     onTap(this.btn.close, () => h.onClose());
-    onTap(q<HTMLButtonElement>('[data-pa="modeSurround"]'), () => h.onSetPdcView('surround'));
-    onTap(q<HTMLButtonElement>('[data-pa="modeSensor"]'), () => h.onSetPdcView('sensor'));
+    // 오른쪽 세로 메뉴의 "표시 방식": 누를 때마다 3D 서라운드 ↔ 센서
+    onTap(q<HTMLButtonElement>('[data-pa="pdcMode"]'), () => h.onSetPdcView(this.surroundActive ? 'sensor' : 'surround'));
     onTap(this.el.querySelector('[data-pa="dest"]') as HTMLButtonElement, () => h.onCycleDestination());
   }
 
@@ -208,12 +205,9 @@ export class AssistPanel {
     this.el.dataset.surround = String(on);
     this.el.dataset.pdcView = supports ? this.pdcView : 'sensor';
     this.el.dataset.surroundSupported = String(supports);
-    const bs = this.el.querySelector<HTMLElement>('[data-pa="modeSurround"]');
-    const bn = this.el.querySelector<HTMLElement>('[data-pa="modeSensor"]');
-    if (bs && bn) {
-      bs.setAttribute('aria-pressed', String(on));
-      bn.setAttribute('aria-pressed', String(!on));
-    }
+    const v = this.el.querySelector<HTMLElement>('.v-pdcmode');
+    if (v) v.textContent = on ? '3D 서라운드' : '센서';
+    this.el.querySelector('[data-pa="pdcMode"]')?.setAttribute('aria-label', `표시 방식: ${on ? '3D 서라운드' : '센서'} (누르면 전환)`);
     if (this.sctx) this.sctx.clearRect(0, 0, this.sur.width, this.sur.height);
     if (this.octx) this.octx.clearRect(0, 0, this.surOv.width, this.surOv.height);
     this.lineAnim.clear();
@@ -397,7 +391,9 @@ export class AssistPanel {
   }
 
   /** 조향각 기반 동적 가이드라인을 실제 카메라 투영으로 오버레이 */
-  private zoneAnim = new Map<string, { c: { x: number; z: number }[]; a: number; target: number; level: ObstacleZone['level']; hits: number }>();
+  /** 테스트/디버그: 마지막으로 그린 수직 경고 패널의 화면 좌표 */
+  debugPanels: { id: string; poly: { x: number; y: number }[]; level: string }[] = [];
+  private zoneAnim = new Map<string, { c: { x: number; z: number }[]; a: number; target: number; level: ObstacleZone['level']; hits: number; panelHeight?: number }>();
 
   private surDimsAt = 0;
   private surDims = { w: 200, h: 240 };
@@ -444,8 +440,7 @@ export class AssistPanel {
     const W = this.surOv.width;
     const H = this.surOv.height;
     g.clearRect(0, 0, W, H);
-    const pal = PDC_PALETTES[this.palette].colors;
-    if (o.path && this.spec) this.drawSurroundPath(g, o.camera, W, H, o.path, pal);
+    if (o.path && this.spec) this.drawSurroundPath(g, o.camera, W, H, o.path);
     const seen = new Set<string>();
     for (const l of o.lines) {
       seen.add(l.id);
@@ -459,6 +454,10 @@ export class AssistPanel {
       }
     }
     g.lineCap = 'round';
+    // 차량 중심의 화면 좌표(방향 표시의 바깥쪽 기준)
+    const cc = new THREE.Vector3(o.path?.pose.x ?? 0, o.y, o.path?.pose.z ?? 0).project(o.camera);
+    const centre = o.path ? { x: (cc.x * 0.5 + 0.5) * W, y: (-cc.y * 0.5 + 0.5) * H } : { x: W / 2, y: H / 2 };
+    let arrowK = 0;
     for (const [id, st] of this.lineAnim) {
       if (!seen.has(id)) st.target = 0;
       st.al += (st.target - st.al) * 0.35;
@@ -468,16 +467,39 @@ export class AssistPanel {
       }
       const seg = projectSegment({ x: st.a.x, y: o.y + 0.05, z: st.a.z }, { x: st.b.x, y: o.y + 0.05, z: st.b.z }, o.camera, W, H, false);
       if (!seg) continue;
+      // 서라운드는 단순하게: 색 구분 없이 흰색(가까울수록 약간 굵게) + 바깥쪽을 가리키는 작은 방향 표시. 거리별 색은 센서 전용 화면에서만 사용.
       g.globalAlpha = Math.min(1, st.al);
       g.beginPath();
       g.moveTo(seg[0].x, seg[0].y);
       g.lineTo(seg[1].x, seg[1].y);
-      g.strokeStyle = 'rgba(0,0,0,0.6)';
-      g.lineWidth = 7;
+      g.strokeStyle = 'rgba(0,0,0,0.5)';
+      g.lineWidth = 5.5;
       g.stroke();
-      g.strokeStyle = pal[st.level];
-      g.lineWidth = st.level === 'critical' ? 5.5 : 4.5;
+      g.strokeStyle = '#ffffff';
+      g.lineWidth = st.level === 'critical' ? 3.6 : 2.6;
       g.stroke();
+      // 방향 표시는 몇 개 선분마다 하나만(과도하게 복잡해지지 않게)
+      if (centre && arrowK++ % 4 === 0) {
+        const mx = (seg[0].x + seg[1].x) / 2;
+        const my = (seg[0].y + seg[1].y) / 2;
+        const dx = mx - centre.x;
+        const dy = my - centre.y;
+        const n = Math.hypot(dx, dy) || 1;
+        const ux = dx / n;
+        const uy = dy / n;
+        const bx = mx + ux * 4;
+        const by = my + uy * 4;
+        g.beginPath();
+        g.moveTo(bx + ux * 7, by + uy * 7);
+        g.lineTo(bx - uy * 4.5, by + ux * 4.5);
+        g.lineTo(bx + uy * 4.5, by - ux * 4.5);
+        g.closePath();
+        g.fillStyle = '#ffffff';
+        g.strokeStyle = 'rgba(0,0,0,0.5)';
+        g.lineWidth = 1.2;
+        g.stroke();
+        g.fill();
+      }
     }
     g.globalAlpha = 1;
   }
@@ -492,7 +514,6 @@ export class AssistPanel {
     W: number,
     H: number,
     p: { pose: { x: number; z: number; heading: number; y?: number }; steer: number; dir: 1 | -1; guideMax: number; groundY?: (x: number, z: number) => number },
-    pal: Record<string, string>,
   ): void {
     const spec = this.spec!;
     const lines = buildGuideLines(spec, p.steer, p.dir, Math.max(0.25, p.guideMax), SURROUND_MARKS);
@@ -523,11 +544,12 @@ export class AssistPanel {
     };
     // 어두운 차체가 어두운 바닥에 묻히지 않도록 차량 외곽(진행 방향 범퍼 강조)을 먼저 그린다
     this.drawFootprint(g, { camera: cam, pose: p.pose, groundY: p.groundY, mirror: false, footprint: p.dir > 0 ? 'front' : 'rear' }, W, H);
-    const col = (s: number): string => pal[guideColor(s)];
-    stroke(lines.straightLeft, 1.2, () => '#ffffff', 0.28, [5, 5]);
-    stroke(lines.straightRight, 1.2, () => '#ffffff', 0.28, [5, 5]);
-    stroke(lines.left, 2.4, col);
-    stroke(lines.right, 2.4, col);
+    // 예측 경로는 흰색 실선(얇게) + 가로 눈금 + 진행 방향 화살표. PDC 방향선(굵은 흰 선+삼각 표시)·직진 기준 점선과 구분된다.
+    const col = (): string => '#ffffff';
+    stroke(lines.straightLeft, 1.1, col, 0.3, [5, 5]);
+    stroke(lines.straightRight, 1.1, col, 0.3, [5, 5]);
+    stroke(lines.left, 1.9, col, 0.95);
+    stroke(lines.right, 1.9, col, 0.95);
     for (const m of lines.marks) {
       const seg = projectSegment(world(m.left), world(m.right), cam, W, H, false);
       if (!seg) continue;
@@ -537,9 +559,37 @@ export class AssistPanel {
       g.strokeStyle = 'rgba(0,0,0,0.55)';
       g.lineWidth = m.s < 1 ? 3.4 : 4.2;
       g.stroke();
-      g.strokeStyle = col(m.s);
-      g.lineWidth = m.s < 1 ? 1.6 : 2.4;
+      g.strokeStyle = col();
+      g.lineWidth = m.s < 1 ? 1.4 : 2.0;
       g.stroke();
+    }
+    // 진행 방향 화살표: 경로 끝(중앙)에서 진행 방향
+    const n = lines.left.length;
+    if (n >= 2) {
+      const mid = (i: number): { x: number; y: number; ok: boolean } => {
+        const a = world({ x: (lines.left[i].x + lines.right[i].x) / 2, z: (lines.left[i].z + lines.right[i].z) / 2 });
+        const sg = projectSegment(a, { ...a, y: a.y + 0.001 }, cam, W, H, false);
+        return sg ? { x: sg[0].x, y: sg[0].y, ok: true } : { x: 0, y: 0, ok: false };
+      };
+      const e = mid(n - 1);
+      const f = mid(Math.max(0, n - 3));
+      if (e.ok && f.ok) {
+        const dx = e.x - f.x;
+        const dy = e.y - f.y;
+        const L = Math.hypot(dx, dy) || 1;
+        const ux = dx / L;
+        const uy = dy / L;
+        g.beginPath();
+        g.moveTo(e.x + ux * 8, e.y + uy * 8);
+        g.lineTo(e.x - uy * 6 - ux * 3, e.y + ux * 6 - uy * 3);
+        g.lineTo(e.x + uy * 6 - ux * 3, e.y - ux * 6 - uy * 3);
+        g.closePath();
+        g.fillStyle = '#ffffff';
+        g.strokeStyle = 'rgba(0,0,0,0.55)';
+        g.lineWidth = 1.4;
+        g.stroke();
+        g.fill();
+      }
     }
   }
 
@@ -605,6 +655,7 @@ export class AssistPanel {
   }): void {
     const g = this.gctx;
     g.clearRect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
+    this.debugPanels = [];
     const spec = this.spec;
     if (!spec) return;
     const pal = PDC_PALETTES[this.palette].colors;
@@ -614,7 +665,7 @@ export class AssistPanel {
     for (const z of o.zones) {
       seen.add(z.sensorId);
       const st = this.zoneAnim.get(z.sensorId);
-      if (!st) this.zoneAnim.set(z.sensorId, { c: z.corners.map((q) => ({ ...q })), a: 0, target: 1, level: z.level, hits: z.hits });
+      if (!st) this.zoneAnim.set(z.sensorId, { c: z.corners.map((q) => ({ ...q })), a: 0, target: 1, level: z.level, hits: z.hits, panelHeight: z.panelHeight });
       else {
         for (let i = 0; i < 4; i++) {
           st.c[i].x += (z.corners[i].x - st.c[i].x) * 0.4;
@@ -623,6 +674,7 @@ export class AssistPanel {
         st.target = 1;
         st.level = z.level;
         st.hits = z.hits;
+        st.panelHeight = z.panelHeight;
       }
     }
     for (const [id, st] of this.zoneAnim) {
@@ -630,6 +682,44 @@ export class AssistPanel {
       st.a += (st.target - st.a) * 0.3;
       if (st.target === 0 && st.a < 0.03) {
         this.zoneAnim.delete(id);
+        continue;
+      }
+      const panelH = st.panelHeight;
+      if (panelH !== undefined) {
+        // 수직 경고 패널: 장애물 표면(corners[3]→corners[2])을 밑변으로 지면과 수직(월드 +y)으로 panelH 만큼 세운 직사각형.
+        const gy = (x: number, zz: number): number => (o.groundY ? o.groundY(x, zz) : (o.pose.y ?? 0)) + 0.02;
+        const a = st.c[3];
+        const b = st.c[2];
+        const poly = projectPolygon(
+          [
+            { x: a.x, y: gy(a.x, a.z), z: a.z },
+            { x: b.x, y: gy(b.x, b.z), z: b.z },
+            { x: b.x, y: gy(b.x, b.z) + panelH, z: b.z },
+            { x: a.x, y: gy(a.x, a.z) + panelH, z: a.z },
+          ],
+          cam,
+          ASSIST_CAM_W,
+          ASSIST_CAM_H,
+          o.mirror,
+        );
+        if (!poly) continue;
+        this.debugPanels.push({ id, poly: poly.map((q) => ({ x: q.x, y: q.y })), level: st.level });
+        g.save();
+        g.beginPath();
+        g.rect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
+        g.clip();
+        g.beginPath();
+        g.moveTo(poly[0].x, poly[0].y);
+        for (let i = 1; i < poly.length; i++) g.lineTo(poly[i].x, poly[i].y);
+        g.closePath();
+        g.globalAlpha = st.a * (st.hits > 1 ? 0.38 : 0.24);
+        g.fillStyle = pal[st.level];
+        g.fill();
+        g.globalAlpha = st.a * 0.95;
+        g.strokeStyle = pal[st.level];
+        g.lineWidth = 2;
+        g.stroke();
+        g.restore();
         continue;
       }
       // 각 변을 근평면/화면 클리핑한 뒤 외곽선과 면을 그린다 (모서리 하나라도 카메라 뒤면 면은 생략하고 선만)

@@ -98,7 +98,7 @@ export class Hud {
     const ab = (a: string, title: string, icon: string, extra = ''): string => `<button class="ab" data-a="${a}" title="${title}" aria-label="${title}">${icon}${extra}</button>`;
     this.root.innerHTML = `
       <div id="left-col">
-        <div id="gear-big" role="status" aria-label="현재 기어 P" data-g="P"><span data-g="P">P</span><span data-g="R">R</span><span data-g="N">N</span><span data-g="D">D</span></div>
+        <div id="gear-panel"><div id="gear-big" role="status" aria-label="현재 기어 P" data-g="P"><span data-g="P">P</span><span data-g="R">R</span><span data-g="N">N</span><span data-g="D">D</span></div></div>
         <div id="floor-ind" class="hidden" role="status" aria-label="현재 층"></div>
         <div id="mission-panel" class="glass"></div>
         <div id="sv-controls"></div>
@@ -155,7 +155,7 @@ export class Hud {
     this.touchEl = q('#touch');
     this.minimap = new Minimap(q('#minimap'));
     this.gearInd = q('#gear-big');
-    this.shifter = new Shifter(this.root, this.h.shifter);
+    this.shifter = new Shifter(q('#gear-panel'), this.h.shifter); // v0.4.8: 기어 표시와 실제 레버를 좌측 상단 한 패널에 통합
     this.root.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => {
       this.btns.set(b.dataset.a!, b);
       onTap(b, () => this.h.action(b.dataset.a as Action));

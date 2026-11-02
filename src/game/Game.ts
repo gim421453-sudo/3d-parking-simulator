@@ -97,6 +97,9 @@ export class Game {
   readonly info = new InfotainmentController();
   readonly nav = new Navigator();
   readonly viewPolicy = new ViewPolicy();
+  /** 기어 변경 후 차량이 실제로 움직였는가 (자동 시점 전환 허용 조건). 테스트에서 직접 설정 가능 */
+  viewGate = false;
+  private viewGateGear: Gear = 'P';
   infoOut: InfoOutput = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '', expanded: false, forcedContent: null };
   viewOut: { view: AssistView; auto: boolean; reason: string } = { view: 'rear', auto: false, reason: '' };
   navState: NavState = this.nav.state;
@@ -361,6 +364,7 @@ export class Game {
     this.assistOut = { active: false, camera: 'rear', manualView: null, focus: 'rear', cameraMode: 'auto', reason: '' };
     this.info.reset('P');
     this.viewPolicy.reset();
+    this.viewGate = false;
     this.infoOut = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '', expanded: false, forcedContent: null };
     this.viewOut = { view: 'rear', auto: false, reason: '' };
     this.nav.setMap(map);
@@ -754,13 +758,21 @@ export class Game {
     };
     const caps = this.spec.assist;
     this.assistOut = this.assist.update({ gear: this.car.gear, speedKmh: Math.abs(this.car.v) * 3.6, dt }, restrictAssist(asSet, caps));
+    // 기어를 바꾼 직후에는 새 기어 방향의 기본 카메라(R=후방, D=전방)를 우선한다.
+    // 차량이 실제로 움직이기 시작(|v|>0.3m/s)한 뒤에만 센서 위험에 의한 자동 집중뷰/측면뷰를 허용한다 (정지 중 히트값만으로 재선택 금지).
+    if (this.car.gear !== this.viewGateGear) {
+      this.viewGateGear = this.car.gear;
+      this.viewGate = false;
+      this.viewPolicy.reset();
+    }
+    if (!this.viewGate && Math.abs(this.car.v) > 0.3) this.viewGate = true;
     // 자동 3D 시점(측면 장애물) + 인포테인먼트 공유 상태 + 내비게이션
     this.viewOut = this.viewPolicy.update(
       dt,
       clampView(this.assistOut.camera, caps),
       this.assistOut.manualView && allowedViews(caps).includes(this.assistOut.manualView) ? this.assistOut.manualView : null,
       this.sensorSnap ? this.sideObservation(this.sensorSnap) : null,
-      this.settings.assistAutoView && autoViewAllowed(caps) && this.assistOut.active && this.settings.sensorEnabled && (this.car.gear === 'R' || this.car.gear === 'D'), // N/P 에서는 자동 시점 전환을 하지 않는다
+      this.viewGate && this.settings.assistAutoView && autoViewAllowed(caps) && this.assistOut.active && this.settings.sensorEnabled && (this.car.gear === 'R' || this.car.gear === 'D'), // N/P 에서는 자동 시점 전환을 하지 않는다
     );
     const infoSet: InfoSettings = { autoShow: this.settings.infoAutoShow, autoHide: this.settings.infoAutoHide, autoHideSec: this.settings.infoAutoHideSec };
     this.infoOut = this.info.update({ dt, gear: this.car.gear, parkingActive: this.assistOut.active, firstPerson: this.rig.mode === 'driver' }, infoSet);
@@ -988,11 +1000,8 @@ export class Game {
     const h = sorted.find((q) => px >= q.x && px <= q.x + q.w && py >= q.y && py <= q.y + q.h);
     if (!h) return null;
     switch (h.action) {
-      case 'pdcSurround':
-        this.onAction('pdcSurround');
-        break;
-      case 'pdcSensor':
-        this.onAction('pdcSensor');
+      case 'pdcMode':
+        this.onAction(this.assistPanel.surroundActive ? 'pdcSensor' : 'pdcSurround');
         break;
       case 'sensor':
         this.onAction('sensorToggle');
@@ -1220,7 +1229,7 @@ export class Game {
     const rng = this.settings.sensorRange;
     const crt = this.settings.sensorCritical;
     // 전/후방 카메라: 가로 6칸 독립 타일, 3D/탑뷰: 차량 근처 장애물 경계 셀 (같은 센서 스냅샷 사용)
-    let zones = !this.settings.sensorEnabled || !isCar ? [] : buildCameraTiles(this.sensorSnap, this.spec, body, view === 'rear' ? 'rear' : 'front', rng, crt);
+    let zones = !this.settings.sensorEnabled || !isCar ? [] : buildCameraTiles(this.sensorSnap, this.spec, body, view === 'rear' ? 'rear' : 'front', rng, crt, (id) => { const c = this.colliderById.get(id); return c ? c.y0 + c.h : undefined; }, pose.y ?? 0);
     const warnLines = !this.settings.sensorEnabled || isCar ? [] : buildWarnLines(this.sensorSnap, body, rng, crt);
     if (!isCar && zones.length) {
       const cbody = this.carBody();

@@ -133,6 +133,14 @@ export class ViewPolicy {
       this.cand = null;
       return { view: base, auto: false, reason: enabled ? '센서 없음' : '자동 전환 꺼짐' };
     }
+    // 진행 방향이 바뀌었는데(기어 변경) 이전 방향의 집중 탑뷰가 남아 있으면 즉시 기본 카메라로 (새 기어 방향 우선)
+    if ((this.cur === 'topFront' && base !== 'front') || (this.cur === 'topRear' && base !== 'rear')) {
+      this.cur = null;
+      this.cand = null;
+      this.candT = 0;
+      this.relT = 0;
+      this.since = this.t;
+    }
     const held = this.t - this.since >= this.cfg.minHoldSec;
     const cool = this.t - this.lastSwitch >= this.cfg.cooldownSec;
     const enterWant = this.want(obs, this.cfg.enterRank, base);
@@ -168,7 +176,9 @@ export class ViewPolicy {
       return { view: this.cur, auto: true, reason: '측면 장애물 접근' };
     }
     this.relT += dt;
-    if (this.relT >= this.cfg.releaseSec && held) {
+    // 집중 탑뷰는 충돌 가능성이 높을 때만 쓰는 보조 화면: 위험이 사라지면 더 빨리(0.8초) 기본 전/후방 카메라로 복귀
+    const relNeed = this.cur === 'topFront' || this.cur === 'topRear' ? Math.min(this.cfg.releaseSec, 0.8) : this.cfg.releaseSec;
+    if (this.relT >= relNeed && (held || this.cur === 'topFront' || this.cur === 'topRear')) {
       this.cur = null;
       this.cand = null;
       this.candT = 0;

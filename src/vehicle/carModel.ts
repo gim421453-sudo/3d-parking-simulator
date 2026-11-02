@@ -321,6 +321,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     // 1인칭 콕핏 (차체는 숨기고 대시보드/후드/필러/지붕 안쪽만 표시)
     const dashMat = sharedMat('dash', () => new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.7 }));
     const eye = spec.driverEye;
+    const dashTop = belt + 0.03; // 대시보드 윗면 높이
     const dash = new THREE.Mesh(new THREE.BoxGeometry(W * 0.92, 0.2, 0.42), dashMat);
     dash.position.set(0, belt - 0.07, z1 - 0.22);
     cockpit.add(dash);
@@ -345,13 +346,13 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     headliner.position.set(0, H - 0.075, (z0t + z1t) / 2);
     cockpit.add(headliner);
     const wheel = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 20), dashMat);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.02, 8, 20), dashMat);
     const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 10), dashMat);
     hub.rotation.x = Math.PI / 2;
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.025, 0.02), dashMat);
     wheel.add(ring, hub, bar);
-    wheel.position.set(eye.x, eye.y - 0.2, eye.z + 0.5);
-    wheel.rotation.x = -0.9; // 운전자 쪽으로 기울임
+    wheel.position.set(eye.x, eye.y - 0.27, eye.z + 0.45); // 시야선 아래(림 윗부분이 계기판보다 낮음)
+    wheel.rotation.x = -1.0; // 운전자 쪽으로 기울임
     cockpit.add(wheel);
     steeringWheel = wheel;
     // 실내 화면 (센터 디스플레이 + 디지털 계기판): 3인칭 플로팅 패널과 같은 상태를 그린다
@@ -386,9 +387,21 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       right: mkMirror(0.2, 0.1, new THREE.Vector3(-(W / 2 + 0.1), belt + 0.1, z1 - 0.08), 0),
       room: mkMirror(0.24, 0.07, new THREE.Vector3(0.12, H - 0.17, z1t - 0.1), 0),
     };
+    const clusterPos = new THREE.Vector3(eye.x + 0.03, Math.max(eye.y - 0.2, dashTop + 0.05 + 0.0728), Math.max(eye.z + 0.7, z1 - 0.36));
+    {
+      // 계기판 하우징: 화면이 허공에 떠 보이지 않도록 대시 윗면까지 내려오는 어두운 받침
+      const hb = clusterPos.y - 0.0728 - dashTop + 0.01;
+      if (hb > 0.02) {
+        const pod = new THREE.Mesh(new THREE.BoxGeometry(0.41, hb, 0.1), dashMat);
+        pod.position.set(clusterPos.x, dashTop + hb / 2 - 0.01, clusterPos.z + 0.05);
+        cockpit.add(pod);
+      }
+    }
     cabinScreens = {
-      center: mkScreen(768, 336, 0.58, 0.254, new THREE.Vector3(0.02, belt + 0.2, z1 - 0.2)),
-      cluster: mkScreen(512, 196, 0.42, 0.161, new THREE.Vector3(eye.x, eye.y - 0.16, eye.z + 0.72)),
+      // v0.4.8: 두 화면을 물리적으로 분리 — 디지털 계기판은 운전자 정면(핸들 림 위), 인포테인먼트는 대시 중앙(운전자 시선 정중앙을 비켜 낮게).
+      // 가로: 중앙 화면 x∈[-0.37,0.09], 계기판 x∈[0.20,0.58] (간격 ≥ 0.11m). 둘 다 운전자 쪽을 향한다.
+      center: mkScreen(768, 336, 0.46, 0.2013, new THREE.Vector3(-0.14, dashTop + 0.02 + 0.1007, z1 - 0.16)),
+      cluster: mkScreen(512, 196, 0.38, 0.1455, clusterPos),
     };
     cockpit.visible = false;
     root.add(cockpit);

@@ -172,8 +172,7 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #gear-ind { width: 34px; height: 34px; display: grid; place-items: center; font-size: 20px; font-weight: 800; border-radius: 10px; color: #fff; background: rgba(143, 184, 255, .2); border: 1px solid rgba(143, 184, 255, .35); }
 #gear-ind[data-g="R"] { background: rgba(229, 55, 47, .38); border-color: rgba(229, 55, 47, .6); }
 #gear-ind[data-g="P"], #gear-ind[data-g="N"] { background: rgba(255, 255, 255, .08); border-color: var(--hair-2); color: var(--txt-2); }
-#shifter { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: 14px; width: 54px; padding: 8px 5px 6px; border-radius: 18px; z-index: 7; touch-action: none; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-#hud.touch-on #shifter { right: calc(160px * var(--touch) + 26px); bottom: 12px; }
+#shifter { position: relative; flex: none; width: 54px; padding: 8px 5px 6px; border-radius: 18px; z-index: 7; touch-action: none; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .sh-track { position: relative; width: 44px; height: calc(var(--sh) * 4); touch-action: none; cursor: grab; user-select: none; }
 #shifter.dragging .sh-track { cursor: grabbing; }
 .sh-rail { position: absolute; left: 50%; top: 8px; bottom: 8px; width: 6px; margin-left: -3px; border-radius: 3px; background: rgba(255, 255, 255, .08); pointer-events: none; }
@@ -291,7 +290,6 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
   .cl-main { gap: 10px; }
   #gear-ind { width: 30px; height: 30px; font-size: 17px; }
   #shifter { --sh: 34px; padding: 6px 4px 5px; width: 50px; }
-  #hud.touch-on #shifter { right: calc(144px * var(--touch) + 20px); bottom: 8px; }
   .tbtn { width: calc(64px * var(--touch)); height: calc(64px * var(--touch)); }
   .tbtn.gas { height: calc(92px * var(--touch)); width: calc(70px * var(--touch)); }
   #t-steer, #t-pedals { bottom: 8px; }
@@ -352,10 +350,15 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #touch .tbtn.gas { width: var(--pw); height: calc(min(var(--pw) * 2.0, 50vh)); border-radius: 22px; }
 #touch .tbtn.brk, #touch .tbtn.gas { font-size: calc(var(--pw) * .17); display: grid; place-items: center; background-image: repeating-linear-gradient(180deg, rgba(255,255,255,.07) 0 3px, transparent 3px 14px); }
 #touch .tbtn.held { transform: scale(.97); }
-#hud.touch-on #shifter { right: calc(var(--ped-r) + var(--ped-total) + 40px); bottom: var(--ped-b); }
-@media (max-height: 480px) { #hud.touch-on { --ped-r: max(22px, env(safe-area-inset-right)); --ped-b: 16px; --ped-gap: 14px; } #hud.touch-on #shifter { right: calc(var(--ped-r) + var(--ped-total) + 28px); } #t-steer { bottom: 8px; } }
+@media (max-height: 480px) { #hud.touch-on { --ped-r: max(22px, env(safe-area-inset-right)); --ped-b: 16px; --ped-gap: 14px; } #t-steer { bottom: 8px; } }
 /* 터치 대형 조작부가 켜져 있으면 좌측의 작은 3D 센서 화면(겹침 원인)은 숨긴다 — PDC 서라운드뷰가 같은 역할을 한다 */
 @media (max-height: 1000px) { #hud.touch-on .sensor-view.small, #hud.touch-on #sv-controls:not(.large) { display: none; } }
 
 /* 낮은 화면(≤480px): 핸들이 위쪽 주차 보조 패널과 겹치지 않도록 높이 상한을 낮춘다 */
 @media (max-height: 480px) { #hud.touch-on { --wheel: max(104px, min(40vh, var(--avail), calc(396px * var(--touch)))); } }
+
+/* v0.4.8: 좌측 상단 통합 기어 패널 = 현재 기어 큰 표시 + 실제 전자식 레버 (오른쪽 페달 쪽에는 레버 없음) */
+#gear-panel { display: flex; align-items: flex-start; gap: 8px; width: max-content; pointer-events: none; }
+#gear-panel > * { pointer-events: auto; }
+#gear-panel #gear-big { pointer-events: none !important; }
+#gear-panel #shifter { right: auto; bottom: auto; }

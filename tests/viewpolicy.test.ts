@@ -159,3 +159,44 @@ describe('간격/접근속도 기반 시점 정책 (risk)', () => {
     expect(p.switches).toBeLessThan(12);
   });
 });
+
+describe('기어 변경과 집중 탑뷰 (v0.4.8)', () => {
+  const risk = (front: boolean, rear: boolean) => ({
+    risk: {
+      threat: { front, rear, left: false, right: false },
+      veryClose: { front, rear, left: false, right: false },
+      pillar: { front: false, rear: false, left: false, right: false },
+      narrow: false,
+      sideBlocked: { left: false, right: false },
+    },
+    level: { left: 'none', right: 'none', front: front ? 'critical' : 'none', rear: rear ? 'critical' : 'none' },
+    hits: { left: 0, right: 0, front: front ? 6 : 0, rear: rear ? 6 : 0 },
+  } as SideObservation);
+  it('전방 집중 탑뷰 중 R 로 바뀌면 지연 없이 즉시 후방(기본) 카메라', () => {
+    const p = new ViewPolicy();
+    expect(run(p, 1, risk(true, false), 'front').view).toBe('topFront');
+    const d = p.update(0.05, 'rear', null, risk(true, false), true);
+    expect(d.view).toBe('rear');
+  });
+  it('후방 집중 탑뷰 중 D 로 바뀌면 즉시 전방(기본) 카메라', () => {
+    const p = new ViewPolicy();
+    expect(run(p, 1, risk(false, true), 'rear').view).toBe('topRear');
+    expect(p.update(0.05, 'front', null, risk(false, true), true).view).toBe('front');
+  });
+  it('위험이 사라지면 약 0.8초 안에 집중 탑뷰에서 기본 전/후방 카메라로 복귀 (측면뷰 해제보다 빠름)', () => {
+    const p = new ViewPolicy();
+    run(p, 1, risk(true, false), 'front');
+    expect(run(p, 0.4, risk(false, false), 'front').view).toBe('topFront');
+    expect(run(p, 0.8, risk(false, false), 'front').view).toBe('front');
+  });
+  it('센서가 잠깐(0.2초) 끊겨도 반복 전환하지 않는다', () => {
+    const p = new ViewPolicy();
+    run(p, 1, risk(true, false), 'front');
+    run(p, 0.2, risk(false, false), 'front');
+    expect(run(p, 1, risk(true, false), 'front').view).toBe('topFront');
+    expect(p.switches).toBe(1);
+  });
+  it('자동 판단이 꺼져 있으면(기어 변경 직후, 이동 전) 위험이 있어도 기본 카메라', () => {
+    expect(run(new ViewPolicy(), 2, risk(true, false), 'front', null, false).view).toBe('front');
+  });
+});

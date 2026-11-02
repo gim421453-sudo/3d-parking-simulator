@@ -182,3 +182,43 @@ describe('서라운드/집중뷰 경고선 (외곽을 따라가는 선)', () => 
     expect(ls.length).toBeGreaterThan(0);
   });
 });
+
+describe('수직 경고 패널 데이터 (v0.4.8)', () => {
+  const body = { x: 0, z: 0, rot: 0, hw: spec.width / 2, hl: spec.length / 2 };
+  const rearWall = (gap: number, w = 12, cx = 0, h = 1.2): Collider => ({ ...wall(cx, -(spec.length / 2 + gap + 0.25), w, 0.5), h });
+  it('전/후방 타일은 모두 panelHeight 를 갖고(수직 패널), 밑변(corners[3]→[2])이 장애물 표면에 놓인다', () => {
+    const t = buildCameraTiles(snapOf([rearWall(1.0)]), spec, body, 'rear', 3, 0.5);
+    expect(t.length).toBeGreaterThan(0);
+    for (const q of t) {
+      expect(q.panelHeight).toBeGreaterThan(0.3);
+      const a = worldToLocal(0, 0, 0, q.corners[3].x, q.corners[3].z);
+      const b = worldToLocal(0, 0, 0, q.corners[2].x, q.corners[2].z);
+      expect(a.z).toBeCloseTo(b.z, 6); // 폭 방향 밑변은 차체 폭과 평행
+      expect(-a.z - spec.length / 2).toBeCloseTo(1.0, 0); // 표면까지 약 1.0m
+    }
+  });
+  it('패널 높이는 실제 충돌체 윗면(topOf)에서 정해지고 상/하한으로 제한된다 — 없는 높이를 만들지 않음', () => {
+    const sn = snapOf([rearWall(1.0, 12, 0, 1.2)]);
+    const low = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 0.6, 0);
+    expect(low.every((q) => Math.abs((q.panelHeight ?? 0) - 0.6) < 1e-9)).toBe(true);
+    const tall = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 3.0, 0);
+    expect(tall.every((q) => (q.panelHeight ?? 0) <= 1.3 + 1e-9)).toBe(true);
+    const elevated = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 4.6, 4.0); // 다층: 기준 높이 상대
+    expect(elevated.every((q) => Math.abs((q.panelHeight ?? 0) - 0.6) < 1e-9)).toBe(true);
+  });
+  it('좁은 기둥: 인접한 감지 안 된 칸까지 패널을 늘리지 않는다', () => {
+    const pillar = (gap: number): Collider => ({ kind: 'cyl', id: 'p', tag: 'pillar', x: 0, z: -(spec.length / 2 + gap + 0.15), r: 0.15, y0: 0, h: 3 });
+    const t = buildCameraTiles(snapOf([pillar(0.8)]), spec, body, 'rear', 3, 0.5);
+    expect(t.length).toBeGreaterThan(0);
+    expect(t.length).toBeLessThanOrEqual(2);
+    for (const q of t) {
+      const xs = [q.corners[2].x, q.corners[3].x];
+      expect(Math.abs(xs[0] - xs[1])).toBeLessThan((spec.width + 0.7) / TILE_COUNT + 1e-6);
+    }
+  });
+  it('후방 카메라 타일의 왼쪽/오른쪽이 뒤집히지 않는다 (왼쪽 장애물 → +x 쪽 칸)', () => {
+    const left = buildCameraTiles(snapOf([rearWall(0.8, 1.0, 0.8)]), spec, body, 'rear', 3, 0.5);
+    const cx = (z: { corners: { x: number }[] }) => (z.corners[2].x + z.corners[3].x) / 2;
+    expect(left.every((q) => cx(q) > 0)).toBe(true);
+  });
+});

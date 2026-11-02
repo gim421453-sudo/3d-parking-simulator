@@ -21,6 +21,11 @@ export interface ObstacleZone {
   hits: number;
   /** 이 구역을 만든 실제 충돌체 id (가림 판정에서 자기 자신은 제외) */
   colliderIds: string[];
+  /**
+   * 전/후방 카메라용 수직 경고 패널: 장애물 표면(corners[3]→corners[2] 변)에 지면과 수직으로 세운 직사각형의 높이(m, 지면 기준).
+   * 있으면 지면 사각형 대신 3D 꼭짓점(바닥 2점 + 윗변 2점)으로 그린다.
+   */
+  panelHeight?: number;
 }
 
 export const OVERLAY_DEPTH = 0.45; // m, 가장 가까운 히트점에서 바깥쪽으로
@@ -83,7 +88,11 @@ const TILE_DEPTH = 0.45; // 장애물 표면 앞쪽(차량 쪽) 바닥으로 칠
  * 타일은 그 칸의 가장 가까운 장애물 표면에서 차량 쪽으로 TILE_DEPTH 만큼의 바닥 사각형이라 표면 위치와 일치한다.
  * 칸의 색 단계는 그 칸의 가장 가까운 거리로 정한다(숫자는 내보내지 않는다). 히트가 없는 칸은 만들지 않는다.
  */
-export function buildCameraTiles(snap: SensorSnapshot | null, spec: VehicleSpec, body: Obb, dir: 'front' | 'rear', range: number, critical: number): ObstacleZone[] {
+export const PANEL_H_DEFAULT = 1.0;
+export const PANEL_H_MIN = 0.35;
+export const PANEL_H_MAX = 1.3;
+
+export function buildCameraTiles(snap: SensorSnapshot | null, spec: VehicleSpec, body: Obb, dir: 'front' | 'rear', range: number, critical: number, topOf?: (colliderId: string) => number | undefined, baseY = 0): ObstacleZone[] {
   if (!snap) return [];
   const hw = body.hw;
   const hl = body.hl;
@@ -115,7 +124,14 @@ export function buildCameraTiles(snap: SensorSnapshot | null, spec: VehicleSpec,
     const zNear = (dir === 'front' ? 1 : -1) * (hl + Math.max(0, b.gap - TILE_DEPTH));
     const zFar = (dir === 'front' ? 1 : -1) * (hl + b.gap);
     const P = (x: number, z: number): { x: number; z: number } => localToWorld(body.x, body.z, body.rot, x, z);
-    out.push({ sensorId: `tile-${dir}-${i}`, group: dir, level, corners: [P(xl, zNear), P(xr, zNear), P(xr, zFar), P(xl, zFar)], hits: b.hits, colliderIds: [...b.ids] });
+    // 수직 경고 패널 높이: 실제 장애물 윗면(충돌체 데이터)까지, 없으면 기본값. 없는 장애물을 키우지 않는다.
+    let top = Infinity;
+    if (topOf) for (const id of b.ids) {
+      const t = topOf(id);
+      if (t !== undefined) top = Math.min(top, t - baseY);
+    }
+    const panelHeight = Number.isFinite(top) ? Math.min(PANEL_H_MAX, Math.max(PANEL_H_MIN, top)) : PANEL_H_DEFAULT;
+    out.push({ sensorId: `tile-${dir}-${i}`, group: dir, level, corners: [P(xl, zNear), P(xr, zNear), P(xr, zFar), P(xl, zFar)], hits: b.hits, colliderIds: [...b.ids], panelHeight });
   });
   return out;
 }
