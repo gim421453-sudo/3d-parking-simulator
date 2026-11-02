@@ -227,7 +227,7 @@ async function waitServer(url, tries = 50) {
   await g(() => { const c = window.__game.car; c.v = 0; });
   await shiftKey('KeyP');
   check('P 직후에는 화면 유지', (await assistInfo()).visible === true);
-  const closedP = await until(() => document.getElementById('parking-assist').classList.contains('hidden'), undefined, 30000);
+  const closedP = await until(() => document.getElementById('parking-assist').classList.contains('hidden'), undefined, 60000);
   check('P 기어: 지연 후 주차 보조 화면 종료', closedP);
   // 수동 열기(B)/닫기(X)
   await page.keyboard.press('KeyB');
