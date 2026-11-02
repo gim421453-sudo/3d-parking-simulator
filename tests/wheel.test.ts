@@ -70,9 +70,49 @@ describe('1080° 핸들 모델', () => {
       }
       return sec;
     };
-    expect(t(8, 1)).toBeLessThan(t(0, 1));
-    expect(t(0, 2)).toBeLessThan(t(0, 1));
-    expect(t(0, 1)).toBeLessThan(5);
+    expect(t(8, 1)).toBeLessThan(t(1, 1));
+    expect(t(1, 2)).toBeLessThan(t(1, 1));
+    expect(t(1, 1)).toBeLessThan(5);
+  });
+  it('정차 중(속도≈0)에는 손을 떼도 조향각 유지 — 기어 무관, 오래 지나도 그대로', () => {
+    const w = new WheelModel();
+    drag(w, 0, -300);
+    w.end();
+    const a = w.angle;
+    for (let i = 0; i < 500; i++) w.update(0.02, 0, 1);
+    expect(w.angle).toBe(a);
+    for (let i = 0; i < 500; i++) w.update(0.02, 0.05, 2); // 센서 노이즈 수준의 미세 속도
+    expect(w.angle).toBe(a);
+  });
+  it('정차 중 다시 돌리면 정상 변경, 주행 시작하면 복귀', () => {
+    const w = new WheelModel();
+    drag(w, 0, -200);
+    w.end();
+    const a = w.angle;
+    w.update(0.02, 0, 1);
+    drag(w, 0, -100);
+    expect(w.angle).not.toBe(a);
+    w.end();
+    const b = w.angle;
+    for (let i = 0; i < 20; i++) w.update(0.02, 2, 1); // 주행 중
+    expect(Math.abs(w.angle)).toBeLessThan(Math.abs(b));
+  });
+  it('히스테리시스: 유지↔복귀가 속도 경계에서 떨리지 않는다', () => {
+    const w = new WheelModel();
+    drag(w, 0, -300);
+    w.end();
+    w.update(0.02, 1, 1); // 주행 → 복귀 모드
+    expect(w.holding).toBe(false);
+    const a = w.angle;
+    w.update(0.02, 0.25, 1); // 진입 임계(0.15)와 이탈 임계(0.35) 사이 → 복귀 모드 유지
+    expect(w.holding).toBe(false);
+    expect(w.angle).toBeLessThan(a);
+    w.update(0.02, 0.1, 1); // 완전 정차 → 유지
+    expect(w.holding).toBe(true);
+    const b = w.angle;
+    w.update(0.02, 0.25, 1); // 다시 경계 구간 → 유지 상태 유지
+    expect(w.holding).toBe(true);
+    expect(w.angle).toBe(b);
   });
   it('드래그 중에는 복귀하지 않는다', () => {
     const w = new WheelModel();

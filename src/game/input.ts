@@ -23,7 +23,9 @@ export type Action =
   | 'gearStepDown'
   | 'infoDest'
   | 'sensorToggle'
-  | 'soundToggle';
+  | 'soundToggle'
+  | 'pdcSurround'
+  | 'pdcSensor';
 
 const HELD: Record<string, HeldKey> = {
   KeyW: 'throttle',

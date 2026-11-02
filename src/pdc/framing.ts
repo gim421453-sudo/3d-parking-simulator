@@ -102,7 +102,19 @@ export function frameView(inp: FrameInput): FrameResult {
       const l = worldToLocal(pose.x, pose.z, pose.heading, h.x, h.z);
       return front ? l.z > hl - 0.3 : l.z < -hl + 0.3;
     });
-    const pts = [...(front ? carCorners(pose, spec, hl - L * 0.4, hl) : carCorners(pose, spec, -hl, -hl + L * 0.4)), ...sel];
+    // 자기 차량의 해당 범퍼/차체 일부는 반드시 화면에 포함한다(최우선). 장애물은 가까운 것부터 추가하되,
+    // 높이 상한(12m, 일반 전체 탑뷰와 구분되는 집중 시점 유지) 안에 들어오는 만큼만 포함한다.
+    const base = front ? carCorners(pose, spec, hl - L * 0.4, hl) : carCorners(pose, spec, -hl, -hl + L * 0.4);
+    const byDist = sel
+      .map((h) => ({ h, d: Math.abs(worldToLocal(pose.x, pose.z, pose.heading, h.x, h.z).z) }))
+      .sort((a, b) => a.d - b.d)
+      .map((q) => q.h);
+    const pts = [...base];
+    for (const h of byDist) {
+      const test = frameTop(inp, [...pts, h], 0.9, 5.0, 1e9);
+      if (test.pos.y - (pose.y ?? 0) <= 12) pts.push(h);
+      else break;
+    }
     return frameTop(inp, pts, 0.9, 5.0, 12);
   }
   if (inp.view === 'topZoom') {

@@ -8,7 +8,7 @@ import type { VehicleSpec } from '../vehicle/spec';
 import type { InfoContent } from '../infotainment/controller';
 import type { NavState } from '../nav/navigator';
 import { ASSIST_VIEW_NAME, type AssistView } from './viewPolicy';
-import { buildGuideLines, guideColor } from './guidelines';
+import { SURROUND_MARKS, buildGuideLines, guideColor } from './guidelines';
 import { PDC_PALETTES, bandLevel, bandLit, outlinePoint, zoneGeometry, type PdcPaletteId, type PdcState, type ZoneBandShape } from './pdcModel';
 
 export interface AssistPanelHandlers {
@@ -18,6 +18,7 @@ export interface AssistPanelHandlers {
   onSettings(): void;
   onClose(): void;
   onCycleDestination(): void;
+  onSetPdcView(mode: 'surround' | 'sensor'): void;
 }
 
 export const ASSIST_CAM_W = 480;
@@ -78,6 +79,10 @@ export class AssistPanel {
           <canvas class="pa-nav-canvas" width="${ASSIST_CAM_W}" height="${ASSIST_CAM_H}"></canvas>
         </div>
         <div class="pa-pdc">
+          <div class="pa-mode" role="group" aria-label="오른쪽 화면 표시 방식">
+            <button type="button" data-pa="modeSurround" aria-pressed="true">3D 서라운드</button>
+            <button type="button" data-pa="modeSensor" aria-pressed="false">센서</button>
+          </div>
           <canvas class="pa-sur-canvas" role="img" aria-label="3D 서라운드뷰"></canvas>
           <canvas class="pa-sur-ov"></canvas>
           <svg class="pa-svg" role="img" aria-label="차량 주변 주차거리감지(PDC)"></svg>
@@ -125,6 +130,8 @@ export class AssistPanel {
     onTap(this.btn.camera, () => h.onCycleCamera());
     onTap(this.btn.settings, () => h.onSettings());
     onTap(this.btn.close, () => h.onClose());
+    onTap(q<HTMLButtonElement>('[data-pa="modeSurround"]'), () => h.onSetPdcView('surround'));
+    onTap(q<HTMLButtonElement>('[data-pa="modeSensor"]'), () => h.onSetPdcView('sensor'));
     onTap(this.el.querySelector('[data-pa="dest"]') as HTMLButtonElement, () => h.onCycleDestination());
   }
 
@@ -184,10 +191,39 @@ export class AssistPanel {
     if (this.lastState) this.updateZones(this.lastState);
   }
 
+  private pdcView: 'surround' | 'sensor' = 'surround';
+  /** 오른쪽 영역에 3D 서라운드가 실제로 표시되는지 (차량이 지원하고 사용자가 선택한 경우) */
+  get surroundActive(): boolean {
+    return !!this.spec?.assist.virtualSurround3D && this.pdcView === 'surround';
+  }
+  /** 오른쪽 PDC 표시 방식 선택. 전환 시 서라운드 잔상과 과거 경고선을 지운다 (왼쪽 메인 카메라는 건드리지 않음) */
+  setPdcView(mode: 'surround' | 'sensor'): void {
+    if (mode === this.pdcView) return;
+    this.pdcView = mode;
+    this.applyPdcView();
+  }
+  private applyPdcView(): void {
+    const on = this.surroundActive;
+    const supports = !!this.spec?.assist.virtualSurround3D;
+    this.el.dataset.surround = String(on);
+    this.el.dataset.pdcView = supports ? this.pdcView : 'sensor';
+    this.el.dataset.surroundSupported = String(supports);
+    const bs = this.el.querySelector<HTMLElement>('[data-pa="modeSurround"]');
+    const bn = this.el.querySelector<HTMLElement>('[data-pa="modeSensor"]');
+    if (bs && bn) {
+      bs.setAttribute('aria-pressed', String(on));
+      bn.setAttribute('aria-pressed', String(!on));
+    }
+    if (this.sctx) this.sctx.clearRect(0, 0, this.sur.width, this.sur.height);
+    if (this.octx) this.octx.clearRect(0, 0, this.surOv.width, this.surOv.height);
+    this.lineAnim.clear();
+    if (this.lastState) this.updateZones(this.lastState);
+  }
+
   /** 차량(제원) 변경 시 PDC 차량 그래픽과 구역을 다시 만든다 */
   setSpec(spec: VehicleSpec): void {
     this.spec = spec;
-    this.el.dataset.surround = String(spec.assist.virtualSurround3D);
+    this.applyPdcView();
     this.el.dataset.layout = spec.assist.panelLayout; // rear: 후방카메라 전용 컴팩트 / surround: 전·후방 + 3D
     const M = 1.45;
     const vbW = spec.width + M * 2;
@@ -397,12 +433,19 @@ export class AssistPanel {
   private mLineAnim = new Map<string, { a: { x: number; z: number }; b: { x: number; z: number }; al: number; target: number; level: WarnLine['level'] }>();
   private lineAnim = new Map<string, { a: { x: number; z: number }; b: { x: number; z: number }; al: number; target: number; level: WarnLine['level'] }>();
   /** 서라운드 경고선: 차량 외곽을 따라 놓인 선분을 서라운드 카메라로 투영해 그린다 (위치/투명도 보간, 미감지 구간은 그리지 않음) */
-  drawWarnLines(o: { camera: THREE.PerspectiveCamera; lines: WarnLine[]; y: number }): void {
+  drawWarnLines(o: {
+    camera: THREE.PerspectiveCamera;
+    lines: WarnLine[];
+    y: number;
+    /** 예측 주차 경로(왼쪽 메인 카메라와 같은 guidelines 계산·같은 절단 거리). 생략하면 그리지 않음 */
+    path?: { pose: { x: number; z: number; heading: number; y?: number }; steer: number; dir: 1 | -1; guideMax: number; groundY?: (x: number, z: number) => number };
+  }): void {
     const g = this.octx;
     const W = this.surOv.width;
     const H = this.surOv.height;
     g.clearRect(0, 0, W, H);
     const pal = PDC_PALETTES[this.palette].colors;
+    if (o.path && this.spec) this.drawSurroundPath(g, o.camera, W, H, o.path, pal);
     const seen = new Set<string>();
     for (const l of o.lines) {
       seen.add(l.id);
@@ -439,6 +482,100 @@ export class AssistPanel {
     g.globalAlpha = 1;
   }
 
+  /**
+   * 서라운드 예측 주차 경로: 좌/우 차체 이동 경계(곡선), 0.5/1/2/3m 거리 구분선, 직진 기준선.
+   * 거리 구분선은 "조향 경로상 이동 거리" 이며 PDC 경고선(장애물 방향 외곽선)과 달리 가는 실선+가로 눈금으로 그린다. 숫자는 쓰지 않는다.
+   */
+  private drawSurroundPath(
+    g: CanvasRenderingContext2D,
+    cam: THREE.PerspectiveCamera,
+    W: number,
+    H: number,
+    p: { pose: { x: number; z: number; heading: number; y?: number }; steer: number; dir: 1 | -1; guideMax: number; groundY?: (x: number, z: number) => number },
+    pal: Record<string, string>,
+  ): void {
+    const spec = this.spec!;
+    const lines = buildGuideLines(spec, p.steer, p.dir, Math.max(0.25, p.guideMax), SURROUND_MARKS);
+    const world = (q: { x: number; z: number }): { x: number; y: number; z: number } => {
+      const w = localToWorld(p.pose.x, p.pose.z, p.pose.heading, q.x, q.z);
+      return { x: w.x, y: (p.groundY ? p.groundY(w.x, w.z) : (p.pose.y ?? 0)) + 0.04, z: w.z };
+    };
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    const stroke = (pts: { x: number; z: number; s: number }[], width: number, color: (s: number) => string, alpha = 1, dash: number[] = []): void => {
+      g.setLineDash(dash);
+      g.globalAlpha = alpha;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const seg = projectSegment(world(pts[i]), world(pts[i + 1]), cam, W, H, false);
+        if (!seg) continue;
+        g.beginPath();
+        g.moveTo(seg[0].x, seg[0].y);
+        g.lineTo(seg[1].x, seg[1].y);
+        g.strokeStyle = 'rgba(0,0,0,0.55)';
+        g.lineWidth = width + 2;
+        g.stroke();
+        g.strokeStyle = color((pts[i].s + pts[i + 1].s) / 2);
+        g.lineWidth = width;
+        g.stroke();
+      }
+      g.setLineDash([]);
+      g.globalAlpha = 1;
+    };
+    // 어두운 차체가 어두운 바닥에 묻히지 않도록 차량 외곽(진행 방향 범퍼 강조)을 먼저 그린다
+    this.drawFootprint(g, { camera: cam, pose: p.pose, groundY: p.groundY, mirror: false, footprint: p.dir > 0 ? 'front' : 'rear' }, W, H);
+    const col = (s: number): string => pal[guideColor(s)];
+    stroke(lines.straightLeft, 1.2, () => '#ffffff', 0.28, [5, 5]);
+    stroke(lines.straightRight, 1.2, () => '#ffffff', 0.28, [5, 5]);
+    stroke(lines.left, 2.4, col);
+    stroke(lines.right, 2.4, col);
+    for (const m of lines.marks) {
+      const seg = projectSegment(world(m.left), world(m.right), cam, W, H, false);
+      if (!seg) continue;
+      g.beginPath();
+      g.moveTo(seg[0].x, seg[0].y);
+      g.lineTo(seg[1].x, seg[1].y);
+      g.strokeStyle = 'rgba(0,0,0,0.55)';
+      g.lineWidth = m.s < 1 ? 3.4 : 4.2;
+      g.stroke();
+      g.strokeStyle = col(m.s);
+      g.lineWidth = m.s < 1 ? 1.6 : 2.4;
+      g.stroke();
+    }
+  }
+
+  /** 자기 차량 바닥 외곽선 + 진행 방향 범퍼선 (카메라 투영, 근평면 클리핑 적용). 거리 숫자 없음 */
+  private drawFootprint(g: CanvasRenderingContext2D, o: { camera: THREE.PerspectiveCamera; pose: { x: number; z: number; heading: number; y?: number }; groundY?: (x: number, z: number) => number; mirror: boolean; footprint?: 'front' | 'rear' | 'none' }, W = ASSIST_CAM_W, H = ASSIST_CAM_H): void {
+    const spec = this.spec;
+    if (!spec) return;
+    const hw = spec.width / 2;
+    const hl = spec.length / 2;
+    const w = (lx: number, lz: number): { x: number; y: number; z: number } => {
+      const q = localToWorld(o.pose.x, o.pose.z, o.pose.heading, lx, lz);
+      return { x: q.x, y: (o.groundY ? o.groundY(q.x, q.z) : (o.pose.y ?? 0)) + 0.05, z: q.z };
+    };
+    const C: [number, number][] = [[hw, hl], [-hw, hl], [-hw, -hl], [hw, -hl]];
+    g.save();
+    g.lineCap = 'round';
+    g.globalAlpha = 0.85;
+    for (let i = 0; i < 4; i++) {
+      const a = C[i];
+      const b = C[(i + 1) % 4];
+      const seg = projectSegment(w(a[0], a[1]), w(b[0], b[1]), o.camera, W, H, o.mirror);
+      if (!seg) continue;
+      const lead = (o.footprint === 'front' && i === 0) || (o.footprint === 'rear' && i === 2);
+      g.beginPath();
+      g.moveTo(seg[0].x, seg[0].y);
+      g.lineTo(seg[1].x, seg[1].y);
+      g.strokeStyle = 'rgba(0,0,0,0.6)';
+      g.lineWidth = lead ? 7 : 4.5;
+      g.stroke();
+      g.strokeStyle = lead ? '#ffffff' : 'rgba(220,235,255,0.9)';
+      g.lineWidth = lead ? 4 : 2;
+      g.stroke();
+    }
+    g.restore();
+  }
+
   /** 오버레이 상태 초기화 (시점/차량 변경 시) */
   resetOverlay(): void {
     this.zoneAnim.clear();
@@ -463,6 +600,8 @@ export class AssistPanel {
     lines?: WarnLine[];
     /** 경사/다층 지면 높이 (없으면 차량 지면 높이 고정) */
     groundY?: (x: number, z: number) => number;
+    /** 3D/탑 시점에서 자기 차량 바닥 외곽(위치 기준선)을 그린다: 어두운 차체가 어두운 바닥에 묻혀 안 보이는 문제 방지. 'front'/'rear' 는 해당 범퍼 변을 강조 */
+    footprint?: 'front' | 'rear' | 'none';
   }): void {
     const g = this.gctx;
     g.clearRect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
@@ -562,6 +701,7 @@ export class AssistPanel {
       }
       g.globalAlpha = 1;
     }
+    if (o.footprint && o.footprint !== 'none') this.drawFootprint(g, o);
     if (!o.showGuides) return;
     // ---- 예측 조향 경로 ----
     const lines = buildGuideLines(spec, o.steer, o.dir, Math.max(0.25, o.guideMax ?? 4.5));

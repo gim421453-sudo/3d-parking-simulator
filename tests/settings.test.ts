@@ -53,3 +53,11 @@ describe('저장소를 쓸 수 없는 환경', () => {
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
   });
 });
+
+describe('pdcView 설정 (v0.4.7)', () => {
+  it('기본값은 서라운드, 잘못된 값은 서라운드로 보정, sensor 는 유지', () => {
+    expect(DEFAULT_SETTINGS.pdcView).toBe('surround');
+    expect(sanitizeSettings({ ...DEFAULT_SETTINGS, pdcView: 'x' as never }).pdcView).toBe('surround');
+    expect(sanitizeSettings({ ...DEFAULT_SETTINGS, pdcView: 'sensor' }).pdcView).toBe('sensor');
+  });
+});

@@ -182,6 +182,7 @@ export class Game {
       },
       onClose: () => this.onAction('assistClose'),
       onCycleDestination: () => this.onAction('infoDest'),
+      onSetPdcView: (m) => this.onAction(m === 'surround' ? 'pdcSurround' : 'pdcSensor'),
     });
     this.hud.onSensorSize = (s) => (s === 'reset' ? this.sensorView.resetCamera() : this.setSensorSize(s));
     this.sensorView = new SensorView(this.hud.sensorSlot);
@@ -235,6 +236,7 @@ export class Game {
     if (before.quality !== this.settings.quality) this.loadedMapId = ''; // 텍스처 해상도는 맵을 다시 만들 때 적용
     if (before.shadows !== this.settings.shadows) this.applyShadows();
     if (before.touchControls !== this.settings.touchControls || before.touchScale !== this.settings.touchScale || before.steerControl !== this.settings.steerControl) this.applyTouch();
+    this.assistPanel.setPdcView(this.settings.pdcView);
     this.beeper.volume = this.settings.sensorVolume;
     this.beeper.enabled = this.settings.sensorSound && this.settings.sensorEnabled;
     if (!this.settings.sensorSound || !this.settings.sensorEnabled) this.beeper.silence();
@@ -352,6 +354,7 @@ export class Game {
     if (this.spec.visual.kind === 'glb') void applyGlbVisual(this.model, this.spec);
     this.sensorView.setSpec(this.spec);
     this.assistPanel.setSpec(this.spec);
+    this.assistPanel.setPdcView(this.settings.pdcView);
     this.assistPanel.setPalette(this.settings.pdcPalette);
     this.assist.reset('P');
     this.assistLastCamera = '';
@@ -406,10 +409,10 @@ export class Game {
     );
   }
 
-  private poseNow(): { x: number; z: number; heading: number; y: number } {
+  private poseNow(): { x: number; z: number; heading: number; y: number; pitch: number } {
     const c = centerOf(this.car, this.spec);
     const off = this.spec.length / 2 - this.spec.rearOverhang;
-    return { x: c.x, z: c.z, heading: this.car.heading, y: this.car.y + off * Math.tan(this.car.pitch) };
+    return { x: c.x, z: c.z, heading: this.car.heading, y: this.car.y + off * Math.tan(this.car.pitch), pitch: this.car.pitch };
   }
 
   pause(): void {
@@ -606,6 +609,18 @@ export class Game {
           this.nav.setDestination(slots[this.destIndex], this.poseNow());
           this.hud.toast(`목적지: ${slots[this.destIndex].id}`);
         }
+        break;
+      }
+      case 'pdcSurround':
+      case 'pdcSensor': {
+        // 오른쪽 PDC 표시 방식만 바꾼다 — 왼쪽 메인 카메라(수동/자동)와 기어 상태는 그대로
+        const mode = a === 'pdcSurround' ? 'surround' : 'sensor';
+        if (mode === 'surround' && !this.spec.assist.virtualSurround3D) {
+          this.hud.toast('이 차량은 3D 서라운드뷰를 지원하지 않습니다(센서 화면만 제공)');
+          break;
+        }
+        this.updateSettings({ pdcView: mode });
+        this.hud.toast(`오른쪽 화면: ${mode === 'surround' ? '3D 서라운드' : '센서'}`);
         break;
       }
       case 'sensorToggle':
@@ -910,7 +925,7 @@ export class Game {
     // 후방/전방/3D 시점 카메라는 "보이는 곳(플로팅 또는 1인칭 실내 화면)"이 있을 때만 렌더링한다 (불필요한 렌더링 중단)
     if (parking && (open || firstPerson)) {
       this.renderAssist(dt, pose);
-      if (this.spec.assist.virtualSurround3D) this.renderSurround(dt, pose);
+      if (this.assistPanel.surroundActive) this.renderSurround(dt, pose);
     }
     if (!parking && (open || firstPerson)) this.drawNav(dt, pose);
     if (firstPerson) {
@@ -973,6 +988,12 @@ export class Game {
     const h = sorted.find((q) => px >= q.x && px <= q.x + q.w && py >= q.y && py <= q.y + q.h);
     if (!h) return null;
     switch (h.action) {
+      case 'pdcSurround':
+        this.onAction('pdcSurround');
+        break;
+      case 'pdcSensor':
+        this.onAction('pdcSensor');
+        break;
       case 'sensor':
         this.onAction('sensorToggle');
         break;
@@ -1218,12 +1239,14 @@ export class Game {
       showGuides: this.settings.assistGuides,
       zones,
       lines: warnLines,
+      footprint: isCar ? 'none' : view === 'topRear' ? 'rear' : view === 'topFront' ? 'front' : 'none',
       groundY: this.map.terrain ? (x: number, z: number) => groundAt(this.map.terrain!, x, z, pose.y ?? 0, 1.2) ?? (pose.y ?? 0) : undefined,
       guideMax: guideCutDistance(this.spec, this.car.steer, this.assistOut.focus === 'rear' ? -1 : 1, pose, this.colliders, (pose.y ?? 0) + this.spec.sensorHeight),
     });
   }
 
   private surAcc = 99;
+  surPathDbg: { steer: number; dir: 1 | -1; guideMax: number; renders: number } | null = null;
   /** 오른쪽 3D 서라운드뷰: 차량 중심 위에 고정된 카메라로 실제 장면을 렌더링하고, 외곽을 따라가는 경고선을 얹는다 */
   private renderSurround(dt: number, pose: { x: number; z: number; heading: number; y?: number }): void {
     this.surAcc += dt;
@@ -1235,7 +1258,8 @@ export class Game {
     const L = this.spec.length;
     const W = this.spec.width;
     // 차량 제원만으로 정한 고정 구도 (장애물/센서에 따라 움직이지 않음)
-    const H = Math.min(18, Math.max(7, Math.max((L + 5) / 2 / tan, (W + 4.4) / 2 / (tan * aspect))));
+    // 앞/뒤 범퍼 너머 3.5m(예측 거리선 0.5/1/2/3m 가 모두 보이는 범위)까지 한 화면에 들어오도록 고정
+    const H = Math.min(22, Math.max(8, Math.max((L + 7.4) / 2 / tan, (W + 4.4) / 2 / (tan * aspect))));
     const gy = pose.y ?? 0;
     cam.aspect = aspect;
     cam.up.set(Math.sin(pose.heading), 0, Math.cos(pose.heading));
@@ -1266,7 +1290,24 @@ export class Game {
       this.assistPanel.blitSurround(this.canvas, 0, this.canvas.height - Math.round(vh * pr), Math.round(vw * pr), Math.round(vh * pr));
     }
     const lines = this.settings.sensorEnabled ? buildWarnLines(this.sensorSnap, obbOf(this.car, this.spec), this.settings.sensorRange, this.settings.sensorCritical) : [];
-    this.assistPanel.drawWarnLines({ camera: cam, lines, y: gy });
+    const sdir: 1 | -1 = this.assistOut.focus === 'rear' ? -1 : 1;
+    const sGuideMax = this.settings.assistGuides ? guideCutDistance(this.spec, this.car.steer, sdir, pose, this.colliders, gy + this.spec.sensorHeight) : 0;
+    /** 테스트/디버그: 서라운드 예측선이 사용한 값 (메인 카메라 예측선과 같은 guidelines 계산) */
+    this.surPathDbg = { steer: this.car.steer, dir: sdir, guideMax: sGuideMax, renders: (this.surPathDbg?.renders ?? 0) + 1 };
+    this.assistPanel.drawWarnLines({
+      camera: cam,
+      lines,
+      y: gy,
+      path: this.settings.assistGuides
+        ? {
+            pose,
+            steer: this.car.steer,
+            dir: sdir,
+            guideMax: sGuideMax,
+            groundY: this.map.terrain ? (x: number, z: number) => groundAt(this.map.terrain!, x, z, gy, 1.2) ?? gy : undefined,
+          }
+        : undefined,
+    });
   }
 
   /** 내비게이션 지도를 캔버스에 그린다 (10Hz) */
@@ -1294,8 +1335,10 @@ export class Game {
       navCanvas: this.assistPanel.navCanvas,
       spec: this.spec,
       pdc: this.pdcState,
-      surround: this.spec.assist.virtualSurround3D ? this.assistPanel.sur : null,
-      surroundOv: this.spec.assist.virtualSurround3D ? this.assistPanel.surOv : null,
+      surround: this.assistPanel.surroundActive ? this.assistPanel.sur : null,
+      surroundOv: this.assistPanel.surroundActive ? this.assistPanel.surOv : null,
+      pdcView: this.assistPanel.surroundActive ? 'surround' : 'sensor',
+      surroundSupported: this.spec.assist.virtualSurround3D,
       palette: this.settings.pdcPalette,
       viewName: ASSIST_VIEW_NAME[this.viewOut.view],
       gear: c.gear,

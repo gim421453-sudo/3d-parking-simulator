@@ -16,7 +16,13 @@ export function unwrapDeg(d: number): number {
   return x;
 }
 
+/** 정차 판단 임계값(m/s, 히스테리시스): 이 값 미만이면 정차로 보고 손을 떼도 조향각을 유지, 이 값을 넘어서면 주행으로 보고 자동 복귀 */
+export const WHEEL_HOLD_ENTER_MPS = 0.15;
+export const WHEEL_HOLD_EXIT_MPS = 0.35;
+
 export class WheelModel {
+  /** 정차 중 조향 유지 상태 (속도 미세 변동으로 유지/복귀가 반복되지 않도록 히스테리시스) */
+  holding = true;
   /** 핸들 각도(도), 왼쪽 + */
   angle = 0;
   dragging = false;
@@ -50,7 +56,12 @@ export class WheelModel {
 
   /** 놓은 뒤 중앙 복귀. returnRate: 설정 배율(0.5~2), speedMps: 속도가 빠를수록 빨리 복귀 */
   update(dt: number, speedMps: number, returnRate = 1): void {
-    if (this.dragging || this.angle === 0) return;
+    const sp = Math.abs(speedMps);
+    if (this.holding) {
+      if (sp > WHEEL_HOLD_EXIT_MPS) this.holding = false;
+    } else if (sp < WHEEL_HOLD_ENTER_MPS) this.holding = true;
+    // 정차(기어 P 여부와 무관, D/R 에서 브레이크로 멈춘 경우 포함) 중에는 놓아도 현재 각도 유지
+    if (this.holding || this.dragging || this.angle === 0) return;
     const rate = (160 + Math.min(10, Math.abs(speedMps)) * 28) * returnRate; // deg/s
     const d = rate * dt;
     this.angle = Math.abs(this.angle) <= d ? 0 : this.angle - Math.sign(this.angle) * d;
@@ -63,6 +74,7 @@ export class WheelModel {
 
   reset(): void {
     this.angle = 0;
+    this.holding = true;
     this.end();
   }
 }

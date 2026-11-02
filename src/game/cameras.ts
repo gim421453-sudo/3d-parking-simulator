@@ -22,6 +22,20 @@ export interface CarPose {
   heading: number;
   /** 차체 중심의 지면 높이 (다층 맵). 없으면 0 */
   y?: number;
+  /** 차체 피치(rad, 앞이 높으면 +). 차체에 고정된 카메라(후방/전방)가 경사로에서 차체와 함께 기울도록 사용. 없으면 0 */
+  pitch?: number;
+}
+
+/**
+ * 차체에 "고정 장착"된 카메라(후방/전방)의 월드 자세. 차량 모델 root 와 똑같은 변환(YXZ: heading, -pitch)을 로컬 장착점/시선에 적용하므로
+ * 차량 메시와 카메라의 상대 좌표는 속도·가속·경사와 무관하게 항상 같다.
+ */
+export function mountedCamera(pose: CarPose, m: { x: number; y: number; z: number; pitch: number }, dir: 1 | -1): { pos: THREE.Vector3; look: THREE.Vector3 } {
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-(pose.pitch ?? 0), pose.heading, 0, 'YXZ'));
+  const origin = new THREE.Vector3(pose.x, pose.y ?? 0, pose.z);
+  const pos = new THREE.Vector3(m.x, m.y, m.z).applyQuaternion(q).add(origin);
+  const look = new THREE.Vector3(0, -Math.sin(m.pitch), dir * Math.cos(m.pitch)).applyQuaternion(q).add(pos);
+  return { pos, look };
 }
 
 export class CameraRig {
@@ -75,14 +89,12 @@ export class CameraRig {
     const up = new THREE.Vector3(0, 1, 0);
     switch (view) {
       case 'rear': {
-        const rc = spec.rearCam;
-        const pos = wp(rc.x, rc.y, rc.z);
-        return { pos, look: new THREE.Vector3(pos.x - f.x * Math.cos(rc.pitch), gy + rc.y - Math.sin(rc.pitch), pos.z - f.z * Math.cos(rc.pitch)), up, fov: 100 };
+        const { pos, look } = mountedCamera(pose, spec.rearCam, -1);
+        return { pos, look, up, fov: 100 };
       }
       case 'front': {
-        const fc = spec.frontCam;
-        const pos = wp(fc.x, fc.y, fc.z);
-        return { pos, look: new THREE.Vector3(pos.x + f.x * Math.cos(fc.pitch), gy + fc.y - Math.sin(fc.pitch), pos.z + f.z * Math.cos(fc.pitch)), up, fov: 100 };
+        const { pos, look } = mountedCamera(pose, spec.frontCam, 1);
+        return { pos, look, up, fov: 100 };
       }
       case 'left':
       case 'right': {
@@ -108,7 +120,10 @@ export class CameraRig {
       : CameraRig.assistTarget(view, pose, spec);
     if (this.aView !== view) this.aT = 0;
     this.aT += dt;
-    const cut = this.aView === null || (this.aView === 'rear' && view === 'front') || (this.aView === 'front' && view === 'rear');
+    // 후방/전방 카메라는 차체에 고정된 장비다: 전환 직후(0.45초)를 제외하면 보간 없이 차체에 그대로 붙는다.
+    // (예전에는 매 프레임 지수 보간해서 속도 v 에 비례(v/7 m)해 카메라가 차체보다 늦게 따라와 영상 속 범퍼/차체가 움직여 보였다)
+    const rigid = !frame && (view === 'rear' || view === 'front') && this.aT >= 0.45;
+    const cut = rigid || this.aView === null || (this.aView === 'rear' && view === 'front') || (this.aView === 'front' && view === 'rear');
     if (cut) {
       this.aPos.copy(t.pos);
       this.aLook.copy(t.look);
@@ -238,15 +253,13 @@ export class CameraRig {
     const f = forwardOf(pose.heading);
     const gy = pose.y ?? 0;
     // 후방 카메라는 항상 갱신 (보조 화면용)
-    const rc = spec.rearCam;
-    const rp = localToWorld(pose.x, pose.z, pose.heading, rc.x, rc.z);
-    this.rearCamera.position.set(rp.x, gy + rc.y, rp.z);
-    this.rearCamera.lookAt(rp.x - f.x * Math.cos(rc.pitch), gy + rc.y - Math.sin(rc.pitch), rp.z - f.z * Math.cos(rc.pitch));
+    const rm = mountedCamera(pose, spec.rearCam, -1);
+    this.rearCamera.position.copy(rm.pos);
+    this.rearCamera.lookAt(rm.look);
     this.rearCamera.updateMatrixWorld();
-    const fc = spec.frontCam;
-    const fp = localToWorld(pose.x, pose.z, pose.heading, fc.x, fc.z);
-    this.frontCamera.position.set(fp.x, gy + fc.y, fp.z);
-    this.frontCamera.lookAt(fp.x + f.x * Math.cos(fc.pitch), gy + fc.y - Math.sin(fc.pitch), fp.z + f.z * Math.cos(fc.pitch));
+    const fm = mountedCamera(pose, spec.frontCam, 1);
+    this.frontCamera.position.copy(fm.pos);
+    this.frontCamera.lookAt(fm.look);
     this.frontCamera.updateMatrixWorld();
 
     const cam = this.camera;

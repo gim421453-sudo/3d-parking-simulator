@@ -320,8 +320,8 @@ async function waitServer(url, tries = 50) {
   check('센서 OFF 설정 존중: 구역 소등 + "PDC 꺼짐"', off.lv && off.t === 'PDC 꺼짐', off.t);
   await g(() => window.__game.updateSettings({ sensorEnabled: true }));
   // 서라운드 미지원: 가짜 360도 UI 없음
-  const surround = await g(() => ({ btn: !!document.querySelector('[data-pa="surround"]'), txt: /360|서라운드|3D ?뷰/.test(document.getElementById('parking-assist').innerText) }));
-  check('서라운드뷰 미지원 상태: 가짜 360도 버튼/영상 없음', !surround.btn && !surround.txt, JSON.stringify(surround));
+  const surround = await g(() => ({ btn: !!document.querySelector('[data-pa="surround"]'), txt: /360/.test(document.getElementById('parking-assist').innerText) }));
+  check('가짜 360도 버튼/문구 없음 (실제 3D 서라운드는 pa-mode 전환으로만 제공)', !surround.btn && !surround.txt, JSON.stringify(surround));
 
   // ---- 필수 운전 버튼: 주차 보조가 열려 있어도 접근 가능 (PC) ----
   await place(0, -6, 0, 'R');
@@ -847,6 +847,9 @@ async function waitServer(url, tries = 50) {
   await shot('111-m4-cabin');
   const m4Cab = await g(() => { const cab = window.__game.model.cabin.center; const d = cab.ctx.getImageData(0, 0, cab.canvas.width, cab.canvas.height).data; let c = 0; for (let i = 0; i < d.length; i += 16) if (d[i] > 60 || d[i + 1] > 60 || d[i + 2] > 60) c++; return c; });
   check('M4: 1인칭 실내 센터 디스플레이에 후방 PDC 화면 표시', m4Cab > 800, String(m4Cab));
+  check('v0.4.7 M4(서라운드 미지원): 센서 전용만 제공 — 서라운드 비활성, 전환 버튼 숨김, 서라운드 렌더 없음', await g(() => { const p = document.getElementById('parking-assist'); const pm = p.querySelector('.pa-mode'); return p.dataset.surround === 'false' && p.dataset.surroundSupported === 'false' && getComputedStyle(pm).display === 'none' && !window.__game.cabinHits.some((h) => h.action === 'pdcSurround'); }));
+  await g(() => { window.__game.onAction('pdcSurround'); });
+  check('v0.4.7 M4: 서라운드 선택 요청을 무시(미지원 기능 활성화 금지)', await g(() => document.getElementById('parking-assist').dataset.surround === 'false'));
   await g(() => window.__game.rig.setMode('chase'));
 
   // ---- X6 ----
@@ -1380,7 +1383,12 @@ async function waitServer(url, tries = 50) {
     await sleep(2500);
     check('핸들: 반시계 540° 에서 멈추고(총 1080° 중 왼쪽 절반) 앞바퀴는 최대 조향각', stL.a === 540 && stL.steer > stL.max * 0.9 && stL.steer <= stL.max + 1e-6, JSON.stringify(stL));
     const afterRel = await mp.evaluate(() => window.__game.hud.wheel.angle);
-    check('핸들: 손을 떼면 중앙으로 복귀', Math.abs(afterRel) < 540, String(afterRel));
+    check('핸들(v0.4.7): 정차 중에는 손을 떼도 조향각 유지(540° 그대로)', afterRel === 540, String(afterRel));
+    await mp.evaluate(() => { window.__game.car.handbrake = false; window.__game.car.v = 3; });
+    await mp.waitForFunction(() => Math.abs(window.__game.hud.wheel.angle) < 520, null, { timeout: 15000 }).catch(() => {});
+    const afterMove = await mp.evaluate(() => window.__game.hud.wheel.angle);
+    await mp.evaluate(() => { window.__game.car.v = 0; window.__game.car.handbrake = true; });
+    check('핸들: 주행 중에는 손을 떼면 중앙으로 복귀', Math.abs(afterMove) < 540, String(afterMove));
     await mp.evaluate(() => window.__game.hud.wheel.reset());
     await wheelSpin([], 700);
     await sleep(400);
@@ -1477,7 +1485,7 @@ async function waitServer(url, tries = 50) {
       const inside = [R.wheel, R.brk, R.gas, R.sh].every((o) => o && o.x >= -1 && o.y >= -1 && o.x + o.w <= R.vw + 1 && o.y + o.h <= R.vh + 1);
       const noOv = !hit2(R.wheel, R.brk) && !hit2(R.wheel, R.gas) && !hit2(R.brk, R.gas) && !hit2(R.sh, R.brk) && !hit2(R.sh, R.gas) && !hit2(R.sh, R.wheel) && !hit2(R.panel, R.wheel) && !hit2(R.panel, R.sh);
       check(`v0.4.6 ${vw}×${vh}: 핸들 ${Math.round(R.wheel.w)}px / 페달 ${Math.round(R.brk.w)}×${Math.round(R.brk.h)}, ${Math.round(R.gas.w)}×${Math.round(R.gas.h)} — 화면 안 + 서로 겹침 없음(기어 레버 포함)`, inside && noOv && R.wheel.w >= 104, JSON.stringify(R));
-      if (vw === 1280) check('v0.4.6 1280×800: 핸들 ≥ 300px, 페달 너비 ≥ 130px (기존 대비 약 3배)', R.wheel.w >= 300 && R.brk.w >= 130 && R.gas.w >= 130, `${R.wheel.w}/${R.brk.w}/${R.gas.w}`);
+      if (vw === 1280) check('v0.4.6 1280×800: 핸들 ≥ 300px, 페달 너비 ≥ 100/115px (v0.4.7 에서 의도적으로 소폭 축소)', R.wheel.w >= 300 && R.brk.w >= 100 && R.gas.w >= 115, `${R.wheel.w}/${R.brk.w}/${R.gas.w}`);
       await mp.screenshot({ path: path.join(OUT, `94-v046-touch-${vw}x${vh}.png`) });
     }
     await mp.setViewportSize({ width: 800, height: 360 });
@@ -1492,7 +1500,7 @@ async function waitServer(url, tries = 50) {
       const brake = await ctr('#touch .brk');
       const send = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts });
       await send('touchStart', [{ x: brake.x, y: brake.y, id: 1 }]);
-      await sleep(700);
+      await mp.waitForFunction(() => window.__game.brake > 0.5, null, { timeout: 8000 }).catch(() => {});
       const braking = await mp.evaluate(() => window.__game.brake > 0.5);
       check('v0.4.6 멀티터치: 브레이크 손가락 유지 중 브레이크 입력 활성', braking);
       // 브레이크 + 카메라 버튼 연타
@@ -1542,6 +1550,339 @@ async function waitServer(url, tries = 50) {
       await cdp.detach();
     }
     await mctx.close();
+  }
+
+
+  // ================= v0.4.7 =================
+  {
+    // ---- 페달 크기/위치, 기어 크기/좌표 (v0.4.6 측정값과 비교) ----
+    const BEFORE = {
+      '1280x800': { brake: [969, 521, 134, 269], gas: [1115, 485, 153, 305], wheel: 376, gearFont: 40 },
+      '1024x768': { brake: [840, 608, 75, 150], gas: [927, 587, 85, 171], wheel: 248, gearFont: 40 },
+      '960x540': { brake: [807, 410, 60, 120], gas: [880, 393, 68, 137], wheel: 216, gearFont: 40 },
+      '780x360': { brake: [643, 246, 53, 106], gas: [708, 232, 60, 120], wheel: 144, gearFont: 34 },
+    };
+    const tctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+    const tp = await tctx.newPage();
+    tp.on('pageerror', (e) => errors.push('v047 touch pageerror: ' + e.message));
+    await tp.addInitScript(() => localStorage.setItem('parksim.v1.settings', JSON.stringify({ quality: 'low', resolutionScale: 0.6, shadows: 'off', sensorViewFps: 10 })));
+    await tp.goto(URL);
+    await tp.waitForSelector('#m-start');
+    await tp.tap('#m-start');
+    await tp.waitForSelector('#hud:not(.hidden)', { timeout: 20000 });
+    await sleep(1200);
+    for (const key of Object.keys(BEFORE)) {
+      const [vw, vh] = key.split('x').map(Number);
+      await tp.setViewportSize({ width: vw, height: vh });
+      await sleep(500);
+      const m = await tp.evaluate(() => {
+        const r = (q) => { const e = document.querySelector(q); const b = e.getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; };
+        const gb = document.getElementById('gear-big');
+        const act = gb.querySelector(`span[data-g="${gb.dataset.g}"]`);
+        return { brake: r('#touch .brk'), gas: r('#touch .gas'), wheel: r('#t-wheel'), sh: r('#shifter'), gear: r('#gear-big'), gearFont: parseFloat(getComputedStyle(act).fontSize), vw: innerWidth, vh: innerHeight };
+      });
+      const B = BEFORE[key];
+      const rb = m.brake[2] / B.brake[2], rg = m.gas[2] / B.gas[2], rbh = m.brake[3] / B.brake[3];
+      check(`v0.4.7 ${key}: 페달 크기 10~15% 축소 (브레이크 ${B.brake[2]}→${Math.round(m.brake[2])}px / 가속 ${B.gas[2]}→${Math.round(m.gas[2])}px), 비율 유지`, rb >= 0.84 && rb <= 0.91 && rg >= 0.84 && rg <= 0.91 && rbh >= 0.84 && rbh <= 0.91 && Math.abs(m.brake[2] / m.gas[2] - B.brake[2] / B.gas[2]) < 0.04, `${rb.toFixed(3)}/${rg.toFixed(3)}/${rbh.toFixed(3)}`);
+      const gasRightBefore = B.gas[0] + B.gas[2], gasRightNow = m.gas[0] + m.gas[2];
+      const gasBotBefore = B.gas[1] + B.gas[3], gasBotNow = m.gas[1] + m.gas[3];
+      check(`v0.4.7 ${key}: 페달 위치가 실제로 이동 (가속 오른쪽 끝 ${Math.round(gasRightBefore)}→${Math.round(gasRightNow)}, 아래쪽 ${Math.round(gasBotBefore)}→${Math.round(gasBotNow)})`, gasRightBefore - gasRightNow >= 8 && gasBotBefore - gasBotNow >= 8, JSON.stringify({ brake: m.brake.map(Math.round), gas: m.gas.map(Math.round) }));
+      const hit = (a, b) => a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1];
+      const inside = [m.brake, m.gas, m.sh, m.wheel].every((o) => o[0] >= 0 && o[1] >= 0 && o[0] + o[2] <= m.vw && o[1] + o[3] <= m.vh);
+      const noOv = !hit(m.brake, m.gas) && !hit(m.sh, m.brake) && !hit(m.sh, m.gas) && !hit(m.wheel, m.brake) && !hit(m.wheel, m.gas) && !hit(m.wheel, m.sh);
+      const gapSh = m.brake[0] - (m.sh[0] + m.sh[2]);
+      const edge = m.vw - gasRightNow;
+      check(`v0.4.7 ${key}: 화면 안 + 겹침 없음 + 레버~페달 간격 ${Math.round(gapSh)}px(≥24) + 오른쪽 가장자리 여백 ${Math.round(edge)}px(≥20), 핸들 ${Math.round(m.wheel[2])}px 불변`, inside && noOv && gapSh >= 24 && edge >= 20 && Math.abs(m.wheel[2] - B.wheel) <= 1, JSON.stringify({ gapSh, edge }));
+      const gearGrow = m.gearFont / B.gearFont;
+      check(`v0.4.7 ${key}: 기어 활성 글자 ${B.gearFont}→${m.gearFont}px (+15~20%), 좌상단 고정 (${Math.round(m.gear[0])},${Math.round(m.gear[1])})`, gearGrow >= 1.15 && gearGrow <= 1.21 && m.gear[0] <= 12 && m.gear[1] <= 12 && m.gear[0] >= 0, `${gearGrow.toFixed(3)}`);
+      if (key === '1280x800') check('v0.4.7 1280×800 기어 활성 글자 46~48px 목표', m.gearFont >= 46 && m.gearFont <= 48, String(m.gearFont));
+      await tp.screenshot({ path: path.join(OUT, `96-v047-touch-${key}.png`) });
+    }
+    await tp.setViewportSize({ width: 1280, height: 800 });
+    await sleep(400);
+
+    // ---- 기어 위치가 주차 보조 패널/층 표시/미션 패널에 의해 이동하지 않음 (D 로 패널을 열기 전후) ----
+    const gearPos = () => tp.evaluate(() => { const b = document.getElementById('gear-big').getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)]; });
+    const g0 = await gearPos();
+    await tp.evaluate(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'D'; G.car.v = 0.5; });
+    await tp.waitForFunction(() => !document.getElementById('parking-assist').classList.contains('hidden'), null, { timeout: 20000 }).catch(() => {});
+    await sleep(600);
+    const g1 = await gearPos();
+    check('v0.4.7 주차 보조 패널이 열려도 기어 표시 좌표/크기 불변 (좌상단 고정)', JSON.stringify(g0) === JSON.stringify(g1), JSON.stringify({ g0, g1 }));
+
+    // ---- 정차 중 핸들 조향각 유지 (모델 + 실제 앞바퀴 + 예측선 입력) ----
+    await tp.evaluate(() => { const G = window.__game; G.car.v = 0; G.car.gear = 'D'; G.car.handbrake = true; G.hud.wheel.reset(); });
+    await sleep(400);
+    await tp.evaluate(() => { const w = window.__game.hud.wheel; w.begin(0); for (let i = 1; i <= 20; i++) w.move(-8 * i, 1); });
+    await tp.waitForFunction(() => Math.abs(window.__game.car.steer) > 0.2, null, { timeout: 20000 }).catch(() => {});
+    const held0 = await tp.evaluate(() => { const G = window.__game; return { a: G.hud.wheel.angle, steer: G.car.steer, sin: G.steerIn, pivot: G.model.frontPivots[0] ? G.model.frontPivots[0].rotation.y : null, v: G.car.v }; });
+    await tp.evaluate(() => window.__game.hud.wheel.end()); // 손가락 뗌
+    await sleep(2500);
+    const held1 = await tp.evaluate(() => { const G = window.__game; return { a: G.hud.wheel.angle, steer: G.car.steer, sin: G.steerIn, pivot: G.model.frontPivots[0] ? G.model.frontPivots[0].rotation.y : null, v: G.car.v }; });
+    check('v0.4.7 정차 중 손을 떼도 핸들 각도 유지 (HUD)', Math.abs(held0.a) > 100 && held1.a === held0.a, JSON.stringify({ held0, held1 }));
+    check('v0.4.7 정차 중 실제 앞바퀴 조향각(VehicleState.steer)·steerInput 유지', Math.abs(held1.steer - held0.steer) < 1e-3 && Math.abs(held1.sin - held0.sin) < 1e-6 && Math.abs(held1.v) < 0.05, JSON.stringify({ held0, held1 }));
+    check('v0.4.7 정차 중 앞바퀴 모델(애니메이션)도 조향 유지', held1.pivot !== null && Math.abs(held1.pivot) > 0.05 && Math.abs(held1.pivot - held0.pivot) < 0.02, JSON.stringify({ p0: held0.pivot, p1: held1.pivot }));
+    await tp.evaluate(() => { const w = window.__game.hud.wheel; w.begin(0); for (let i = 1; i <= 10; i++) w.move(8 * i, 1); w.end(); });
+    await sleep(600);
+    const re = await tp.evaluate(() => window.__game.hud.wheel.angle);
+    check('v0.4.7 정차 중 핸들을 다시 돌리면 정상 변경', re !== held1.a, `${held1.a}→${re}`);
+    await tp.evaluate(() => { const G = window.__game; G.car.handbrake = false; G.car.v = 2.5; });
+    const ret = await tp.waitForFunction((a) => Math.abs(window.__game.hud.wheel.angle) < Math.abs(a) - 20, re, { timeout: 15000 }).then(() => true).catch(() => false);
+    check('v0.4.7 차량이 움직이면(재출발) 자동 복귀 기능 동작', ret);
+    await tp.evaluate(() => { const G = window.__game; G.car.v = 0; G.car.handbrake = true; });
+    await sleep(500);
+    const stopA = await tp.evaluate(() => window.__game.hud.wheel.angle);
+    await sleep(1500);
+    const stopB = await tp.evaluate(() => window.__game.hud.wheel.angle);
+    check('v0.4.7 다시 정차하면 그 각도에서 다시 유지', stopA === stopB, `${stopA}/${stopB}`);
+    await tp.evaluate(() => { window.__game.hud.wheel.reset(); });
+
+    // ---- 브레이크 유지 + 카메라/설정/기어 멀티터치 (신규 위치에서) ----
+    {
+      const cdp = await tctx.newCDPSession(tp);
+      const ctr = (sel) => tp.evaluate((q) => { const r = document.querySelector(q).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, sel);
+      const send = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts });
+      await tp.evaluate(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'D'; G.car.v = 0.4; });
+      await tp.waitForFunction(() => !document.getElementById('parking-assist').classList.contains('hidden'), null, { timeout: 20000 }).catch(() => {});
+      const brake = await ctr('#touch .brk');
+      const gas = await ctr('#touch .gas');
+      const wheel = await ctr('#t-wheel');
+      const cam = await ctr('#parking-assist [data-pa="camera"]');
+      const m0 = await tp.evaluate(() => window.__game.assist.cameraMode);
+      await send('touchStart', [{ x: brake.x, y: brake.y, id: 1 }, { x: gas.x, y: gas.y, id: 2 }]);
+      await sleep(300);
+      await send('touchStart', [{ x: brake.x, y: brake.y, id: 1 }, { x: gas.x, y: gas.y, id: 2 }, { x: cam.x, y: cam.y, id: 3 }]);
+      await sleep(80);
+      await send('touchEnd', [{ x: cam.x, y: cam.y, id: 3 }]);
+      await sleep(300);
+      const st = await tp.evaluate(() => ({ m: window.__game.assist.cameraMode, brake: window.__game.brake, th: window.__game.throttle }));
+      check('v0.4.7 브레이크+가속 두 페달을 누른 채 카메라 버튼 동작', st.m !== m0 && st.brake > 0.5, JSON.stringify({ m0, st }));
+      await send('touchStart', [{ x: brake.x, y: brake.y, id: 1 }, { x: gas.x, y: gas.y, id: 2 }, { x: wheel.x, y: wheel.y - 40, id: 4 }]);
+      for (let i = 1; i <= 6; i++) { await send('touchMove', [{ x: brake.x, y: brake.y, id: 1 }, { x: gas.x, y: gas.y, id: 2 }, { x: wheel.x + i * 9, y: wheel.y - 40 + i * 5, id: 4 }]); await sleep(30); }
+      await sleep(200);
+      const three = await tp.evaluate(() => ({ brake: window.__game.brake, a: window.__game.hud.wheel.angle }));
+      check('v0.4.7 두 페달 + 핸들 동시 조작(3손가락)', three.brake > 0.5 && Math.abs(three.a) > 5, JSON.stringify(three));
+      await send('touchEnd', [{ x: brake.x, y: brake.y, id: 1 }, { x: gas.x, y: gas.y, id: 2 }, { x: wheel.x + 54, y: wheel.y - 10, id: 4 }]);
+      await sleep(300);
+      await tp.evaluate(() => { window.__game.hud.wheel.reset(); });
+      await cdp.detach();
+    }
+    await tctx.close();
+  }
+
+  // ---- X6(서라운드 지원) 데스크톱: 서라운드/센서 전환, 예측선, 집중 탑뷰, 후방카메라 안정성, 실내 화면, 자원 ----
+  {
+    const xctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const xp = await xctx.newPage();
+    xp.on('pageerror', (e) => errors.push('v047 x6 pageerror: ' + e.message));
+    await xp.addInitScript(() => { if (!localStorage.getItem('parksim.v1.settings')) localStorage.setItem('parksim.v1.settings', JSON.stringify({ quality: 'low', resolutionScale: 0.6, shadows: 'off', vehicleId: 'suv-x6', assistCameraFps: 60 })); });
+    await xp.goto(URL);
+    await xp.waitForSelector('#m-start');
+    await xp.click('#m-start');
+    await xp.waitForSelector('#hud:not(.hidden)', { timeout: 20000 });
+    await sleep(1500);
+    const X = (fn, arg) => xp.evaluate(fn, arg);
+    const xuntil = (fn, arg, timeout = 30000) => xp.waitForFunction(fn, arg, { timeout, polling: 100 }).then(() => true).catch(() => false);
+    const xplace = (cx, cz, h, gear) => X(({ cx, cz, h, gear }) => { const G = window.__game; const c = G.car; const off = G.spec.length / 2 - G.spec.rearOverhang; c.x = cx - Math.sin(h) * off; c.z = cz - Math.cos(h) * off; c.heading = h; c.v = 0; c.steer = 0; c.gear = gear; c.handbrake = true; G.hud.wheel.reset(); }, { cx, cz, h, gear });
+    const xbox = (id, x, z, w, d, h = 1.4) => X(([id, x, z, w, d, h]) => { const c = { kind: 'box', id: 't-' + id, tag: 'wall', x, z, w, d, rot: 0, y0: 0, h }; window.__game.colliders.push(c); window.__game.colliderById.set(c.id, c); }, [id, x, z, w, d, h]);
+    const xclear = () => X(() => { const G = window.__game; G.colliders = G.colliders.filter((c) => !String(c.id).startsWith('t-')); for (const k of [...G.colliderById.keys()]) if (String(k).startsWith('t-')) G.colliderById.delete(k); G.rig.colliders = G.colliders; });
+    const L2 = await X(() => window.__game.spec.length);
+    const ovStats = (sel) => X((sel) => { const c = document.querySelector(sel); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0, sx = 0, sy = 0, white = 0, minY = 1e9, maxY = -1; for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) { const i = (y * c.width + x) * 4; if (d[i + 3] > 40) { n++; sx += x; sy += y; if (y < minY) minY = y; if (y > maxY) maxY = y; if (d[i] > 200 && d[i + 1] > 215 && d[i + 2] > 230 && d[i + 3] > 150) white++; } } return { n, cx: n ? sx / n / c.width : 0.5, cy: n ? sy / n / c.height : 0.5, minY, maxY, h: c.height, white }; }, sel);
+
+    check('v0.4.7 X6: 기본은 3D 서라운드, 모드 버튼 2개 표시', await X(() => document.getElementById('parking-assist').dataset.surround === 'true' && document.querySelectorAll('#parking-assist .pa-mode button').length === 2));
+    // ---- 서라운드 예측선: D 전진 ----
+    await xclear();
+    await xplace(0, 10, 0, 'D');
+    await xuntil(() => !document.getElementById('parking-assist').classList.contains('hidden') && window.__game.surPathDbg && window.__game.surPathDbg.renders > 5);
+    await sleep(800);
+    const f0 = await X(() => ({ ...window.__game.surPathDbg, view: window.__game.viewOut.view }));
+    const s0 = await ovStats('.pa-sur-ov');
+    check('v0.4.7 서라운드: 전진(D) 예측선이 차량 앞쪽(화면 위쪽)에 그려짐', f0.dir === 1 && s0.n > 200 && s0.cy < 0.5, JSON.stringify({ f0, s0 }));
+    await xp.screenshot({ path: path.join(OUT, '97-v047-surround-forward.png') });
+    // 정지 상태에서 조향 → 곡선 변화 (centroid 가 왼쪽으로)
+    await X(() => { const w = window.__game.hud.wheel; w.begin(0); for (let i = 1; i <= 25; i++) w.move(-8 * i, 1); w.end(); });
+    await xuntil(() => window.__game.car.steer > 0.2);
+    await sleep(1200);
+    const s1 = await ovStats('.pa-sur-ov');
+    const f1 = await X(() => ({ ...window.__game.surPathDbg }));
+    check('v0.4.7 서라운드: 정차 중 조향 변화가 예측선에 실시간 반영(왼쪽으로 휘어짐), 조향각 유지 시 선도 유지', f1.steer > 0.2 && s1.cx < s0.cx - 0.008, JSON.stringify({ s0: s0.cx, s1: s1.cx, steer: f1.steer }));
+    await sleep(1500);
+    const s1b = await ovStats('.pa-sur-ov');
+    check('v0.4.7 서라운드: 손을 뗀 뒤에도 예측선 유지', Math.abs(s1b.cx - s1.cx) < 0.01 && Math.abs(s1b.n - s1.n) < s1.n * 0.1, JSON.stringify({ a: s1.cx, b: s1b.cx }));
+    await xp.screenshot({ path: path.join(OUT, '98-v047-surround-steer.png') });
+    const mainSame = await X(() => ({ sm: window.__game.surPathDbg.guideMax }));
+    // ---- 후진(R) ----
+    await xplace(0, 10, 0, 'R');
+    await sleep(900);
+    await xuntil(() => window.__game.surPathDbg.dir === -1);
+    await sleep(800);
+    const r0 = await ovStats('.pa-sur-ov');
+    check('v0.4.7 서라운드: 후진(R) 예측선이 차량 뒤쪽(화면 아래쪽)에 그려짐', (await X(() => window.__game.surPathDbg.dir)) === -1 && r0.n > 200 && r0.cy > 0.5, JSON.stringify(r0));
+    await xp.screenshot({ path: path.join(OUT, '99-v047-surround-reverse.png') });
+    // ---- 장애물에서 종료 ----
+    await xplace(0, 10, 0, 'D');
+    await xuntil(() => window.__game.surPathDbg.dir === 1);
+    await sleep(500);
+    const open = await X(() => window.__game.surPathDbg.guideMax);
+    await xbox('cut', 0, 10 + L2 / 2 + 1.7, 8, 0.5, 1.6);
+    await sleep(1200);
+    const cut = await X(() => ({ g: window.__game.surPathDbg.guideMax, steer: window.__game.surPathDbg.steer }));
+    check('v0.4.7 서라운드: 예측선이 장애물 직전에서 종료 (4.5m → 약 1.7m 이하)', open > 4 && cut.g < 2.2 && cut.g > 0.8, JSON.stringify({ open, cut }));
+    await xp.screenshot({ path: path.join(OUT, '100-v047-surround-cut.png') });
+    await xclear();
+
+    // ---- 서라운드 ↔ 센서 전환: 메인 카메라 불변, 상태 저장/복원, 렌더 중지 ----
+    await xplace(0, 10, 0, 'D');
+    await xuntil(() => window.__game.viewOut.view === 'front');
+    for (let i = 0; i < 8 && (await X(() => window.__game.assist.cameraMode !== 'left')); i++) { await xp.click('#parking-assist [data-pa="camera"]'); await sleep(150); }
+    await sleep(800);
+    const before = await X(() => ({ mode: window.__game.assist.cameraMode, view: window.__game.viewOut.view, cap: document.querySelector('#parking-assist .v-camera').textContent }));
+    await xp.click('#parking-assist [data-pa="modeSensor"]');
+    await sleep(900);
+    const after = await X(() => ({ mode: window.__game.assist.cameraMode, view: window.__game.viewOut.view, surround: document.getElementById('parking-assist').dataset.surround, pressed: document.querySelector('[data-pa="modeSensor"]').getAttribute('aria-pressed'), pdcView: window.__game.settings.pdcView, svgVisible: getComputedStyle(document.querySelector('#parking-assist .pa-svg')).display !== 'none', surVisible: getComputedStyle(document.querySelector('#parking-assist .pa-sur-canvas')).display !== 'none' }));
+    check('v0.4.7 센서 전용 전환: 오른쪽만 2D 센서 화면, 왼쪽 메인 카메라(수동 좌측)는 변경 없음', after.surround === 'false' && after.pdcView === 'sensor' && after.svgVisible && !after.surVisible && after.mode === before.mode && after.view === before.view && after.pressed === 'true', JSON.stringify({ before, after }));
+    const r1 = await X(() => window.__game.surPathDbg.renders);
+    await sleep(1500);
+    const r2 = await X(() => window.__game.surPathDbg.renders);
+    check('v0.4.7 센서 모드에서는 서라운드 3D 렌더링 중지', r1 === r2, `${r1}/${r2}`);
+    const ovClear = await ovStats('.pa-sur-ov');
+    check('v0.4.7 전환 후 서라운드 잔상(과거 예측/경고선) 제거', ovClear.n === 0, JSON.stringify(ovClear));
+    await xp.screenshot({ path: path.join(OUT, '101-v047-sensor-mode.png') });
+    // 기어 변경 후에도 선택 유지
+    await xp.keyboard.down('KeyS'); await sleep(150); await xp.keyboard.press('KeyR'); await sleep(100); await xp.keyboard.up('KeyS');
+    await sleep(1200);
+    check('v0.4.7 기어 변경 후에도 센서 전용 선택 유지', await X(() => document.getElementById('parking-assist').dataset.surround === 'false' && window.__game.settings.pdcView === 'sensor'));
+    // 저장/복원: 새로고침 후에도 센서 모드
+    const saved = await X(() => JSON.parse(localStorage.getItem('parksim.v1.settings') || '{}').pdcView);
+    await xp.reload();
+    await xp.waitForSelector('#m-start');
+    await xp.click('#m-start');
+    await xp.waitForSelector('#hud:not(.hidden)', { timeout: 20000 });
+    await sleep(1200);
+    check('v0.4.7 선택한 표시 방식 저장·복원 (새로고침 후)', saved === 'sensor' && (await X(() => window.__game.settings.pdcView)) === 'sensor' && (await X(() => document.getElementById('parking-assist').dataset.surround)) === 'false', String(saved));
+    // 다시 서라운드로
+    await X(() => window.__game.onAction('pdcSurround'));
+    await sleep(500);
+    check('v0.4.7 센서→서라운드 즉시 복귀', (await X(() => document.getElementById('parking-assist').dataset.surround)) === 'true');
+
+    // ---- 전방/후방 집중 탑뷰: 자기 차량 위치 기준선 ----
+    await xclear();
+    await xplace(0, 10, 0, 'D');
+    await xuntil(() => !document.getElementById('parking-assist').classList.contains('hidden'));
+    await sleep(500);
+    await xbox('tf', 0, 10 + L2 / 2 + 1.4, 6, 0.5, 1.6);
+    for (let i = 0; i < 9 && (await X(() => window.__game.assist.cameraMode !== 'topFront')); i++) { await xp.click('#parking-assist [data-pa="camera"]'); await sleep(150); }
+    await xuntil(() => window.__game.viewOut.view === 'topFront');
+    await sleep(2500);
+    const tf = await ovStats('.pa-guide-canvas');
+    check('v0.4.7 전방 집중 탑뷰: 자기 차량 외곽(전방 범퍼선 포함)이 화면에 표시', tf.white >= 40, JSON.stringify(tf));
+    await xp.screenshot({ path: path.join(OUT, '102-v047-topfront.png') });
+    await xclear();
+    await xplace(0, 10, 0, 'R');
+    await sleep(900);
+    await xbox('tr', 0, 10 - L2 / 2 - 1.4, 6, 0.5, 1.6);
+    for (let i = 0; i < 9 && (await X(() => window.__game.assist.cameraMode !== 'topRear')); i++) { await xp.click('#parking-assist [data-pa="camera"]'); await sleep(150); }
+    await xuntil(() => window.__game.viewOut.view === 'topRear');
+    await sleep(2500);
+    const tr = await ovStats('.pa-guide-canvas');
+    check('v0.4.7 후방 집중 탑뷰: 자기 차량 외곽(후방 범퍼선 포함)이 화면에 표시', tr.white >= 40, JSON.stringify(tr));
+    await xp.screenshot({ path: path.join(OUT, '103-v047-toprear.png') });
+    check('v0.4.7 메인 카메라 정책 유지: 전체 탑뷰/사선 미사용', await X(() => !['top', 'topZoom', 'oblique'].includes(window.__game.viewOut.view)));
+    await xclear();
+
+    // ---- 후방/전방 카메라: 속도별 차체 상대 좌표 안정성 (실제 게임 루프) ----
+    const rig = async (gear, kmh) => {
+      await xplace(0, 10, 0, gear);
+      await X(() => { const G = window.__game; G.assist.setManualCamera('auto'); });
+      await xuntil((v) => window.__game.viewOut.view === v && window.__game.rig.assistSettled, gear === 'R' ? 'rear' : 'front', 40000);
+      await sleep(600);
+      await X(() => { window.__game.car.handbrake = false; });
+      return X(async ([gear, kmh]) => {
+        const G = window.__game;
+        G.debugInput = { throttle: 0, brake: 0, steerInput: 0 };
+        const view = gear === 'R' ? 'rear' : 'front';
+        const target = (kmh / 3.6) * (gear === 'R' ? -1 : 1);
+        const samples = [];
+        const t0 = performance.now();
+        await new Promise((res) => {
+          const tick = () => {
+            if (kmh > 0) G.car.v = target; else { G.car.v = 0; G.car.handbrake = true; }
+            const root = G.model.root; root.updateMatrixWorld(true);
+            if (G.viewOut.view === view) {
+              const c = G.rig.assistCamera;
+              const l = root.worldToLocal(c.position.clone());
+              const d = new (c.position.constructor)(); c.getWorldDirection(d);
+              const ld = d.clone().transformDirection(root.matrixWorld.clone().invert());
+              if (performance.now() - t0 > 800) samples.push([l.x, l.y, l.z, ld.x, ld.y, ld.z]);
+            }
+            if (performance.now() - t0 < 3500) requestAnimationFrame(tick); else res();
+          };
+          requestAnimationFrame(tick);
+        });
+        G.debugInput = null; G.car.handbrake = true; G.car.v = 0;
+        if (!samples.length) return null;
+        const mean = samples[0].map((_, k) => samples.reduce((a, s) => a + s[k], 0) / samples.length);
+        const dev = Math.max(...samples.map((s) => Math.max(...s.map((v, k) => Math.abs(v - mean[k])))));
+        const m = gear === 'R' ? G.spec.rearCam : G.spec.frontCam;
+        const exp = [m.x, m.y, m.z, 0, -Math.sin(m.pitch), (gear === 'R' ? -1 : 1) * Math.cos(m.pitch)];
+        const err = Math.max(...mean.map((v, k) => Math.abs(v - exp[k])));
+        return { n: samples.length, mean, dev, err };
+      }, [gear, kmh]);
+    };
+    const results = {};
+    for (const [gear, label] of [['R', '후방'], ['D', '전방']]) {
+      const base = await rig(gear, 0);
+      for (const kmh of [1, 3, 5]) {
+        const r = await rig(gear, kmh);
+        results[`${gear}${kmh}`] = r;
+        const dm = base && r ? Math.max(Math.max(...r.mean.map((v, k) => Math.abs(v - base.mean[k]))), r.err) : 99;
+        check(`v0.4.7 ${label}카메라 ${kmh}km/h: 차체 기준 카메라 위치·방향이 정지 상태 및 장착 제원(spec)과 동일 (평균 차이 ${(dm * 1000).toFixed(2)}mm, 프레임 편차 ${r ? (r.dev * 1000).toFixed(2) : '?'}mm)`, !!r && !!base && dm < 0.002 && r.dev < 0.002, JSON.stringify({ base: base && base.n, r: r && r.n }));
+      }
+    }
+    await xplace(0, 10, 0, 'D');
+    await sleep(500);
+
+    // ---- 1인칭 실내 화면 ↔ 3인칭 상태 동기화 + 클릭 ----
+    await X(() => { window.__game.rig.setMode('driver'); });
+    await xuntil(() => window.__game.model.cabin && window.__game.rig.mode === 'driver');
+    await sleep(1500);
+    await xuntil(() => window.__game.cabinHits.length > 0, undefined, 30000);
+    const hits = await X(() => window.__game.cabinHits.map((h) => h.action));
+    check('v0.4.7 실내 화면: 3D 서라운드/센서 선택 영역이 터치 판정에 포함', hits.includes('pdcSurround') && hits.includes('pdcSensor'), JSON.stringify(hits));
+    const clickCabin = async (action) => {
+      const pt = await X((action) => {
+        const G = window.__game; const h = G.cabinHits.find((q) => q.action === action); if (!h) return null;
+        const mesh = G.model.cabin.center.mesh; const cv = G.model.cabin.center.canvas;
+        const u = (h.x + h.w / 2) / cv.width, v = 1 - (h.y + h.h / 2) / cv.height;
+        const p = mesh.geometry.parameters; const lp = mesh.localToWorld(new (mesh.position.constructor)((u - 0.5) * p.width, (v - 0.5) * p.height, 0));
+        G.rig.camera.updateMatrixWorld(); lp.project(G.rig.camera);
+        const r = G.canvas.getBoundingClientRect();
+        return { x: r.left + (lp.x * 0.5 + 0.5) * r.width, y: r.top + (-lp.y * 0.5 + 0.5) * r.height };
+      }, action);
+      if (!pt) return false;
+      await xp.mouse.click(pt.x, pt.y);
+      await sleep(500);
+      return true;
+    };
+    await clickCabin('pdcSensor');
+    check('v0.4.7 실내 화면 클릭 → 센서 전용 (플로팅 패널과 같은 설정 공유)', (await X(() => window.__game.settings.pdcView === 'sensor' && document.getElementById('parking-assist').dataset.surround === 'false')));
+    await sleep(800);
+    await xp.screenshot({ path: path.join(OUT, '104-v047-cabin-sensor.png') });
+    await clickCabin('pdcSurround');
+    check('v0.4.7 실내 화면 클릭 → 3D 서라운드 복귀', (await X(() => window.__game.settings.pdcView === 'surround' && document.getElementById('parking-assist').dataset.surround === 'true')));
+    await sleep(800);
+    await xp.screenshot({ path: path.join(OUT, '105-v047-cabin-surround.png') });
+    await X(() => { window.__game.rig.setMode('chase'); });
+    await sleep(500);
+
+    // ---- 반복 렌더링 GPU 자원 누수 (서라운드/센서 전환 반복) ----
+    const res0 = await X(() => { const i = window.__game.renderer.info.memory; return { g: i.geometries, t: i.textures }; });
+    for (let i = 0; i < 12; i++) { await X((i) => window.__game.onAction(i % 2 ? 'pdcSurround' : 'pdcSensor'), i); await sleep(150); }
+    await X(() => window.__game.onAction('pdcSurround'));
+    await sleep(1000);
+    const res1 = await X(() => { const i = window.__game.renderer.info.memory; return { g: i.geometries, t: i.textures }; });
+    check('v0.4.7 서라운드/센서 12회 전환 후 GPU 자원(geometry/texture) 증가 없음', res1.g <= res0.g + 2 && res1.t <= res0.t + 2, JSON.stringify({ res0, res1 }));
+    await xctx.close();
   }
 
   // ---------- 10. 오류 ----------

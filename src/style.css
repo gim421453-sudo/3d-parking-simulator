@@ -309,13 +309,13 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 /* ---------- 좌측 상단 큰 기어 표시 (P R N D, 현재 기어만 크게) ---------- */
 #gear-big { display: flex; align-items: center; gap: 2px; width: fit-content; padding: 4px 10px; border-radius: 14px; background: var(--glass); border: 1px solid var(--hair); backdrop-filter: blur(8px); pointer-events: none !important; }
 #gear-big span { font-weight: 800; font-size: 15px; line-height: 1; color: var(--txt-3); min-width: 17px; text-align: center; transition: color .12s; }
-#gear-big[data-g="P"] span[data-g="P"], #gear-big[data-g="R"] span[data-g="R"], #gear-big[data-g="N"] span[data-g="N"], #gear-big[data-g="D"] span[data-g="D"] { font-size: 40px; min-width: 38px; color: #fff; text-shadow: 0 0 14px rgba(143, 184, 255, .55); }
+#gear-big[data-g="P"] span[data-g="P"], #gear-big[data-g="R"] span[data-g="R"], #gear-big[data-g="N"] span[data-g="N"], #gear-big[data-g="D"] span[data-g="D"] { font-size: 47px; min-width: 44px; color: #fff; text-shadow: 0 0 14px rgba(143, 184, 255, .55); }
 #gear-big[data-g="R"] span[data-g="R"] { color: #ff6a5f; text-shadow: 0 0 14px rgba(229, 55, 47, .7); }
 #gear-big[data-g="D"] span[data-g="D"] { color: #bcd6ff; }
 @media (max-height: 480px) {
   #gear-big { padding: 3px 8px; }
   #gear-big span { display: none; }
-  #gear-big[data-g="P"] span[data-g="P"], #gear-big[data-g="R"] span[data-g="R"], #gear-big[data-g="N"] span[data-g="N"], #gear-big[data-g="D"] span[data-g="D"] { display: block; font-size: 34px; min-width: 30px; }
+  #gear-big[data-g="P"] span[data-g="P"], #gear-big[data-g="R"] span[data-g="R"], #gear-big[data-g="N"] span[data-g="N"], #gear-big[data-g="D"] span[data-g="D"] { display: block; font-size: 40px; min-width: 36px; }
 }
 
 /* ---------- 회전형 핸들 (터치) ---------- */
@@ -337,19 +337,23 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 @media (max-height: 480px) { #hud { --avail: calc((100vw - 350px) / 2 - 18px); } }
 #hud.touch-on {
   --wheel: max(104px, min(48vh, var(--avail), calc(396px * var(--touch))));
-  --pw: max(60px, min(calc((var(--avail) - 86px) / 1.9), calc(234px * var(--touch))));
-  --ped-total: calc(var(--pw) * 1.88 + 12px);
+  /* v0.4.7: 페달 크기 ≈13% 축소(0.87배), 가장자리에서 띄우고(오른쪽 36px/아래 28px) 두 페달 간격 18px, 레버와는 40px 이상 분리 */
+  --pw: max(52px, calc(0.87 * min(calc((var(--avail) - 86px) / 1.9), calc(234px * var(--touch)))));
+  --ped-r: max(36px, env(safe-area-inset-right));
+  --ped-b: 28px;
+  --ped-gap: 18px;
+  --ped-total: calc(var(--pw) * 1.88 + var(--ped-gap));
 }
 #hud button, #hud .tbtn, #hud #t-wheel, #hud #shifter { touch-action: none; -webkit-tap-highlight-color: transparent; }
 #t-wheel { width: var(--wheel); height: var(--wheel); }
 #t-steer { bottom: 10px; }
-#t-pedals { bottom: 10px; gap: 12px; align-items: flex-end; }
+#hud.touch-on #t-pedals { right: var(--ped-r); bottom: var(--ped-b); gap: var(--ped-gap); align-items: flex-end; }
 #touch .tbtn.brk { width: calc(var(--pw) * .88); height: calc(min(var(--pw) * 1.76, 44vh)); border-radius: 22px; }
 #touch .tbtn.gas { width: var(--pw); height: calc(min(var(--pw) * 2.0, 50vh)); border-radius: 22px; }
 #touch .tbtn.brk, #touch .tbtn.gas { font-size: calc(var(--pw) * .17); display: grid; place-items: center; background-image: repeating-linear-gradient(180deg, rgba(255,255,255,.07) 0 3px, transparent 3px 14px); }
 #touch .tbtn.held { transform: scale(.97); }
-#hud.touch-on #shifter { right: calc(var(--ped-total) + 22px); bottom: 10px; }
-@media (max-height: 480px) { #hud.touch-on #shifter { right: calc(var(--ped-total) + 16px); bottom: 8px; } #t-steer, #t-pedals { bottom: 8px; } }
+#hud.touch-on #shifter { right: calc(var(--ped-r) + var(--ped-total) + 40px); bottom: var(--ped-b); }
+@media (max-height: 480px) { #hud.touch-on { --ped-r: max(22px, env(safe-area-inset-right)); --ped-b: 16px; --ped-gap: 14px; } #hud.touch-on #shifter { right: calc(var(--ped-r) + var(--ped-total) + 28px); } #t-steer { bottom: 8px; } }
 /* 터치 대형 조작부가 켜져 있으면 좌측의 작은 3D 센서 화면(겹침 원인)은 숨긴다 — PDC 서라운드뷰가 같은 역할을 한다 */
 @media (max-height: 1000px) { #hud.touch-on .sensor-view.small, #hud.touch-on #sv-controls:not(.large) { display: none; } }
 

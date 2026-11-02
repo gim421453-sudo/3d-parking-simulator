@@ -115,3 +115,15 @@
 #parking-assist:not([data-surround="true"]) .pa-sur-canvas, #parking-assist:not([data-surround="true"]) .pa-sur-ov { display: none; }
 #parking-assist[data-content="nav"] .pa-sur-canvas, #parking-assist[data-content="nav"] .pa-sur-ov { display: none; }
 @media (max-height: 480px) { .pa-sur-canvas, .pa-sur-ov { bottom: 18px; height: calc(100% - 18px); } }
+
+/* v0.4.7: 오른쪽 PDC 표시 방식 선택 (3D 서라운드 / 센서). 서라운드 미지원 차량은 숨김 */
+.pa-mode { position: absolute; top: 4px; left: 4px; right: 4px; z-index: 4; display: none; gap: 4px; }
+#parking-assist[data-surround-supported="true"][data-content="parking"] .pa-mode { display: flex; }
+.pa-mode button { flex: 1; min-height: 26px; padding: 2px 6px; border-radius: 8px; border: 1px solid var(--hair); background: rgba(255,255,255,.1); color: var(--txt-2, #b9c5d3); font: 600 11px/1.1 inherit; cursor: pointer; touch-action: none; }
+.pa-mode button[aria-pressed="true"] { background: rgba(111,168,255,.5); color: #fff; border-color: rgba(143,184,255,.8); }
+/* 전환 버튼 줄(약 30px)만큼 아래로 내려 PDC/서라운드 화면이 버튼에 가려지지 않게 한다 */
+#parking-assist[data-surround-supported="true"][data-content="parking"] .pa-svg { top: 32px; height: calc(100% - 54px); }
+#parking-assist[data-surround-supported="true"][data-content="parking"] .pa-sur-canvas, #parking-assist[data-surround-supported="true"][data-content="parking"] .pa-sur-ov { top: 32px; height: calc(100% - 54px); }
+@media (max-height: 480px) {
+  #parking-assist[data-surround-supported="true"][data-content="parking"] .pa-svg, #parking-assist[data-surround-supported="true"][data-content="parking"] .pa-sur-canvas, #parking-assist[data-surround-supported="true"][data-content="parking"] .pa-sur-ov { top: 30px; height: calc(100% - 48px); }
+}

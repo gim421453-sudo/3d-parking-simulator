@@ -15,6 +15,8 @@ export interface CenterData {
   /** 3D 서라운드뷰 캔버스(+경고선) — 있으면 센서 PDC 대신 사용 */
   surround?: HTMLCanvasElement | null;
   surroundOv?: HTMLCanvasElement | null;
+  pdcView?: 'surround' | 'sensor';
+  surroundSupported?: boolean;
   palette: PdcPaletteId;
   viewName: string;
   gear: string;
@@ -28,7 +30,7 @@ export interface CenterData {
 }
 
 /** 실내 디스플레이에서 눌러 조작할 수 있는 영역 (캔버스 좌표) */
-export type CabinAction = 'sensor' | 'sound' | 'camera' | 'settings' | 'content' | 'expand';
+export type CabinAction = 'sensor' | 'sound' | 'camera' | 'settings' | 'content' | 'expand' | 'pdcSurround' | 'pdcSensor';
 export interface CabinHit {
   action: CabinAction;
   x: number;
@@ -90,9 +92,27 @@ export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: nu
   ctx.fillRect(mainW, top, midW, bh);
   if (d.content === 'parking') {
     if (d.surround && d.surround.width > 0) {
-      ctx.drawImage(d.surround, mainW, top, midW, bh - 18);
-      if (d.surroundOv) ctx.drawImage(d.surroundOv, mainW, top, midW, bh - 18);
+      const oy = d.surroundSupported ? Math.max(18, h * 0.085) : 0; // 전환 버튼 줄 아래
+      ctx.drawImage(d.surround, mainW, top + oy, midW, bh - 18 - oy);
+      if (d.surroundOv) ctx.drawImage(d.surroundOv, mainW, top + oy, midW, bh - 18 - oy);
     } else drawPdcCanvas(ctx, mainW, top, midW, bh - 18, d.spec, d.pdc, d.palette);
+    if (d.surroundSupported) {
+      // 오른쪽 화면 표시 방식 선택 (3인칭 패널의 3D 서라운드/센서 버튼과 같은 상태)
+      const bw = (midW - 12) / 2;
+      const by = top + 4;
+      const bh2 = Math.max(16, h * 0.075);
+      (['surround', 'sensor'] as const).forEach((m, i) => {
+        const x = mainW + 4 + i * (bw + 4);
+        const on = (d.pdcView ?? 'surround') === m;
+        ctx.fillStyle = on ? 'rgba(111,168,255,.55)' : 'rgba(255,255,255,.12)';
+        ctx.fillRect(x, by, bw, bh2);
+        ctx.fillStyle = on ? '#fff' : '#b9c5d3';
+        ctx.font = `600 ${Math.round(h * 0.045)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(m === 'surround' ? '3D 서라운드' : '센서', x + bw / 2, by + bh2 * 0.7);
+        hits.push({ action: m === 'surround' ? 'pdcSurround' : 'pdcSensor', x, y: by, w: bw, h: bh2 });
+      });
+    }
     ctx.fillStyle = '#c6d1dc';
     ctx.font = `${Math.round(h * 0.055)}px sans-serif`;
     ctx.textAlign = 'center';

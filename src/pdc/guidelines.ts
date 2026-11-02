@@ -52,14 +52,16 @@ export interface GuideLines {
 
 export const GUIDE_ZONES = [1.0, 2.0, 3.5]; // 빨강 → 노랑 → 초록 경계(m)
 
-export function buildGuideLines(spec: VehicleSpec, steer: number, dir: 1 | -1, maxDist = 4.5): GuideLines {
+export const SURROUND_MARKS = [0.5, 1.0, 2.0, 3.0]; // 서라운드뷰 예측 거리 구분선(조향 경로상 이동 거리, 장애물까지의 측정 거리가 아님)
+
+export function buildGuideLines(spec: VehicleSpec, steer: number, dir: 1 | -1, maxDist = 4.5, markDists: readonly number[] = GUIDE_ZONES): GuideLines {
   const zEdge = dir < 0 ? -spec.length / 2 : spec.length / 2; // 후진=뒤 범퍼, 전진=앞 범퍼
   const hw = spec.width / 2;
   const left = pathOfPoint(spec, steer, dir, hw, zEdge, maxDist, 0.25);
   const right = pathOfPoint(spec, steer, dir, -hw, zEdge, maxDist, 0.25);
   const straightLeft = pathOfPoint(spec, 0, dir, hw, zEdge, maxDist, maxDist);
   const straightRight = pathOfPoint(spec, 0, dir, -hw, zEdge, maxDist, maxDist);
-  const marks = GUIDE_ZONES.filter((z) => z <= maxDist + 1e-9).map((s) => {
+  const marks = markDists.filter((z) => z <= maxDist + 1e-9).map((s) => {
     const l = pathOfPoint(spec, steer, dir, hw, zEdge, s, s).pop()!;
     const r = pathOfPoint(spec, steer, dir, -hw, zEdge, s, s).pop()!;
     return { s, left: l, right: r };

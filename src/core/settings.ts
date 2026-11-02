@@ -23,6 +23,7 @@ export interface Settings {
   assistGuides: boolean; // 조향 연동 주차 가이드라인
   assistCameraFps: number; // 주차 보조 카메라 갱신 FPS (부하 조절)
   pdcPalette: PdcPaletteId; // PDC 경고 색상 프리셋
+  pdcView: 'surround' | 'sensor'; // 오른쪽 PDC 영역: 3D 서라운드뷰 / 센서 전용 2D (서라운드 미지원 차량은 항상 센서)
   assistAutoView: boolean; // 측면 장애물 접근 시 3D 측면/탑뷰로 자동 전환
   infoAutoShow: boolean; // 주차 보조가 필요하면 플로팅 디스플레이 자동 표시
   infoAutoHide: boolean; // 주차 보조가 끝나면 플로팅 디스플레이 자동 숨김 (끄면 내비게이션을 표시하며 유지)
@@ -63,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   assistGuides: true,
   assistCameraFps: 30,
   pdcPalette: 'standard',
+  pdcView: 'surround',
   assistAutoView: true,
   infoAutoShow: true,
   infoAutoHide: true,
@@ -94,6 +96,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Settings {
   s.assistExitSec = Math.min(10, Math.max(0, Number.isFinite(Number(s.assistExitSec)) ? Number(s.assistExitSec) : 3));
   s.assistCameraFps = Math.min(60, Math.max(10, Number(s.assistCameraFps) || 30));
   if (!(s.pdcPalette in PDC_PALETTES)) s.pdcPalette = 'standard';
+  s.pdcView = s.pdcView === 'sensor' ? 'sensor' : 'surround';
   s.infoAutoHideSec = Math.min(10, Math.max(0.5, Number(s.infoAutoHideSec) || 2.5));
   s.cabinFps = Math.min(30, Math.max(5, Number(s.cabinFps) || 15));
   s.mirrorFps = Math.min(30, Math.max(0, Number.isFinite(Number(s.mirrorFps)) ? Number(s.mirrorFps) : 15));
