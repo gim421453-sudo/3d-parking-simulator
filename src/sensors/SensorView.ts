@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { disposeObject } from '../core/dispose';
 import type { Collider } from '../core/geometry';
 import { localToWorld, worldToLocal } from '../core/math';
 import type { SensorGroup, VehicleSpec } from '../vehicle/spec';
@@ -147,7 +148,10 @@ export class SensorView {
   setSpec(spec: VehicleSpec): void {
     this.spec = spec;
     // 기존 차량 목업/부채꼴 제거 후 재생성
-    for (const c of [...this.carGroup.children]) this.carGroup.remove(c);
+    for (const c of [...this.carGroup.children]) {
+      this.carGroup.remove(c);
+      disposeObject(c);
+    }
     this.fanCover = [];
     this.fanMeasure = [];
     this.fanEdge = [];

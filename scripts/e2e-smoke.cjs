@@ -870,6 +870,33 @@ async function waitServer(url, tries = 50) {
   await g(() => { window.__game.updateSettings({ vehicleId: 'sedan' }); window.__game.startRun(); });
   await sleep(500);
 
+  // ---------- 14. 자원 누수 (반복 시작 시 geometry/texture 가 늘어나지 않아야 함) ----------
+  const mem = () => g(() => { const m = window.__game.renderer.info.memory; return { geo: m.geometries, tex: m.textures }; });
+  const leakRun = async (vehicleId, mapId) => {
+    const samples = [];
+    for (let i = 0; i < 8; i++) {
+      await g(([v, m]) => { const G = window.__game; G.updateSettings({ vehicleId: v, mapId: m }); G.startRun(); }, [vehicleId, mapId]);
+      await sleep(250);
+      samples.push(await mem());
+    }
+    return samples;
+  };
+  for (const [v, m] of [['suv-x6', 'lot'], ['coupe-m4', 'lot'], ['sedan-glb', 'lot']]) {
+    const sm = await leakRun(v, m);
+    const base = sm[2];
+    const last = sm[sm.length - 1];
+    check(`반복 시작 자원 안정: ${v} (geometry ${base.geo}→${last.geo}, texture ${base.tex}→${last.tex})`, last.geo <= base.geo + 1 && last.tex <= base.tex + 1, JSON.stringify(sm.map((x) => x.geo + '/' + x.tex)));
+  }
+  await g(() => { window.__game.updateSettings({ vehicleId: 'sedan', mapId: 'lot' }); window.__game.startRun(); });
+  const mapA = [];
+  for (const mid of ['underground', 'lot', 'outdoor', 'underground', 'lot', 'outdoor']) {
+    await g((id) => { const G = window.__game; G.updateSettings({ mapId: id }); G.startRun(); }, mid).catch(() => {});
+    await sleep(300);
+    mapA.push(await mem());
+  }
+  check('맵 교체 반복 시에도 자원 증가 없음', mapA[5].geo <= mapA[2].geo + 2 && mapA[5].tex <= mapA[2].tex + 2, JSON.stringify(mapA));
+  await g(() => { window.__game.updateSettings({ mapId: 'lot', missionId: 'lot-front' }); window.__game.startRun(); });
+
   // ---------- 11. 모바일(터치/가로 화면) ----------
   {
     const mctx = await browser.newContext({ viewport: { width: 800, height: 360 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });

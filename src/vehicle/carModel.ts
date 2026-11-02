@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { LightingOutput } from './lighting';
 import type { VehicleSpec } from './spec';
+import { disposeObject } from '../core/dispose';
 import { KR_PLATE, makeKrPlateMaterial } from './plate';
 
 /** 차량 시각 모델. 충돌체(OBB)/센서 좌표는 VehicleSpec 에 별도로 있으며 이 모델과 독립적이다. */
@@ -424,6 +425,12 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       }
     },
     dispose() {
+      // 공유 캐시(geoCache/matCache)와 맵 공용 그림자 텍스처는 제외하고 이 모델이 만든 자원만 해제 (GLB 로 붙은 장면 포함)
+      disposeObject(root, {
+        geometries: new Set(geoCache.values()),
+        materials: new Set(matCache.values()),
+        textures: opts.blobTexture ? new Set([opts.blobTexture]) : undefined,
+      });
       for (const m of ownMaterials) m.dispose();
       headSpot?.dispose();
       highSpot?.dispose();
