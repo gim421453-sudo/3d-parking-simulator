@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { LightingOutput } from './lighting';
 import type { VehicleSpec } from './spec';
+import { KR_PLATE, makeKrPlateMaterial } from './plate';
 
 /** 차량 시각 모델. 충돌체(OBB)/센서 좌표는 VehicleSpec 에 별도로 있으며 이 모델과 독립적이다. */
 /** 실내 화면: 캔버스에 그리고 텍스처로 쓴다 */
@@ -193,7 +194,8 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     const b = new THREE.Mesh(box(`${key}:bumper`, W * 0.97, 0.2, 0.1), darkMat);
     b.position.set(0, clearance + 0.12, s * (hl - 0.03));
     bodyGroup.add(b);
-    const plate = new THREE.Mesh(box(`${key}:plate`, 0.52, 0.12, 0.02), plateMat);
+    const plate = new THREE.Mesh(box(`${key}:plate`, KR_PLATE.widthM, KR_PLATE.heightM, 0.015), spec.plate ? makeKrPlateMaterial(spec.plate) : plateMat);
+    plate.name = s > 0 ? 'Plate_Front' : 'Plate_Rear';
     plate.position.set(0, clearance + 0.3, s * (hl + 0.04));
     bodyGroup.add(plate);
   }

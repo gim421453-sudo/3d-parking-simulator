@@ -172,6 +172,7 @@ export class AssistPanel {
   /** 차량(제원) 변경 시 PDC 차량 그래픽과 구역을 다시 만든다 */
   setSpec(spec: VehicleSpec): void {
     this.spec = spec;
+    this.el.dataset.layout = spec.assist.panelLayout; // rear: 후방카메라 전용 컴팩트 / surround: 전·후방 + 3D
     const M = 1.45;
     const vbW = spec.width + M * 2;
     const vbH = spec.length + M * 2;

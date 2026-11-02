@@ -31,7 +31,7 @@ w('schema.json', {
 });
 w('vehicles.json', VEHICLES.map((v) => ({
   id: v.id, name: v.name, length: v.length, width: v.width, height: v.height, wheelbase: v.wheelbase, rearOverhang: v.rearOverhang,
-  maxSteerRad: v.maxSteer, maxSpeedFwdMps: v.maxSpeedFwd, maxSpeedRevMps: v.maxSpeedRev, accel: v.accel, transmission: v.transmission, category: v.category, wheelRadius: v.wheelRadius, trackWidth: v.trackWidth,
+  maxSteerRad: v.maxSteer, maxSpeedFwdMps: v.maxSpeedFwd, maxSpeedRevMps: v.maxSpeedRev, accel: v.accel, transmission: v.transmission, category: v.category, assist: v.assist, plate: v.plate ?? null, wheelRadius: v.wheelRadius, trackWidth: v.trackWidth,
   cameras: { driverEye: v.driverEye, rearCam: v.rearCam, frontCam: v.frontCam },
   sensorHeight: v.sensorHeight, sensors: v.sensors, color: '#' + v.color.toString(16).padStart(6, '0'), visual: v.visual,
 })));

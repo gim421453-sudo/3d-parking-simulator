@@ -38,9 +38,9 @@
 .pa-status[data-enabled="false"] { color: var(--txt-3); }
 
 /* 콘텐츠 전환: 주차 보조(camera+PDC) ↔ 내비게이션(map+guidance). DOM 과 우측 사이드 메뉴는 그대로 */
-.pa-nav-canvas, .pa-guidance { display: none; }
-#parking-assist[data-content="nav"] .pa-nav-canvas { display: block; }
-#parking-assist[data-content="nav"] .pa-cam-canvas, #parking-assist[data-content="nav"] .pa-guide-canvas, #parking-assist[data-content="nav"] .pa-svg, #parking-assist[data-content="nav"] .pa-status { display: none; }
+.pa-cam .pa-nav-canvas, .pa-guidance { display: none; } /* .pa-cam canvas(display:block)보다 구체적이어야 함 */
+#parking-assist[data-content="nav"] .pa-cam .pa-nav-canvas { display: block; }
+#parking-assist[data-content="nav"] .pa-cam .pa-cam-canvas, #parking-assist[data-content="nav"] .pa-cam .pa-guide-canvas, #parking-assist[data-content="nav"] .pa-svg, #parking-assist[data-content="nav"] .pa-status { display: none; }
 #parking-assist[data-content="nav"] .pa-guidance { display: flex; }
 .pa-guidance { position: absolute; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px; text-align: center; }
 .pa-turn { width: 54px; height: 54px; color: #e8edf3; display: grid; place-items: center; }
@@ -96,4 +96,14 @@
   #parking-assist { top: 50px; }
   #hud.assist-open #toasts { top: 8px; }
   #hud.assist-open .toast { max-width: 330px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* 후방카메라 전용 레이아웃 (카메라 + 차량 전체 PDC + 컴팩트 메뉴 3개). 전방/서라운드/3D 시점 선택 버튼은 없다. */
+#parking-assist[data-layout="rear"] .pa-body { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1.05fr) minmax(0, .72fr); }
+#parking-assist[data-layout="rear"] .pa-side button[data-pa="camera"] { display: none; }
+#parking-assist[data-layout="rear"] .pa-side { min-height: 126px; }
+#parking-assist[data-layout="rear"] .pa-title::after { content: ' · 후방'; }
+@media (max-height: 480px) {
+  #parking-assist[data-layout="rear"] .pa-body { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, .8fr); }
+  #parking-assist[data-layout="rear"] .pa-side { min-height: 120px; }
 }

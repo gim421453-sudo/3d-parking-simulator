@@ -23,6 +23,34 @@ export interface VehicleVisual {
   rotY?: number;
 }
 
+/** 차량별 주차 보조 지원 기능 (데이터 기반). 지원하지 않는 기능은 호출 자체를 하지 않는다. */
+export interface AssistCaps {
+  rearCamera: boolean;
+  frontCamera: boolean;
+  /** 가상 카메라 기반 3D 측면/탑/사선 시점 (실차 카메라 스티칭이 아님) */
+  virtualSurround3D: boolean;
+  /** 센서 방향에 따른 3D 시점 자동 전환 */
+  automaticViewSelection: boolean;
+  rearParkingGuidelines: boolean;
+  /** 주차 보조 패널 구성: rear = 후방카메라 전용 컴팩트, surround = 전/후방+3D */
+  panelLayout: 'rear' | 'surround';
+  /** 실내 디스플레이/계기판 외형 프로필 (게임 상태·렌더 로직은 공통) */
+  interior: 'generic' | 'coupe' | 'suv';
+  /** 사이드미러/룸미러 렌더 지원 */
+  mirrors: boolean;
+}
+
+export const FULL_ASSIST: AssistCaps = {
+  rearCamera: true,
+  frontCamera: true,
+  virtualSurround3D: true,
+  automaticViewSelection: true,
+  rearParkingGuidelines: true,
+  panelLayout: 'surround',
+  interior: 'generic',
+  mirrors: true,
+};
+
 export interface VehicleSpec {
   id: string;
   name: string;
@@ -52,6 +80,10 @@ export interface VehicleSpec {
   // --- 센서 ---
   sensorHeight: number;
   sensors: SensorMount[];
+  /** 주차 보조 지원 기능 */
+  assist: AssistCaps;
+  /** 번호판(한국형 가상 번호). 교체 가능 */
+  plate?: string;
   color: number;
   visual: VehicleVisual;
 }
@@ -117,6 +149,7 @@ function make(p: {
     frontCam: { x: 0, y: 0.78, z: p.length / 2 - 0.04, pitch: 22 * DEG },
     sensorHeight: 0.55,
     sensors: defaultSensorLayout(p.length, p.width),
+    assist: { ...FULL_ASSIST },
     color: p.color,
     visual: { kind: 'procedural', body: p.body },
   };
@@ -177,7 +210,59 @@ export const VEHICLE_EXTRAS: VehicleSpec[] = [
     visual: { kind: 'glb', body: 'sedan', url: './models/sedan-test.glb', scale: 1, offset: { x: 0, y: 0, z: 0 }, rotY: 0 },
   },
 ];
-export const SELECTABLE_VEHICLES: VehicleSpec[] = [...VEHICLES, ...VEHICLE_EXTRAS];
+/**
+ * 차량 2대 프로필 (v0.4.1). 외형은 승인된 에셋이 없어 **임시 절차 모델**이다(Blender 작업 후 GLB 로 교체).
+ * - coupe-m4: M4(G82) 계열 제원. 후방카메라 전용 (전방카메라/서라운드/3D 시점 없음).
+ * - suv-x6: X6(G06) xDrive40i 계열 제원. 전/후방 + 가상 3D 서라운드.
+ */
+const rearOnly: AssistCaps = {
+  rearCamera: true,
+  frontCamera: false,
+  virtualSurround3D: false,
+  automaticViewSelection: false,
+  rearParkingGuidelines: true,
+  panelLayout: 'rear',
+  interior: 'coupe',
+  mirrors: true,
+};
+export const PROFILE_VEHICLES: VehicleSpec[] = [
+  {
+    ...make({
+      id: 'coupe-m4',
+      name: '스포츠 쿠페 (M4 계열)',
+      desc: '낮고 긴 2도어 쿠페 (임시 형상). 후방카메라 전용 PDC.',
+      length: 4.794,
+      width: 1.887,
+      height: 1.393,
+      wheelbase: 2.857,
+      rearOverhang: 1.02,
+      color: 0x1f3d8f,
+      body: 'sedan',
+      wheelRadius: 0.34,
+    }),
+    assist: rearOnly,
+    plate: '123가 4567',
+  },
+  {
+    ...make({
+      id: 'suv-x6',
+      name: '프리미엄 SUV 쿠페 (X6 xDrive40i 계열)',
+      desc: '크고 높은 SUV 쿠페 (임시 형상). 전/후방카메라 + 3D 서라운드 PDC.',
+      length: 4.936,
+      width: 2.004,
+      height: 1.696,
+      wheelbase: 2.972,
+      rearOverhang: 1.1,
+      color: 0x2b2f36,
+      body: 'suv',
+      wheelRadius: 0.39,
+    }),
+    assist: { ...FULL_ASSIST, interior: 'suv' },
+    plate: '456나 7890',
+  },
+];
+
+export const SELECTABLE_VEHICLES: VehicleSpec[] = [...VEHICLES, ...PROFILE_VEHICLES, ...VEHICLE_EXTRAS];
 
 export const getVehicle = (id: string): VehicleSpec => SELECTABLE_VEHICLES.find((v) => v.id === id) ?? VEHICLES[1];
 

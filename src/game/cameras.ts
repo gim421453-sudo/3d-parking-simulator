@@ -118,9 +118,15 @@ export class CameraRig {
     if (m === 'free' && pose) this.freeYaw = pose.heading + Math.PI;
   }
 
-  next(pose: CarPose): CameraMode {
-    const i = CAMERA_ORDER.indexOf(this.mode);
-    this.setMode(CAMERA_ORDER[(i + 1) % CAMERA_ORDER.length], pose);
+  /** 다음 카메라. 전방카메라가 없는 차량(hasFront=false)은 'front' 모드를 건너뛴다 */
+  next(pose: CarPose, hasFront = true): CameraMode {
+    let i = CAMERA_ORDER.indexOf(this.mode);
+    let n: CameraMode;
+    do {
+      i = (i + 1) % CAMERA_ORDER.length;
+      n = CAMERA_ORDER[i];
+    } while (n === 'front' && !hasFront);
+    this.setMode(n, pose);
     return this.mode;
   }
 

@@ -24,7 +24,8 @@ import { LIGHT_MODE_NAME, computeLighting, nextLightMode, stepLeveling, type Lig
 import { AssistController, type AssistOutput, type AssistSettings } from '../pdc/assistPolicy';
 import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
 import { buildPdcState, type PdcState } from '../pdc/pdcModel';
-import { ASSIST_VIEW_NAME, ASSIST_VIEW_ORDER, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
+import { allowedViews, autoViewAllowed, cameraCycle, clampView, restrictAssist } from '../pdc/capabilities';
+import { ASSIST_VIEW_NAME, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
 import { InfotainmentController, type InfoOutput, type InfoSettings } from '../infotainment/controller';
 import { drawCenterScreen, drawCluster } from '../infotainment/cabinScreens';
 import { Navigator, type NavState } from '../nav/navigator';
@@ -182,6 +183,7 @@ export class Game {
     });
 
     (window as unknown as { __devExportGlb?: typeof exportVehicleGlb }).__devExportGlb = exportVehicleGlb;
+    (window as unknown as { __perfStats?: () => unknown }).__perfStats = () => this.perfStats();
     this.input.onAction = (a) => this.onAction(a);
     this.input.attach();
     this.rig.bind(canvas);
@@ -478,7 +480,7 @@ export class Game {
         this.hud.toast(this.car.handbrake ? '주차 브레이크 ON' : '주차 브레이크 OFF');
         break;
       case 'camera': {
-        const m = this.rig.next(this.poseNow());
+        const m = this.rig.next(this.poseNow(), this.spec.assist.frontCamera);
         this.hud.toast(`카메라: ${CAMERA_NAMES[m]}`);
         break;
       }
@@ -522,8 +524,12 @@ export class Game {
         this.info.hide();
         break;
       case 'assistCamera': {
-        const order: ('auto' | AssistView)[] = ['auto', ...ASSIST_VIEW_ORDER];
-        const next = order[(order.indexOf(this.assist.cameraMode) + 1) % order.length];
+        const order = cameraCycle(this.spec.assist);
+        if (order.length === 0) {
+          this.hud.toast('이 차량은 후방카메라 전용입니다');
+          break;
+        }
+        const next = order[(Math.max(0, order.indexOf(this.assist.cameraMode)) + 1) % order.length];
         this.assist.setManualCamera(next);
         this.viewPolicy.reset();
         this.hud.toast(`카메라 화면: ${next === 'auto' ? '자동(기어/센서 연동)' : ASSIST_VIEW_NAME[next]}`);
@@ -653,14 +659,15 @@ export class Game {
       frontMaxKmh: this.settings.assistFrontMaxKmh,
       pExitSec: this.settings.assistExitSec,
     };
-    this.assistOut = this.assist.update({ gear: this.car.gear, speedKmh: Math.abs(this.car.v) * 3.6, dt }, asSet);
+    const caps = this.spec.assist;
+    this.assistOut = this.assist.update({ gear: this.car.gear, speedKmh: Math.abs(this.car.v) * 3.6, dt }, restrictAssist(asSet, caps));
     // 자동 3D 시점(측면 장애물) + 인포테인먼트 공유 상태 + 내비게이션
     this.viewOut = this.viewPolicy.update(
       dt,
-      this.assistOut.camera,
-      this.assistOut.manualView,
+      clampView(this.assistOut.camera, caps),
+      this.assistOut.manualView && allowedViews(caps).includes(this.assistOut.manualView) ? this.assistOut.manualView : null,
       this.sensorSnap ? this.sideObservation(this.sensorSnap) : null,
-      this.settings.assistAutoView && this.assistOut.active && this.settings.sensorEnabled,
+      this.settings.assistAutoView && autoViewAllowed(caps) && this.assistOut.active && this.settings.sensorEnabled,
     );
     const infoSet: InfoSettings = { autoShow: this.settings.infoAutoShow, autoHide: this.settings.infoAutoHide, autoHideSec: this.settings.infoAutoHideSec };
     this.infoOut = this.info.update({ dt, gear: this.car.gear, parkingActive: this.assistOut.active, firstPerson: this.rig.mode === 'driver' }, infoSet);
@@ -856,6 +863,32 @@ export class Game {
   }
 
   /** 주차 보조 카메라: 실제 3D 장면을 선택된 시점의 가상 카메라로 렌더링해 패널(및 실내 화면)에 복사 */
+  /** 개발용 성능 지표 (이 환경의 소프트웨어 WebGL 수치는 실기기 FPS 가 아님) */
+  perfStats(): { drawCalls: number; triangles: number; geometries: number; textures: number; vehicleMeshes: number; vehicleTriangles: number; avgFps: number; assistRenders: number; mirrorRenders: number } {
+    const info = this.renderer.info;
+    let meshes = 0;
+    let tris = 0;
+    this.model?.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      meshes++;
+      const g = m.geometry;
+      tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    });
+    return {
+      drawCalls: info.render.calls,
+      triangles: info.render.triangles,
+      geometries: info.memory.geometries,
+      textures: info.memory.textures,
+      vehicleMeshes: meshes,
+      vehicleTriangles: Math.round(tris),
+      avgFps: this.avgFps(),
+      assistRenders: this.assistRenderCount,
+      mirrorRenders: this.mirrors.renders,
+    };
+  }
+
+  private assistRenderCount = 0;
   private renderAssist(dt: number, pose: { x: number; z: number; heading: number }): void {
     const view = this.viewOut.view;
     this.rig.updateAssistCamera(dt, view, pose, this.spec); // 시점 보간은 매 프레임
@@ -864,6 +897,7 @@ export class Game {
     // 부하 관리: 보조 카메라는 설정 FPS 로만 다시 렌더링한다 (시점이 바뀌면 즉시)
     if (!switched && this.assistCamAcc < 1 / this.settings.assistCameraFps) return;
     this.assistCamAcc = 0;
+    this.assistRenderCount++;
     this.assistLastCamera = view;
     const cam = this.rig.assistCamera;
     const pw = ASSIST_CAM_W;
@@ -936,6 +970,7 @@ export class Game {
       nav: this.navState,
       sensorOn: this.settings.sensorEnabled,
       soundOn: this.settings.sensorSound,
+      rearOnly: this.spec.assist.panelLayout === 'rear',
       cameraMode: this.assist.cameraMode === 'auto' ? '자동' : ASSIST_VIEW_NAME[this.assist.cameraMode],
       mission: this.mission ? this.mission.def.name : slotName ? `목적지 ${slotName}` : '자유주행',
     });

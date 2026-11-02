@@ -53,3 +53,16 @@ npm run dev -- --host       # 같은 Wi-Fi 의 폰에서 접속 (방화벽에서
 npm run build; npm run preview
 npm run verify:pages        # Pages 하위 경로 조건 재현 검증 (Playwright 필요)
 ```
+
+## 기본 브랜치 / Pages 전략 (v0.4.1)
+
+현재: 저장소 Public, `has_pages=false`, 기본 브랜치 = 옛 `claude/compassionate-fermi-i6emhr`(워크플로 파일이 최신이 아님). 최신 검증 브랜치 = `feature/pdc-display-v2`.
+`workflow_dispatch` 는 기본 브랜치에 워크플로가 있어야 목록/실행이 가능하다.
+
+**권장(히스토리 보존, 강제 푸시 없음)**
+1. GitHub → Settings → Branches → Default branch 를 `feature/pdc-display-v2` 로 변경 (구 브랜치는 삭제하지 않고 보존). 영향: 새 PR 기본 대상 브랜치가 바뀜.
+2. Settings → Pages → Build and deployment → Source = **GitHub Actions**.
+3. Settings → Environments → github-pages → Deployment branches 에 기본 브랜치(또는 `feature/pdc-display-v2`) 허용 확인. 브랜치 보호 규칙이 있으면 해당 브랜치 push/실행 차단 여부 확인.
+4. Actions 탭 → "Deploy to GitHub Pages (manual)" → Run workflow 를 **1회**.
+5. 주소: `https://gim421453-sudo.github.io/3d-parking-simulator/` (배포 성공 후 실제 URL 확인).
+이 세션은 저장소 설정 API 가 프록시에서 거부되어(`/pages` 403) 1~3 을 직접 수행할 수 없었다.

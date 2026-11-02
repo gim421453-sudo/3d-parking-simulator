@@ -95,7 +95,7 @@ async function waitServer(url, tries = 50) {
   await shot('02-controls');
   await page.click('#back');
   await page.click('#m-car');
-  check('차량 선택 화면 (3종 + GLB 시험 차량)', (await page.locator('#cars .option').count()) === 4);
+  check('차량 선택 화면 (기본 3종 + M4/X6 프로필 + GLB 시험)', (await page.locator('#cars .option').count()) === 6);
   await shot('03-vehicles');
   await page.click('#back');
   await page.click('#m-map');
@@ -779,6 +779,95 @@ async function waitServer(url, tries = 50) {
   await sleep(500);
   check('GLB 차량: 램프 재질(Lamp_*)이 점등 시스템에 연결됨 (상향등 → 발광)', await g(() => window.__game.model.lights.head.name === 'Lamp_Head' && window.__game.model.lights.head.emissiveIntensity > 2));
   await g(() => { const G = window.__game; G.updateSettings({ vehicleId: 'sedan' }); G.startRun(); });
+  await sleep(500);
+
+  // ---------- 13. v0.4.1: 차량별 기능 분리 (M4 후방 전용 / X6 서라운드) ----------
+  await g(() => { const G = window.__game; G.updateSettings({ vehicleId: 'coupe-m4', infoAutoHide: false, assistAutoView: true }); G.startRun(); });
+  await sleep(600);
+  const Wm = await g(() => window.__game.spec.width);
+  const panelInfo = () => g(() => {
+    const el = document.getElementById('parking-assist');
+    const cam = el.querySelector('[data-pa="camera"]');
+    return { layout: el.dataset.layout, camDisplay: getComputedStyle(cam).display, hidden: el.classList.contains('hidden'), content: el.dataset.content, camera: el.dataset.camera };
+  });
+  await g(() => { const c = window.__game.car; c.handbrake = false; c.v = 0; c.gear = 'N'; });
+  await sleep(300);
+  await shiftKey('KeyR');
+  await until(() => window.__game.infoOut.floatingVisible && window.__game.infoOut.content === 'parking', undefined, 20000);
+  const m4R = await panelInfo();
+  await shot('110-m4-rear-pdc');
+  check('M4: 패널 레이아웃은 후방 전용(rear)', m4R.layout === 'rear', JSON.stringify(m4R));
+  check('주차 보조 콘텐츠에서는 내비 캔버스가 카메라 영상을 가리지 않음(회귀 방지)', (await g(() => getComputedStyle(document.querySelector('#parking-assist .pa-nav-canvas')).display)) === 'none');
+  check('M4: R 에서 후방카메라 + PDC 표시', !m4R.hidden && m4R.content === 'parking' && m4R.camera === 'rear');
+  check('M4: 카메라(전방/서라운드 선택) 버튼 미표시', m4R.camDisplay === 'none');
+  check('M4: 사이드 메뉴는 컴팩트(보이는 버튼 3개)', (await g(() => [...document.querySelectorAll('#parking-assist .pa-side button')].filter((b) => getComputedStyle(b).display !== 'none').length)) === 3);
+  check('M4: 후방 PDC 센서 구역 12개 존재 (실제 센서 구성 유지)', (await g(() => window.__game.spec.sensors.length)) === 12);
+  // 카메라 모드 순환에서 전방카메라 모드 제외
+  const m4modes = [];
+  for (let i = 0; i < 6; i++) { await page.keyboard.press('KeyC'); await sleep(120); m4modes.push(await g(() => window.__game.rig.mode)); }
+  check('M4: 카메라 순환에 전방카메라 모드가 없음', !m4modes.includes("front") && m4modes.includes("rear"), m4modes.join(','));
+  await g(() => window.__game.rig.setMode('chase'));
+  await g(() => window.__game.onAction('assistCamera'));
+  await sleep(200);
+  check('M4: 수동 카메라 전환 시도는 무시 (후방 유지)', (await g(() => window.__game.viewOut.view)) === 'rear');
+  // 측면 벽에 붙어도 3D 시점으로 바뀌지 않음
+  await placeHold(-36 + 0.8 + Wm / 2, 10, Math.PI, 'R');
+  await sleep(2500);
+  check('M4: 측면 장애물이 있어도 3D 시점으로 전환하지 않음', (await g(() => window.__game.viewOut.view)) === 'rear');
+  // D: 존재하지 않는 전방카메라를 호출하지 않음
+  await g(() => { const c = window.__game.car; c.v = 0; c.x = 0; c.z = -8; c.heading = 0; c.handbrake = false; c.gear = 'N'; });
+  await sleep(300);
+  await shiftKey('KeyF');
+  await sleep(1200);
+  const m4D = await g(() => ({ active: window.__game.assistOut.active, view: window.__game.viewOut.view, content: window.__game.infoOut.content }));
+  check('M4: D 에서 전방카메라 주차 화면을 열지 않음 (검은 화면 없음)', m4D.active === false && m4D.view !== 'front', JSON.stringify(m4D));
+  const plate = await g(() => { const G = window.__game; let n = 0; G.model.bodyGroup.traverse((o) => { if (o.name === 'Plate_Front' || o.name === 'Plate_Rear') n += o.material && o.material.name === 'Plate_KR' ? 1 : 0; }); return n; });
+  check('M4: 한국형 번호판(앞·뒤) 메시/텍스처 적용', plate === 2, String(plate));
+  // 1인칭 연동
+  await g(() => { const c = window.__game.car; c.v = 0; c.handbrake = true; c.gear = 'N'; });
+  await sleep(300);
+  await g(() => { window.__game.car.handbrake = false; });
+  await shiftKey('KeyR');
+  await g(() => window.__game.rig.setMode('driver'));
+  await until(() => window.__game.infoOut.content === 'parking', undefined, 15000);
+  await sleep(800);
+  await shot('111-m4-cabin');
+  const m4Cab = await g(() => { const cab = window.__game.model.cabin.center; const d = cab.ctx.getImageData(0, 0, cab.canvas.width, cab.canvas.height).data; let c = 0; for (let i = 0; i < d.length; i += 16) if (d[i] > 60 || d[i + 1] > 60 || d[i + 2] > 60) c++; return c; });
+  check('M4: 1인칭 실내 센터 디스플레이에 후방 PDC 화면 표시', m4Cab > 800, String(m4Cab));
+  await g(() => window.__game.rig.setMode('chase'));
+
+  // ---- X6 ----
+  await g(() => { const G = window.__game; G.updateSettings({ vehicleId: 'suv-x6', infoAutoHide: false }); G.startRun(); });
+  await sleep(600);
+  const Wx = await g(() => window.__game.spec.width);
+  await g(() => { const c = window.__game.car; c.handbrake = false; c.v = 0; c.gear = 'N'; });
+  await sleep(300);
+  await shiftKey('KeyR');
+  await until(() => window.__game.infoOut.floatingVisible && window.__game.infoOut.content === 'parking', undefined, 20000);
+  const x6R = await panelInfo();
+  check('X6: 패널 레이아웃은 서라운드(surround), 카메라 버튼 표시', x6R.layout === 'surround' && x6R.camDisplay !== 'none' && x6R.camera === 'rear', JSON.stringify(x6R));
+  await shot('112-x6-rear');
+  await g(() => { const c = window.__game.car; c.v = 0; c.gear = 'N'; });
+  await sleep(300);
+  await shiftKey('KeyF');
+  await until(() => window.__game.viewOut.view === 'front', undefined, 20000);
+  check('X6: D 저속에서 전방카메라', true);
+  await shot('113-x6-front');
+  await placeHold(-36 + 0.8 + Wx / 2, 10, Math.PI, 'D');
+  check('X6: 왼쪽 장애물 → 왼쪽 3D 시점', await until(() => window.__game.viewOut.view === 'left', undefined, 40000));
+  await sleep(1800);
+  await shot('114-x6-left3d');
+  await placeHold(-36 + 0.8 + Wx / 2, 10, 0, 'D');
+  check('X6: 오른쪽 장애물 → 오른쪽 3D 시점', await until(() => window.__game.viewOut.view === 'right', undefined, 40000));
+  await sleep(1800);
+  await shot('115-x6-right3d');
+  // 패널 좌표 불변
+  const xr = await g(() => [...document.querySelectorAll('#parking-assist .pa-side button')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y)]; }));
+  await placeHold(-36 + 0.8 + Wx / 2, 10, Math.PI, 'D');
+  await until(() => window.__game.viewOut.view === 'left', undefined, 40000);
+  const xl = await g(() => [...document.querySelectorAll('#parking-assist .pa-side button')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y)]; }));
+  check('X6: 3D 시점이 바뀌어도 우측 사이드 메뉴 좌표 불변', JSON.stringify(xr) === JSON.stringify(xl));
+  await g(() => { window.__game.updateSettings({ vehicleId: 'sedan' }); window.__game.startRun(); });
   await sleep(500);
 
   // ---------- 11. 모바일(터치/가로 화면) ----------

@@ -20,14 +20,19 @@ export interface CenterData {
   soundOn: boolean;
   cameraMode: string;
   mission: string;
+  /** 후방카메라 전용 차량: 카메라 화면 선택 항목 없음 */
+  rearOnly?: boolean;
 }
 
-const MENU = (d: CenterData): [string, string][] => [
-  ['주차 보조', d.sensorOn ? '켜짐' : '꺼짐'],
-  ['경고음', d.soundOn ? '켜짐' : '꺼짐'],
-  ['카메라 화면', d.cameraMode],
-  ['설정', ''],
-];
+const MENU = (d: CenterData): [string, string][] => {
+  const m: [string, string][] = [
+    ['주차 보조', d.sensorOn ? '켜짐' : '꺼짐'],
+    ['경고음', d.soundOn ? '켜짐' : '꺼짐'],
+    ['카메라 화면', d.cameraMode],
+    ['설정', ''],
+  ];
+  return d.rearOnly ? m.filter((x) => x[0] !== '카메라 화면') : m;
+};
 
 export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: number, d: CenterData): void {
   ctx.fillStyle = '#070a0e';

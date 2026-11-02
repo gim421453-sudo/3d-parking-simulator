@@ -211,7 +211,8 @@ export class Menu {
           <div class="row"><span>폭</span><div class="meter"><i style="width:${((v.width / 2.0) * 100).toFixed(0)}%"></i></div></div>
           <div class="row"><span>회전반경</span><div class="meter"><i style="width:${((turn / 6.5) * 100).toFixed(0)}%"></i></div></div>
         </div>
-        <div class="desc" style="margin-top:6px">${v.length.toFixed(2)} × ${v.width.toFixed(2)} × ${v.height.toFixed(2)} m · 최소 회전반경 약 ${turn.toFixed(1)} m</div>`;
+        <div class="desc" style="margin-top:6px">${v.assist.panelLayout === 'rear' ? '주차 보조: 후방카메라 전용' : '주차 보조: 전·후방 + 3D 서라운드'}</div>
+        <div class="desc" style="margin-top:2px">${v.length.toFixed(2)} × ${v.width.toFixed(2)} × ${v.height.toFixed(2)} m · 최소 회전반경 약 ${turn.toFixed(1)} m</div>`;
       b.addEventListener('click', () => {
         this.host.update({ vehicleId: v.id });
         grid.querySelectorAll('.option').forEach((o) => o.classList.remove('selected'));
