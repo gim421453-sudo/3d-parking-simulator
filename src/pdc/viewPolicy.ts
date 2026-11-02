@@ -8,20 +8,33 @@ import type { SensorGroup } from '../vehicle/spec';
  *  top        : 차량 바로 위 탑뷰 (실제 장면, 센서 PDC 아이콘과 별개)
  *  oblique    : 차량 뒤쪽 위 3D 사선뷰
  */
-export type AssistView = 'rear' | 'front' | 'left' | 'right' | 'top' | 'oblique';
-export const ASSIST_VIEW_ORDER: AssistView[] = ['rear', 'front', 'left', 'right', 'top', 'oblique'];
+export type AssistView = 'rear' | 'front' | 'left' | 'right' | 'top' | 'topZoom' | 'oblique';
+export const ASSIST_VIEW_ORDER: AssistView[] = ['rear', 'front', 'left', 'right', 'top', 'topZoom', 'oblique'];
 export const ASSIST_VIEW_NAME: Record<AssistView, string> = {
   rear: '후방 카메라',
   front: '전방 카메라',
   left: '좌측 3D 뷰',
   right: '우측 3D 뷰',
   top: '3D 탑뷰',
+  topZoom: '확대 탑뷰',
   oblique: '3D 사선뷰',
 };
 
 const RANK: Record<ProximityLevel, number> = { none: 0, far: 1, mid: 2, near: 3, critical: 4 };
 
+/** 방향별 위험 판단 결과(pdc/risk.ts)에서 정책이 쓰는 부분 */
+export interface ViewRisk {
+  threat: Record<SensorGroup, boolean>;
+  veryClose: Record<SensorGroup, boolean>;
+  pillar: Record<SensorGroup, boolean>;
+  narrow: boolean;
+  /** 해당 측면 3D 시점이 차체/장애물에 가려져 틈이 보이지 않는가 (프레이밍 검사 결과) */
+  sideBlocked: { left: boolean; right: boolean };
+}
+
 export interface SideObservation {
+  /** 있으면 간격/접근속도 기반 정책을 쓰고, 없으면 아래 level 기반(레거시) 정책을 쓴다 */
+  risk?: ViewRisk;
   /** 그룹별 최악 단계 */
   level: Record<SensorGroup, ProximityLevel>;
   /** 그룹별 현재 장애물에 닿은 광선 수 (신뢰도: 우연한 한두 개 광선은 무시) */
@@ -74,7 +87,23 @@ export class ViewPolicy {
     this.lastSwitch = -Infinity;
   }
 
+  /** 간격/접근속도 기반: 좁은 곳·다방향 위험·가림 → 전체 탑뷰, 아주 가까운 측면/기둥 → 확대 탑뷰, 그 외 측면은 해당 3D 측면뷰 */
+  private wantRisk(r: ViewRisk): AssistView | null {
+    const L = r.threat.left;
+    const R = r.threat.right;
+    const FB = r.threat.front || r.threat.rear;
+    if (L && R) return 'top';
+    if (r.narrow) return 'top';
+    if ((L || R) && FB) return 'top';
+    if (!L && !R) return null;
+    const side = L ? 'left' : 'right';
+    if (r.sideBlocked[side]) return 'top';
+    if (r.veryClose[side] || r.pillar[side]) return 'topZoom';
+    return side;
+  }
+
   private want(obs: SideObservation, rank: number): AssistView | null {
+    if (obs.risk) return this.wantRisk(obs.risk);
     const side = (g: SensorGroup): boolean => RANK[obs.level[g]] >= rank && obs.hits[g] >= this.cfg.minHits;
     const l = side('left');
     const r = side('right');

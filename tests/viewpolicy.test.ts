@@ -79,3 +79,65 @@ describe('자동 3D 시점 정책', () => {
     expect(DEFAULT_VIEW_POLICY.enterRank).toBeGreaterThan(DEFAULT_VIEW_POLICY.exitRank);
   });
 });
+
+import { ViewPolicy as VP2, type ViewRisk } from '../src/pdc/viewPolicy';
+
+describe('간격/접근속도 기반 시점 정책 (risk)', () => {
+  const none = () => ({ front: false, rear: false, left: false, right: false });
+  const mk = (o: Partial<{ threat: Partial<ViewRisk['threat']>; veryClose: Partial<ViewRisk['veryClose']>; pillar: Partial<ViewRisk['pillar']>; narrow: boolean; blocked: Partial<ViewRisk['sideBlocked']> }>): ViewRisk => ({
+    threat: { ...none(), ...o.threat },
+    veryClose: { ...none(), ...o.veryClose },
+    pillar: { ...none(), ...o.pillar },
+    narrow: o.narrow ?? false,
+    sideBlocked: { left: false, right: false, ...o.blocked },
+  });
+  const obs = (r: ViewRisk) => ({ level: { front: 'none', rear: 'none', left: 'none', right: 'none' } as never, hits: { front: 0, rear: 0, left: 0, right: 0 }, risk: r });
+  const settle = (p: InstanceType<typeof VP2>, r: ViewRisk, base: 'rear' | 'front' = 'rear', sec = 3) => {
+    let d = p.update(0.05, base, null, obs(r), true);
+    for (let t = 0; t < sec; t += 0.05) d = p.update(0.05, base, null, obs(r), true);
+    return d;
+  };
+  it('왼쪽만 → 좌측뷰, 오른쪽만 → 우측뷰', () => {
+    expect(settle(new VP2(), mk({ threat: { left: true } })).view).toBe('left');
+    expect(settle(new VP2(), mk({ threat: { right: true } })).view).toBe('right');
+  });
+  it('양쪽(주차 차량 사이/좁은 공간) → 전체 탑뷰', () => {
+    expect(settle(new VP2(), mk({ threat: { left: true, right: true } })).view).toBe('top');
+    expect(settle(new VP2(), mk({ narrow: true, threat: { left: true } })).view).toBe('top');
+  });
+  it('한쪽 측면 + 전/후방 동시 위험 → 전체 탑뷰', () => {
+    expect(settle(new VP2(), mk({ threat: { left: true, front: true } })).view).toBe('top');
+    expect(settle(new VP2(), mk({ threat: { right: true, rear: true } }), 'rear').view).toBe('top');
+  });
+  it('매우 가까운 측면 / 기둥 옆 → 확대 탑뷰', () => {
+    expect(settle(new VP2(), mk({ threat: { left: true }, veryClose: { left: true } })).view).toBe('topZoom');
+    expect(settle(new VP2(), mk({ threat: { right: true }, pillar: { right: true } })).view).toBe('topZoom');
+  });
+  it('측면 틈이 가려지면(sideBlocked) 측면뷰 대신 전체 탑뷰', () => {
+    expect(settle(new VP2(), mk({ threat: { left: true }, blocked: { left: true } })).view).toBe('top');
+  });
+  it('전방/후방만 위험하면 기본 시점 유지', () => {
+    expect(settle(new VP2(), mk({ threat: { rear: true } }), 'rear').view).toBe('rear');
+    expect(settle(new VP2(), mk({ threat: { front: true } }), 'front').view).toBe('front');
+  });
+  it('위험이 사라지면 지연 후 기본 시점으로 복귀하고 그 전에는 유지', () => {
+    const p = new VP2();
+    expect(settle(p, mk({ threat: { left: true } })).view).toBe('left');
+    expect(p.update(0.05, 'rear', null, obs(mk({})), true).view).toBe('left');
+    expect(settle(p, mk({}), 'rear', 4).view).toBe('rear');
+  });
+  it('수동 시점은 항상 우선', () => {
+    const p = new VP2();
+    const d = p.update(0.05, 'rear', 'front', obs(mk({ threat: { left: true, right: true } })), true);
+    expect(d.view).toBe('front');
+    expect(d.auto).toBe(false);
+  });
+  it('경계에서 깜빡이면 반복 전환하지 않는다 (전환 횟수 제한)', () => {
+    const p = new VP2();
+    for (let i = 0; i < 400; i++) {
+      const on = Math.floor(i / 3) % 2 === 0; // 0.15초 주기로 위험 on/off
+      p.update(0.05, 'rear', null, obs(mk(on ? { threat: { left: true } } : {})), true);
+    }
+    expect(p.switches).toBeLessThan(12);
+  });
+});

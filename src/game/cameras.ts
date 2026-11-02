@@ -24,9 +24,9 @@ export class CameraRig {
   mode: CameraMode = 'chase';
   readonly camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.12, 600);
   /** 후방 카메라 전용(보조 화면 + 후방 모드) */
-  readonly rearCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
+  readonly rearCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.05, 300);
   /** 전방카메라(보조 화면 + 전방 모드) */
-  readonly frontCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
+  readonly frontCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.05, 300);
 
   /** 주차 보조 디스플레이용 가상 카메라 (실제 3D 장면을 렌더링: 후방/전방 카메라, 좌·우 3D 측면뷰, 3D 탑뷰, 3D 사선뷰) */
   readonly assistCamera = new THREE.PerspectiveCamera(100, 16 / 9, 0.1, 300);
@@ -73,6 +73,8 @@ export class CameraRig {
         const sx = view === 'left' ? 1 : -1; // 로컬 +x = 왼쪽
         return { pos: wp(sx * (W / 2 + 2.3), 2.3, -L * 0.62), look: wp(sx * 0.1, 0.45, L * 0.12), up, fov: 64 };
       }
+      case 'topZoom':
+        return { pos: new THREE.Vector3(pose.x, 7, pose.z), look: new THREE.Vector3(pose.x, 0, pose.z), up: new THREE.Vector3(f.x, 0, f.z), fov: 52 };
       case 'top':
         return { pos: new THREE.Vector3(pose.x, 12.5, pose.z), look: new THREE.Vector3(pose.x, 0, pose.z), up: new THREE.Vector3(f.x, 0, f.z), fov: 52 };
       case 'oblique':
@@ -81,8 +83,11 @@ export class CameraRig {
   }
 
   /** 시점 전환은 부드럽게 보간한다 (후방↔전방은 실제 카메라가 서로 반대편이라 컷 전환) */
-  updateAssistCamera(dt: number, view: AssistView, pose: CarPose, spec: VehicleSpec): void {
-    const t = CameraRig.assistTarget(view, pose, spec);
+  updateAssistCamera(dt: number, view: AssistView, pose: CarPose, spec: VehicleSpec, frame: { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; fov: number } | null = null): void {
+    // frame: 실제 장애물 경계로 계산한 프레이밍(측면/탑/확대 탑). 없으면 차량 제원 기반 기본 자세
+    const t = frame
+      ? { pos: new THREE.Vector3(frame.pos.x, frame.pos.y, frame.pos.z), look: new THREE.Vector3(frame.look.x, frame.look.y, frame.look.z), up: new THREE.Vector3(frame.up.x, frame.up.y, frame.up.z), fov: frame.fov }
+      : CameraRig.assistTarget(view, pose, spec);
     const cut = this.aView === null || (this.aView === 'rear' && view === 'front') || (this.aView === 'front' && view === 'rear');
     if (cut) {
       this.aPos.copy(t.pos);
@@ -91,7 +96,7 @@ export class CameraRig {
       this.aFov = t.fov;
     } else {
       // 3D 시점은 차를 따라 움직이므로 실시간 추적(빠른 보간), 시점 변경 직후에는 부드럽게 이동
-      const k = 1 - Math.exp(-7 * dt);
+      const k = 1 - Math.exp(-(frame ? 5 : 7) * dt);
       this.aPos.lerp(t.pos, k);
       this.aLook.lerp(t.look, k);
       this.aUp.lerp(t.up, k).normalize();

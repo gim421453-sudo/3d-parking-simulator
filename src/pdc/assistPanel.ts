@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ObstacleZone } from './overlay';
+import { inFront, projectSegment } from './clip';
 import { localToWorld } from '../core/math';
 import { ICON } from '../ui/icons';
 import type { VehicleSpec } from '../vehicle/spec';
@@ -21,7 +22,7 @@ export interface AssistPanelHandlers {
 export const ASSIST_CAM_W = 480;
 export const ASSIST_CAM_H = 270;
 
-const MODE_NAME: Record<'auto' | AssistView, string> = { auto: '자동', rear: '후방', front: '전방', left: '좌측', right: '우측', top: '탑뷰', oblique: '사선' };
+const MODE_NAME: Record<'auto' | AssistView, string> = { auto: '자동', rear: '후방', front: '전방', left: '좌측', right: '우측', top: '탑뷰', topZoom: '확대', oblique: '사선' };
 
 /**
  * 주차 보조 디스플레이(차량 디스플레이 시스템의 한 화면).
@@ -346,64 +347,108 @@ export class AssistPanel {
   }
 
   /** 조향각 기반 동적 가이드라인을 실제 카메라 투영으로 오버레이 */
-  /** 실제 감지된 장애물 구역(반투명 사각형)을 카메라 영상 위에 투영한다. 거리 숫자는 그리지 않는다. */
-  drawObstacles(o: { camera: THREE.PerspectiveCamera; zones: ObstacleZone[]; mirror: boolean }): void {
+  private zoneAnim = new Map<string, { c: { x: number; z: number }[]; a: number; target: number; level: ObstacleZone['level']; hits: number }>();
+
+  /** 오버레이 상태 초기화 (시점/차량 변경 시) */
+  resetOverlay(): void {
+    this.zoneAnim.clear();
+  }
+
+  /**
+   * 카메라/3D 영상 위 오버레이: ① 실제 감지된 장애물 구역(반투명 컬러, 보간) → ② 예측 조향 경로(근평면/화면 클리핑).
+   * 장애물 구역을 아래에, 조향선을 위에 그려 겹쳐도 읽기 쉽게 한다. 거리 숫자는 그리지 않는다.
+   */
+  drawOverlay(o: {
+    camera: THREE.PerspectiveCamera;
+    pose: { x: number; z: number; heading: number };
+    steer: number;
+    dir: 1 | -1;
+    mirror: boolean;
+    showGuides: boolean;
+    zones: ObstacleZone[];
+  }): void {
     const g = this.gctx;
+    g.clearRect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
+    const spec = this.spec;
+    if (!spec) return;
     const pal = PDC_PALETTES[this.palette].colors;
-    const v = new THREE.Vector3();
+    const cam = o.camera;
+    // ---- 장애물 구역 (부드러운 크기/위치/투명도 보간) ----
+    const seen = new Set<string>();
     for (const z of o.zones) {
-      const pts: { x: number; y: number }[] = [];
-      for (const c of z.corners) {
-        v.set(c.x, 0.03, c.z).project(o.camera);
-        if (v.z < -1 || v.z > 1) break;
-        const nx = o.mirror ? -v.x : v.x;
-        pts.push({ x: (nx * 0.5 + 0.5) * ASSIST_CAM_W, y: (-v.y * 0.5 + 0.5) * ASSIST_CAM_H });
+      seen.add(z.sensorId);
+      const st = this.zoneAnim.get(z.sensorId);
+      if (!st) this.zoneAnim.set(z.sensorId, { c: z.corners.map((q) => ({ ...q })), a: 0, target: 1, level: z.level, hits: z.hits });
+      else {
+        for (let i = 0; i < 4; i++) {
+          st.c[i].x += (z.corners[i].x - st.c[i].x) * 0.4;
+          st.c[i].z += (z.corners[i].z - st.c[i].z) * 0.4;
+        }
+        st.target = 1;
+        st.level = z.level;
+        st.hits = z.hits;
       }
-      if (pts.length < 4) continue;
+    }
+    for (const [id, st] of this.zoneAnim) {
+      if (!seen.has(id)) st.target = 0;
+      st.a += (st.target - st.a) * 0.3;
+      if (st.target === 0 && st.a < 0.03) {
+        this.zoneAnim.delete(id);
+        continue;
+      }
+      // 각 변을 근평면/화면 클리핑한 뒤 외곽선과 면을 그린다 (모서리 하나라도 카메라 뒤면 면은 생략하고 선만)
+      const pts: { x: number; y: number }[] = [];
+      let allFront = true;
+      for (const c of st.c) {
+        const p = { x: c.x, y: 0.03, z: c.z };
+        if (!inFront(p, cam)) {
+          allFront = false;
+          break;
+        }
+        v3.set(p.x, p.y, p.z).project(cam);
+        pts.push({ x: ((o.mirror ? -v3.x : v3.x) * 0.5 + 0.5) * ASSIST_CAM_W, y: (-v3.y * 0.5 + 0.5) * ASSIST_CAM_H });
+      }
+      if (!allFront) continue;
+      g.save();
+      g.beginPath();
+      g.rect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
+      g.clip();
       g.beginPath();
       g.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < 4; i++) g.lineTo(pts[i].x, pts[i].y);
       g.closePath();
-      g.globalAlpha = z.hits > 1 ? 0.38 : 0.2;
-      g.fillStyle = pal[z.level];
+      g.globalAlpha = st.a * (st.hits > 1 ? 0.4 : 0.22);
+      g.fillStyle = pal[st.level];
       g.fill();
-      g.globalAlpha = 0.9;
-      g.strokeStyle = pal[z.level];
+      g.globalAlpha = st.a * 0.9;
+      g.strokeStyle = pal[st.level];
       g.lineWidth = 2;
       g.stroke();
-      g.globalAlpha = 1;
+      g.restore();
     }
-  }
-
-  drawGuides(o: { camera: THREE.PerspectiveCamera; pose: { x: number; z: number; heading: number }; steer: number; dir: 1 | -1; mirror: boolean; show: boolean }): void {
-    const g = this.gctx;
-    g.clearRect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);
-    const spec = this.spec;
-    if (!o.show || !spec) return;
-    const pal = PDC_PALETTES[this.palette].colors;
+    g.globalAlpha = 1;
+    if (!o.showGuides) return;
+    // ---- 예측 조향 경로 ----
     const lines = buildGuideLines(spec, o.steer, o.dir);
-    const v = new THREE.Vector3();
-    const proj = (p: { x: number; z: number }): { x: number; y: number } | null => {
+    const W = ASSIST_CAM_W;
+    const H = ASSIST_CAM_H;
+    const world = (p: { x: number; z: number }): { x: number; y: number; z: number } => {
       const w = localToWorld(o.pose.x, o.pose.z, o.pose.heading, p.x, p.z);
-      v.set(w.x, 0.03, w.z).project(o.camera);
-      if (v.z < -1 || v.z > 1) return null;
-      const nx = o.mirror ? -v.x : v.x;
-      return { x: (nx * 0.5 + 0.5) * ASSIST_CAM_W, y: (-v.y * 0.5 + 0.5) * ASSIST_CAM_H };
+      return { x: w.x, y: 0.03, z: w.z };
     };
     g.lineCap = 'round';
     g.lineJoin = 'round';
     const stroke = (pts: { x: number; z: number; s: number }[], width: number, color: (s: number) => string, alpha = 1, dash: number[] = []): void => {
       g.setLineDash(dash);
+      g.globalAlpha = alpha;
       for (let i = 0; i < pts.length - 1; i++) {
-        const a = proj(pts[i]);
-        const b = proj(pts[i + 1]);
-        if (!a || !b) continue;
+        const seg = projectSegment(world(pts[i]), world(pts[i + 1]), cam, W, H, o.mirror);
+        if (!seg) continue;
         g.beginPath();
-        g.moveTo(a.x, a.y);
-        g.lineTo(b.x, b.y);
+        g.moveTo(seg[0].x, seg[0].y);
+        g.lineTo(seg[1].x, seg[1].y);
         g.strokeStyle = 'rgba(0,0,0,0.55)';
         g.lineWidth = width + 2;
-        g.globalAlpha = alpha;
         g.stroke();
         g.strokeStyle = color((pts[i].s + pts[i + 1].s) / 2);
         g.lineWidth = width;
@@ -412,21 +457,35 @@ export class AssistPanel {
       g.setLineDash([]);
       g.globalAlpha = 1;
     };
-    // 직진 기준 폭 표시선 (흐리게)
-    stroke(lines.straightLeft, 1.5, () => '#ffffff', 0.35, [6, 6]);
-    stroke(lines.straightRight, 1.5, () => '#ffffff', 0.35, [6, 6]);
-    // 현재 조향 예상 경로 (거리 구간별 색)
+    // 예상 차체 이동 범위(면): 좌/우 경로 사이를 얇게 칠한다. 네 모서리가 모두 카메라 앞일 때만 (잘못된 면 방지)
+    for (let i = 0; i < lines.left.length - 1; i++) {
+      const q = [lines.left[i], lines.left[i + 1], lines.right[i + 1], lines.right[i]].map(world);
+      if (!q.every((p) => inFront(p, cam))) continue;
+      g.beginPath();
+      q.forEach((p, k) => {
+        v3.set(p.x, p.y, p.z).project(cam);
+        const x = ((o.mirror ? -v3.x : v3.x) * 0.5 + 0.5) * W;
+        const y = (-v3.y * 0.5 + 0.5) * H;
+        if (k === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
+      });
+      g.closePath();
+      g.globalAlpha = 0.1;
+      g.fillStyle = pal[guideColor((lines.left[i].s + lines.left[i + 1].s) / 2)];
+      g.fill();
+    }
+    g.globalAlpha = 1;
+    stroke(lines.straightLeft, 1.5, () => '#ffffff', 0.3, [6, 6]);
+    stroke(lines.straightRight, 1.5, () => '#ffffff', 0.3, [6, 6]);
     const col = (s: number): string => pal[guideColor(s)];
     stroke(lines.left, 3.2, col);
     stroke(lines.right, 3.2, col);
-    // 거리 구분선
     for (const m of lines.marks) {
-      const a = proj(m.left);
-      const b = proj(m.right);
-      if (!a || !b) continue;
+      const seg = projectSegment(world(m.left), world(m.right), cam, W, H, o.mirror);
+      if (!seg) continue;
       g.beginPath();
-      g.moveTo(a.x, a.y);
-      g.lineTo(b.x, b.y);
+      g.moveTo(seg[0].x, seg[0].y);
+      g.lineTo(seg[1].x, seg[1].y);
       g.strokeStyle = 'rgba(0,0,0,0.55)';
       g.lineWidth = 5;
       g.stroke();
@@ -436,3 +495,5 @@ export class AssistPanel {
     }
   }
 }
+
+const v3 = new THREE.Vector3();

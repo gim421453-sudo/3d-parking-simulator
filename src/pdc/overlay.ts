@@ -17,6 +17,8 @@ export interface ObstacleZone {
   corners: { x: number; z: number }[];
   /** 히트점 개수(신뢰도 근사). 1개 이하의 고립 히트는 약하게 표시 */
   hits: number;
+  /** 이 구역을 만든 실제 충돌체 id (가림 판정에서 자기 자신은 제외) */
+  colliderIds: string[];
 }
 
 export const OVERLAY_DEPTH = 0.45; // m, 가장 가까운 히트점에서 바깥쪽으로
@@ -59,7 +61,7 @@ export function buildObstacleZones(
     const l0 = minL - OVERLAY_PAD;
     const l1 = maxL + OVERLAY_PAD;
     const P = (f: number, l: number): { x: number; z: number } => ({ x: r.origin.x + fx * f + lx * l, z: r.origin.z + fz * f + lz * l });
-    out.push({ sensorId: m.id, group: m.group, level, corners: [P(f0, l0), P(f0, l1), P(f1, l1), P(f1, l0)], hits: r.hits.length });
+    out.push({ sensorId: m.id, group: m.group, level, corners: [P(f0, l0), P(f0, l1), P(f1, l1), P(f1, l0)], hits: r.hits.length, colliderIds: [...new Set(r.hits.map((h) => h.colliderId))] });
   });
   return out;
 }

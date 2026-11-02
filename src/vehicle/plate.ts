@@ -42,5 +42,9 @@ export function makeKrPlateMaterial(text: string): THREE.MeshStandardMaterial {
   tex.anisotropy = 4;
   const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.05 });
   m.name = 'Plate_KR';
+  // 차체와 거의 같은 깊이에서 깜빡이지 않도록 약간 앞으로 당긴다
+  m.polygonOffset = true;
+  m.polygonOffsetFactor = -2;
+  m.polygonOffsetUnits = -2;
   return m;
 }

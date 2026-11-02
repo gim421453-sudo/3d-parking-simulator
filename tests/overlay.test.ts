@@ -43,6 +43,6 @@ describe('카메라 영상용 장애물 구역(overlay)', () => {
   });
   it('출력 구조에 거리 필드가 없다', () => {
     const z = buildObstacleZones(snapOf([wall(0, -3.5, 8, 0.5)]), spec, pose, ['rear']);
-    for (const q of z) expect(Object.keys(q).sort()).toEqual(['corners', 'group', 'hits', 'level', 'sensorId']);
+    for (const q of z) expect(Object.keys(q).sort()).toEqual(['colliderIds', 'corners', 'group', 'hits', 'level', 'sensorId']);
   });
 });

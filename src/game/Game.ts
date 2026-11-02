@@ -25,6 +25,9 @@ import { AssistController, type AssistOutput, type AssistSettings } from '../pdc
 import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
 import { buildPdcState, type PdcState } from '../pdc/pdcModel';
 import { buildObstacleZones } from '../pdc/overlay';
+import { RiskTracker, type RiskOutput } from '../pdc/risk';
+import { frameView, type FrameResult } from '../pdc/framing';
+import { segmentBlocked } from '../pdc/visibility';
 import { allowedViews, autoViewAllowed, cameraCycle, clampView, restrictAssist } from '../pdc/capabilities';
 import { ASSIST_VIEW_NAME, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
 import { InfotainmentController, type InfoOutput, type InfoSettings } from '../infotainment/controller';
@@ -70,6 +73,15 @@ export class Game {
   readonly showroom: Showroom;
   readonly assist = new AssistController();
   readonly assistPanel: AssistPanel;
+  private risk = new RiskTracker();
+  riskOut: RiskOutput | null = null;
+  private assistFrame: FrameResult | null = null;
+  private frameAcc = 99;
+  private frameForView = '';
+  private sideBlocked = { left: false, right: false };
+  private blockedAcc = 99;
+  private lastHits: { x: number; z: number }[] = [];
+  private lastHitsAge = 99;
   assistOut: AssistOutput = { active: false, camera: 'rear', manualView: null, focus: 'rear', cameraMode: 'auto', reason: '' };
   /** 인포테인먼트 공유 상태 (3인칭 플로팅/1인칭 실내가 같은 상태를 본다) */
   readonly info = new InfotainmentController();
@@ -646,6 +658,7 @@ export class Game {
       collectRays: this.settings.sensorDebug,
     };
     this.sensorSnap = this.settings.sensorEnabled ? readSensors(pose, this.spec.sensors, this.spec.sensorHeight, this.colliders, cfg) : null;
+    this.updateRisk(dt);
 
     // AUTO Leveling: 속도 변화로 구한 가속도(근사)로 조사각 보정
     const aRaw = (this.car.v - this.lastV) / Math.max(dt, 1e-3);
@@ -847,6 +860,50 @@ export class Game {
     return computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor });
   }
 
+  private allHits(): { x: number; z: number }[] {
+    const out: { x: number; z: number }[] = [];
+    if (this.sensorSnap) for (const r of this.sensorSnap.readings) for (const h of r.hits) out.push({ x: h.x, z: h.z });
+    return out;
+  }
+
+  private carBody(): { x: number; z: number; rot: number; hw: number; hl: number; height: number } {
+    const o = obbOf(this.car, this.spec);
+    return { ...o, height: this.spec.height };
+  }
+
+  /** 방향별 위험(차체 외곽~장애물 간격, 접근 속도) + 측면 3D 시점의 시야 가림 검사 (화면 전환 정책의 입력) */
+  private updateRisk(dt: number): void {
+    this.riskOut = this.risk.update(dt, this.sensorSnap, obbOf(this.car, this.spec), this.spec);
+    const hits = this.allHits();
+    if (hits.length) {
+      this.lastHits = hits;
+      this.lastHitsAge = 0;
+    } else this.lastHitsAge += dt;
+    this.blockedAcc += dt;
+    if (this.blockedAcc >= 0.2) {
+      this.blockedAcc = 0;
+      const pose = this.poseNow();
+      for (const side of ['left', 'right'] as const) {
+        if (this.riskOut.groups[side].threat || this.viewOut.view === side) {
+          const f = frameView({ view: side, pose, spec: this.spec, hits: this.frameHits(), colliders: this.colliders, aspect: 16 / 9 });
+          this.sideBlocked[side] = !f.visible;
+        } else this.sideBlocked[side] = false;
+      }
+    }
+  }
+
+  /** 프레이밍에 쓰는 히트점: 현재 감지 + 짧은 유지(해제 대기 중 카메라가 튀지 않게) */
+  private frameHits(): { x: number; z: number }[] {
+    return this.lastHitsAge < 1.5 ? this.lastHits : [];
+  }
+
+  private viewRisk(): SideObservation['risk'] {
+    const r = this.riskOut;
+    if (!r) return undefined;
+    const pick = <T,>(f: (g: RiskOutput['groups'][keyof RiskOutput['groups']]) => T): Record<'front' | 'rear' | 'left' | 'right', T> => ({ front: f(r.groups.front), rear: f(r.groups.rear), left: f(r.groups.left), right: f(r.groups.right) });
+    return { threat: pick((g) => g.threat), veryClose: pick((g) => g.veryClose), pillar: pick((g) => g.pillar), narrow: r.narrow, sideBlocked: { ...this.sideBlocked } };
+  }
+
   private sideObservation(snap: SensorSnapshot): SideObservation {
     const rank: Record<ProximityLevel, number> = { none: 0, far: 1, mid: 2, near: 3, critical: 4 };
     const level: Record<string, ProximityLevel> = { front: 'none', rear: 'none', left: 'none', right: 'none' };
@@ -856,7 +913,7 @@ export class Game {
       const lv = proximityLevel(r.distance, snap.range, snap.critical);
       if (rank[lv] > rank[level[r.group]]) level[r.group] = lv;
     }
-    return { level: level as SideObservation['level'], hits: hits as SideObservation['hits'] };
+    return { level: level as SideObservation['level'], hits: hits as SideObservation['hits'], risk: this.viewRisk() };
   }
 
   private brakeLightOn(): boolean {
@@ -892,7 +949,23 @@ export class Game {
   private assistRenderCount = 0;
   private renderAssist(dt: number, pose: { x: number; z: number; heading: number }): void {
     const view = this.viewOut.view;
-    this.rig.updateAssistCamera(dt, view, pose, this.spec); // 시점 보간은 매 프레임
+    // 측면/탑/확대 탑뷰는 차량과 실제 장애물 경계로 프레이밍한다 (10Hz 재계산, 카메라는 매 프레임 보간)
+    let frame: FrameResult | null = null;
+    if (view === 'left' || view === 'right' || view === 'top' || view === 'topZoom') {
+      this.frameAcc += dt;
+      if (this.frameAcc >= 0.1 || this.frameForView !== view) {
+        this.frameAcc = 0;
+        this.frameForView = view;
+        const g = this.riskOut?.groups;
+        const focusSide = g ? (g.left.veryClose || g.left.pillar ? 'left' : g.right.veryClose || g.right.pillar ? 'right' : g.left.threat ? 'left' : g.right.threat ? 'right' : null) : null;
+        this.assistFrame = frameView({ view, pose, spec: this.spec, hits: this.frameHits(), colliders: this.colliders, aspect: ASSIST_CAM_W / ASSIST_CAM_H, focusSide });
+      }
+      frame = this.assistFrame;
+    } else {
+      this.assistFrame = null;
+      this.frameForView = '';
+    }
+    this.rig.updateAssistCamera(dt, view, pose, this.spec, frame);
     const switched = this.assistLastCamera !== view;
     this.assistCamAcc += dt;
     // 부하 관리: 보조 카메라는 설정 FPS 로만 다시 렌더링한다 (시점이 바뀌면 즉시)
@@ -914,7 +987,7 @@ export class Game {
     const m = this.model!;
     const prevBody = m.bodyGroup.visible;
     const prevCockpit = m.cockpit.visible;
-    const show3d = view === 'left' || view === 'right' || view === 'top' || view === 'oblique';
+    const show3d = view === 'left' || view === 'right' || view === 'top' || view === 'topZoom' || view === 'oblique';
     if (show3d) {
       m.bodyGroup.visible = true;
       m.cockpit.visible = false;
@@ -930,19 +1003,28 @@ export class Game {
     const sh = Math.max(1, Math.round(vh * pr));
     const mirror = view === 'rear' && this.settings.rearMirror;
     this.assistPanel.blit(this.canvas, 0, this.canvas.height - sh, sw, sh, mirror);
-    this.assistPanel.drawGuides({
+    // 오버레이: 실제 감지된 장애물 구역(전 시점) + 예측 조향 경로. 장애물 구역은 3D 시점에서 가려지는 부분을 제외한다.
+    const camPos = cam.position;
+    const isCar = view === 'rear' || view === 'front';
+    const groups: ('front' | 'rear' | 'left' | 'right')[] = view === 'rear' ? ['rear'] : view === 'front' ? ['front'] : ['front', 'rear', 'left', 'right'];
+    let zones = this.settings.sensorEnabled ? buildObstacleZones(this.sensorSnap, this.spec, pose, groups) : [];
+    if (!isCar && zones.length) {
+      const body = this.carBody();
+      zones = zones.filter((z) => {
+        const cx = z.corners.reduce((a, c) => a + c.x, 0) / 4;
+        const cz = z.corners.reduce((a, c) => a + c.z, 0) / 4;
+        return !segmentBlocked({ x: camPos.x, y: camPos.y, z: camPos.z }, { x: cx, y: 0.25, z: cz }, this.colliders, body, { ignoreIds: new Set(z.colliderIds), endMargin: 0.3, step: 0.3 });
+      });
+    }
+    this.assistPanel.drawOverlay({
       camera: cam,
       pose,
       steer: this.car.steer,
-      dir: view === 'rear' ? -1 : 1,
+      dir: this.assistOut.focus === 'rear' ? -1 : 1,
       mirror,
-      show: this.settings.assistGuides && (view === 'rear' || view === 'front'),
+      showGuides: this.settings.assistGuides && view !== 'left' && view !== 'right',
+      zones,
     });
-    // 실제 센서 히트점 기반 장애물 구역 (감지된 것만, 후방/전방 카메라 영상 위)
-    if (this.settings.sensorEnabled && (view === 'rear' || view === 'front')) {
-      const zones = buildObstacleZones(this.sensorSnap, this.spec, pose, view === 'rear' ? ['rear'] : ['front']);
-      this.assistPanel.drawObstacles({ camera: cam, zones, mirror });
-    }
   }
 
   /** 내비게이션 지도를 캔버스에 그린다 (10Hz) */

@@ -49,8 +49,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sensorEnabled: true,
   sensorSound: true,
   sensorVolume: 0.5,
-  sensorRange: 2.5,
-  sensorCritical: 0.3,
+  sensorRange: 3.0,
+  sensorCritical: 0.5,
   sensorDebug: false,
   rearMirror: true,
   rearPip: true,
@@ -76,8 +76,8 @@ export const DEFAULT_SETTINGS: Settings = {
 export function sanitizeSettings(raw: Partial<Settings>): Settings {
   const s = { ...DEFAULT_SETTINGS, ...raw };
   s.resolutionScale = Math.min(1, Math.max(0.4, Number(s.resolutionScale) || 1));
-  s.sensorRange = Math.min(4, Math.max(1, Number(s.sensorRange) || 2.5));
-  s.sensorCritical = Math.min(s.sensorRange - 0.2, Math.max(0.1, Number(s.sensorCritical) || 0.3));
+  s.sensorRange = Math.min(4, Math.max(1, Number(s.sensorRange) || 3.0));
+  s.sensorCritical = Math.min(s.sensorRange - 0.2, Math.max(0.1, Number(s.sensorCritical) || 0.5));
   s.sensorVolume = Math.min(1, Math.max(0, Number(s.sensorVolume)));
   s.touchScale = Math.min(1.5, Math.max(0.7, Number(s.touchScale) || 1));
   s.sensorViewFps = Math.min(60, Math.max(5, Number(s.sensorViewFps) || 24));

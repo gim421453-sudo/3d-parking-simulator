@@ -115,6 +115,10 @@ function cyl(key: string, rt: number, rb: number, h: number, seg: number): THREE
   return g;
 }
 
+/** 번호판 두께와 차체 외곽에서 띄우는 간격(m) */
+export const PLATE_DEPTH = 0.02;
+export const PLATE_STANDOFF = 0.012;
+
 function sharedMat(key: string, make: () => THREE.Material): THREE.Material {
   let m = matCache.get(key);
   if (!m) {
@@ -195,9 +199,16 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     const b = new THREE.Mesh(box(`${key}:bumper`, W * 0.97, 0.2, 0.1), darkMat);
     b.position.set(0, clearance + 0.12, s * (hl - 0.03));
     bodyGroup.add(b);
-    const plate = new THREE.Mesh(box(`${key}:plate`, KR_PLATE.widthM, KR_PLATE.heightM, 0.015), spec.plate ? makeKrPlateMaterial(spec.plate) : plateMat);
+  }
+  // 번호판: 차체 "실제 외곽"(lowerMesh 범위: 베벨 포함)에서 일정 간격만큼 띄워 부착한다.
+  // (hl 기준 고정 좌표는 차종별 베벨/오버행 때문에 차체 면과 거의 같은 평면이 되어 깜빡임/뜬 것처럼 보일 수 있었다)
+  lower.computeBoundingBox();
+  const zExtent = Math.max(Math.abs(lower.boundingBox!.min.z), Math.abs(lower.boundingBox!.max.z));
+  const plateMatKr = spec.plate ? makeKrPlateMaterial(spec.plate) : null;
+  for (const s of [1, -1]) {
+    const plate = new THREE.Mesh(box(`${key}:plate`, KR_PLATE.widthM, KR_PLATE.heightM, PLATE_DEPTH), plateMatKr ?? plateMat);
     plate.name = s > 0 ? 'Plate_Front' : 'Plate_Rear';
-    plate.position.set(0, clearance + 0.3, s * (hl + 0.04));
+    plate.position.set(0, clearance + 0.3, s * (zExtent + PLATE_STANDOFF + PLATE_DEPTH / 2));
     bodyGroup.add(plate);
   }
 
@@ -495,9 +506,22 @@ export function attachGlbScene(
       } else mesh.material = l[key]; // 같은 이름의 재질은 하나로 공유
     }
   });
-  // 기존 프로시저럴 차체 제거
+  // 기존 프로시저럴 차체 제거 (번호판은 보존해 GLB 외곽에 다시 부착)
+  const plates = model.bodyGroup.children.filter((c) => c.name === 'Plate_Front' || c.name === 'Plate_Rear');
   for (const c of [...model.bodyGroup.children]) model.bodyGroup.remove(c);
   model.bodyGroup.add(node);
+  const glbHasPlates = !!(node.getObjectByName('Plate_Front') && node.getObjectByName('Plate_Rear'));
+  if (!glbHasPlates) {
+    node.updateMatrixWorld(true);
+    model.root.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(node).applyMatrix4(model.root.matrixWorld.clone().invert());
+    for (const p of plates) {
+      const sgn = p.name === 'Plate_Front' ? 1 : -1;
+      const ext = sgn > 0 ? bb.max.z : -bb.min.z;
+      p.position.z = sgn * (ext + PLATE_STANDOFF + PLATE_DEPTH / 2);
+      model.bodyGroup.add(p);
+    }
+  }
   model.rollers.length = 0;
   model.rollers.push(...rollers);
   model.frontPivots.length = 0;
