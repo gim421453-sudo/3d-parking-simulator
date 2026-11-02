@@ -4,8 +4,9 @@
 공통 규칙: [COMMON_GLB_CONTRACT.md](COMMON_GLB_CONTRACT.md)
 
 ## 1. 원본 모델과 라이선스
-- 후보(미검증): Sketchfab "bmw-m4-g82-5a9007d569…", Sketchfab "bmw-m4-4f23f654…", BlendSwap 16463.
-- **확정된 원본 없음.** 이 세션 환경에서는 sketchfab.com/blendswap.com 접속이 차단되어 실제 파일·라이선스를 확인하지 못했다(`docs/ASSET_RESEARCH_V041.md`).
+- 후보(메타데이터만 확인, **파일 미확보**): ① Sketchfab Rosemarin "BMW M4 G82" CC BY 4.0, 104,190 faces, 22 재질, 실내 단순 ② Sketchfab SABLE "BMW M4" CC BY 4.0, 533,906 faces, 30 재질/18 텍스처 ③ BlendSwap #16463 "BMW M4 F82"(G82 아님) CC-BY, .blend 2.07 MB.
+- **확정된 원본 없음.** 다운로드는 Sketchfab API 토큰/BlendSwap 로그인이 필요해 받지 못했다(`docs/ASSET_RESEARCH_V041.md`). 파일 확보 후 이 절을 실제 노드 목록/삼각형 수로 갱신할 것.
+- 예상 감량: ① 104k→외관 ≤60k(약 40% 감량), ② 534k→≤60k(약 89% 감량, 텍스처 18개 병합 필요).
 - 사용자 승인 + 라이선스(재배포·수정 허용, 저작자 표시 방법) 확인 전에는 파일을 저장소에 넣지 않는다. 원본은 별도 보관(저장소 외).
 
 ## 2. 작업 범위 (실내 전체 재제작 아님 — 부분 보완)

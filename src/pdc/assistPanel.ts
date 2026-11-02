@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ObstacleZone } from './overlay';
 import { localToWorld } from '../core/math';
 import { ICON } from '../ui/icons';
 import type { VehicleSpec } from '../vehicle/spec';
@@ -345,6 +346,35 @@ export class AssistPanel {
   }
 
   /** 조향각 기반 동적 가이드라인을 실제 카메라 투영으로 오버레이 */
+  /** 실제 감지된 장애물 구역(반투명 사각형)을 카메라 영상 위에 투영한다. 거리 숫자는 그리지 않는다. */
+  drawObstacles(o: { camera: THREE.PerspectiveCamera; zones: ObstacleZone[]; mirror: boolean }): void {
+    const g = this.gctx;
+    const pal = PDC_PALETTES[this.palette].colors;
+    const v = new THREE.Vector3();
+    for (const z of o.zones) {
+      const pts: { x: number; y: number }[] = [];
+      for (const c of z.corners) {
+        v.set(c.x, 0.03, c.z).project(o.camera);
+        if (v.z < -1 || v.z > 1) break;
+        const nx = o.mirror ? -v.x : v.x;
+        pts.push({ x: (nx * 0.5 + 0.5) * ASSIST_CAM_W, y: (-v.y * 0.5 + 0.5) * ASSIST_CAM_H });
+      }
+      if (pts.length < 4) continue;
+      g.beginPath();
+      g.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < 4; i++) g.lineTo(pts[i].x, pts[i].y);
+      g.closePath();
+      g.globalAlpha = z.hits > 1 ? 0.38 : 0.2;
+      g.fillStyle = pal[z.level];
+      g.fill();
+      g.globalAlpha = 0.9;
+      g.strokeStyle = pal[z.level];
+      g.lineWidth = 2;
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+  }
+
   drawGuides(o: { camera: THREE.PerspectiveCamera; pose: { x: number; z: number; heading: number }; steer: number; dir: 1 | -1; mirror: boolean; show: boolean }): void {
     const g = this.gctx;
     g.clearRect(0, 0, ASSIST_CAM_W, ASSIST_CAM_H);

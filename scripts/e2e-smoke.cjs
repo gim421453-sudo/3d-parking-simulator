@@ -867,6 +867,21 @@ async function waitServer(url, tries = 50) {
   await until(() => window.__game.viewOut.view === 'left', undefined, 40000);
   const xl = await g(() => [...document.querySelectorAll('#parking-assist .pa-side button')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y)]; }));
   check('X6: 3D 시점이 바뀌어도 우측 사이드 메뉴 좌표 불변', JSON.stringify(xr) === JSON.stringify(xl));
+  // ---- 카메라 영상 위 실제 장애물 구역 (감지된 것만) ----
+  const guidePix = () => g(() => { const c = document.querySelector('#parking-assist .pa-guide-canvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++; return n; });
+  const Lx = await g(() => window.__game.spec.length);
+  await g(() => window.__game.updateSettings({ assistAutoView: false }));
+  await placeHold(0, -6, 0, 'R');
+  await until(() => window.__game.viewOut.view === 'rear' && window.__game.infoOut.content === 'parking', undefined, 30000);
+  await sleep(1200);
+  const freePix = await guidePix();
+  const freeZones = await g(() => window.__game.sensorSnap.readings.filter((r) => r.distance !== null).length);
+  await placeHold(-36 + 1.0 + Lx / 2, 10, Math.PI / 2, 'R');
+  await until(() => window.__game.sensorSnap && window.__game.sensorSnap.readings.some((r) => r.group === 'rear' && r.distance !== null), undefined, 30000);
+  await sleep(1500);
+  const wallPix = await guidePix();
+  await shot('116-x6-rear-overlay');
+  check('카메라 영상 위 장애물 구역: 감지가 없으면 그리지 않고, 후방 벽 감지 시 구역이 추가로 그려짐', freeZones === 0 && wallPix > freePix + 300, JSON.stringify({ freeZones, freePix, wallPix }));
   await g(() => { window.__game.updateSettings({ vehicleId: 'sedan' }); window.__game.startRun(); });
   await sleep(500);
 

@@ -24,6 +24,7 @@ import { LIGHT_MODE_NAME, computeLighting, nextLightMode, stepLeveling, type Lig
 import { AssistController, type AssistOutput, type AssistSettings } from '../pdc/assistPolicy';
 import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
 import { buildPdcState, type PdcState } from '../pdc/pdcModel';
+import { buildObstacleZones } from '../pdc/overlay';
 import { allowedViews, autoViewAllowed, cameraCycle, clampView, restrictAssist } from '../pdc/capabilities';
 import { ASSIST_VIEW_NAME, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
 import { InfotainmentController, type InfoOutput, type InfoSettings } from '../infotainment/controller';
@@ -937,6 +938,11 @@ export class Game {
       mirror,
       show: this.settings.assistGuides && (view === 'rear' || view === 'front'),
     });
+    // 실제 센서 히트점 기반 장애물 구역 (감지된 것만, 후방/전방 카메라 영상 위)
+    if (this.settings.sensorEnabled && (view === 'rear' || view === 'front')) {
+      const zones = buildObstacleZones(this.sensorSnap, this.spec, pose, view === 'rear' ? ['rear'] : ['front']);
+      this.assistPanel.drawObstacles({ camera: cam, zones, mirror });
+    }
   }
 
   /** 내비게이션 지도를 캔버스에 그린다 (10Hz) */
