@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { LightingOutput } from './lighting';
-import type { VehicleSpec } from './spec';
+import { BELT_RATIO, type VehicleSpec } from './spec';
 import { disposeObject } from '../core/dispose';
 import { KR_PLATE, makeKrPlateMaterial } from './plate';
 
@@ -68,9 +68,9 @@ interface BodyShape {
 }
 
 const SHAPES: Record<'hatch' | 'sedan' | 'suv', BodyShape> = {
-  sedan: { belt: 0.86, hood: 1.15, trunk: 0.95, topRearInset: 0.55, topFrontInset: 0.45 },
-  hatch: { belt: 0.84, hood: 0.85, trunk: 0.0, topRearInset: 0.25, topFrontInset: 0.4 },
-  suv: { belt: 1.0, hood: 1.0, trunk: 0.15, topRearInset: 0.12, topFrontInset: 0.4 },
+  sedan: { belt: BELT_RATIO.sedan, hood: 1.15, trunk: 0.95, topRearInset: 0.55, topFrontInset: 0.45 },
+  hatch: { belt: BELT_RATIO.hatch, hood: 0.85, trunk: 0.0, topRearInset: 0.25, topFrontInset: 0.4 },
+  suv: { belt: BELT_RATIO.suv, hood: 1.0, trunk: 0.15, topRearInset: 0.12, topFrontInset: 0.4 },
 };
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
@@ -387,12 +387,12 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       right: mkMirror(0.2, 0.1, new THREE.Vector3(-(W / 2 + 0.1), belt + 0.1, z1 - 0.08), 0),
       room: mkMirror(0.24, 0.07, new THREE.Vector3(0.12, H - 0.17, z1t - 0.1), 0),
     };
-    const clusterPos = new THREE.Vector3(eye.x + 0.03, Math.max(eye.y - 0.2, dashTop + 0.05 + 0.0728), Math.max(eye.z + 0.7, z1 - 0.36));
+    const clusterPos = new THREE.Vector3(eye.x + 0.03, Math.max(eye.y - 0.2, dashTop + 0.05 + 0.0843), Math.max(eye.z + 0.7, z1 - 0.36));
     {
       // 계기판 하우징: 화면이 허공에 떠 보이지 않도록 대시 윗면까지 내려오는 어두운 받침
-      const hb = clusterPos.y - 0.0728 - dashTop + 0.01;
+      const hb = clusterPos.y - 0.0843 - dashTop + 0.01;
       if (hb > 0.02) {
-        const pod = new THREE.Mesh(new THREE.BoxGeometry(0.41, hb, 0.1), dashMat);
+        const pod = new THREE.Mesh(new THREE.BoxGeometry(0.47, hb, 0.1), dashMat);
         pod.position.set(clusterPos.x, dashTop + hb / 2 - 0.01, clusterPos.z + 0.05);
         cockpit.add(pod);
       }
@@ -401,7 +401,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       // v0.4.8: 두 화면을 물리적으로 분리 — 디지털 계기판은 운전자 정면(핸들 림 위), 인포테인먼트는 대시 중앙(운전자 시선 정중앙을 비켜 낮게).
       // 가로: 중앙 화면 x∈[-0.37,0.09], 계기판 x∈[0.20,0.58] (간격 ≥ 0.11m). 둘 다 운전자 쪽을 향한다.
       center: mkScreen(768, 336, 0.46, 0.2013, new THREE.Vector3(-0.14, dashTop + 0.02 + 0.1007, z1 - 0.16)),
-      cluster: mkScreen(512, 196, 0.38, 0.1455, clusterPos),
+      cluster: mkScreen(768, 294, 0.44, 0.1685, clusterPos),
     };
     cockpit.visible = false;
     root.add(cockpit);

@@ -99,20 +99,25 @@ export function defaultSensorLayout(length: number, width: number): SensorMount[
     // 측면 센서(fov 140°)는 담당 구간을 차체 길이 안쪽(+0.35m)으로 제한한다
     s.push({ id, group, x, z, angle: angDeg * DEG, fov: fovDeg * DEG, ...(group === 'left' || group === 'right' ? { zBound: hl + 0.35 } : {}) });
   };
-  mk('F-L-out', 'front', hw - 0.12, hl, 45, 60);
-  mk('F-L-in', 'front', hw * 0.35, hl, 12, 50);
-  mk('F-R-in', 'front', -hw * 0.35, hl, -12, 50);
-  mk('F-R-out', 'front', -(hw - 0.12), hl, -45, 60);
-  mk('R-L-out', 'rear', hw - 0.12, -hl, 180 - 45, 60);
-  mk('R-L-in', 'rear', hw * 0.35, -hl, 180 - 12, 50);
-  mk('R-R-in', 'rear', -hw * 0.35, -hl, -180 + 12, 50);
-  mk('R-R-out', 'rear', -(hw - 0.12), -hl, -180 + 45, 60);
+  mk('F-L-out', 'front', hw - 0.12, hl, 40, 90);
+  // 안쪽 센서는 중앙을 향해 약간 토인(±4°) + 넓은 시야: 범퍼 정중앙 바로 앞의 가는 장애물(좌우 안쪽 센서 사이)이 사각지대가 되지 않게 한다
+  mk('F-L-in', 'front', hw * 0.35, hl, -4, 66);
+  mk('F-R-in', 'front', -hw * 0.35, hl, 4, 66);
+  mk('F-R-out', 'front', -(hw - 0.12), hl, -40, 90);
+  mk('R-L-out', 'rear', hw - 0.12, -hl, 180 - 40, 90);
+  mk('R-L-in', 'rear', hw * 0.35, -hl, 180 + 4, 66);
+  mk('R-R-in', 'rear', -hw * 0.35, -hl, 180 - 4, 66);
+  mk('R-R-out', 'rear', -(hw - 0.12), -hl, -180 + 40, 90);
   mk('L-front', 'left', hw, hl * 0.45, 90, 140);
   mk('L-rear', 'left', hw, -hl * 0.45, 90, 140);
   mk('R-front', 'right', -hw, hl * 0.45, -90, 140);
   mk('R-rear', 'right', -hw, -hl * 0.45, -90, 140);
   return s;
 }
+
+/** 차체 벨트라인(하부 차체 윗면) 높이 — carModel 의 SHAPES.belt 와 같은 값. 전/후방 카메라가 차체 윗면 바로 위에 장착되도록 계산에 쓴다 */
+export const BELT_RATIO = { sedan: 0.86, hatch: 0.84, suv: 1.0 } as const;
+export const beltOf = (body: 'hatch' | 'sedan' | 'suv', height: number): number => BELT_RATIO[body] * (height / 1.45);
 
 function make(p: {
   id: string;
@@ -148,8 +153,9 @@ function make(p: {
     wheelRadius: p.wheelRadius,
     trackWidth: p.width - 0.22,
     driverEye: { x: 0.36, y: eyeY, z: -0.05 },
-    rearCam: { x: 0, y: 0.95, z: -p.length / 2 + 0.02, pitch: 28 * DEG },
-    frontCam: { x: 0, y: 0.78, z: p.length / 2 - 0.02, pitch: 22 * DEG },
+    // v0.4.9: 카메라를 차체 윗면 바로 위(트렁크 립/후드 끝)에 장착 — 영상 하단에 실제 차체(범퍼 윗면) 일부가 보인다
+    rearCam: { x: 0, y: beltOf(p.body, p.height) + 0.14, z: -p.length / 2 + 0.035, pitch: 28 * DEG },
+    frontCam: { x: 0, y: beltOf(p.body, p.height) + 0.05, z: p.length / 2 - 0.11, pitch: 22 * DEG },
     sensorHeight: 0.55,
     sensors: defaultSensorLayout(p.length, p.width),
     assist: { ...FULL_ASSIST },

@@ -140,70 +140,193 @@ export function drawCenterScreen(ctx: CanvasRenderingContext2D, w: number, h: nu
 export interface ClusterData {
   speedKmh: number;
   gear: string;
+  /** 엔진 회전수 — 물리 엔진에 없는 **시뮬레이션 값**(속도/가속에서 만든 근사). 화면에도 "시뮬레이션"으로 표기한다 */
   rpm: number;
   signalLeft: boolean;
   signalRight: boolean;
   hazard: boolean;
   lightMode: string;
   lowBeam: boolean;
+  highBeam?: boolean;
   handbrake: boolean;
+  /** PDC 전체 경고 단계(센서 거리 → 색), 숫자는 표시하지 않는다 */
   pdcLevel: string;
+  pdcOn?: boolean;
   steerDeg: number;
+  /** 핸들 각도(도, 왼쪽 +, ±540) */
+  wheelDeg?: number;
+  /** 현재 층(다층 맵), 없으면 null */
+  floor?: string | null;
+  mission?: string;
+  /** 간단한 내비 안내 (있을 때만) */
+  navText?: string;
+  vehicleName?: string;
 }
 
-/** 1인칭 계기판: 속도, 변속 상태, 방향지시등, 경고등, 전조등/주차브레이크, PDC 경고 요약 */
-export function drawCluster(ctx: CanvasRenderingContext2D, w: number, h: number, c: ClusterData): void {
-  ctx.fillStyle = '#05080c';
-  ctx.fillRect(0, 0, w, h);
-  const cx = w / 2;
-  const cy = h * 0.54;
-  const R = h * 0.4;
-  // 속도 링
+const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif';
+const PDC_COL: Record<string, string> = { critical: '#ff3b30', near: '#f08a2b', mid: '#f1d13a', far: '#7fc24d' };
+
+/** 270° 원형 게이지: 눈금/라벨/값 호. a0=135°, a1=405° (아래 가운데가 열림) */
+function dial(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number, frac: number, o: { max: number; major: number; minor: number; labelDiv: number; color: string; redFrom?: number; fontPx: number }): void {
+  const a0 = Math.PI * 0.75;
+  const span = Math.PI * 1.5;
   ctx.lineCap = 'round';
-  ctx.lineWidth = h * 0.05;
-  ctx.strokeStyle = 'rgba(255,255,255,.1)';
+  ctx.lineWidth = R * 0.07;
+  ctx.strokeStyle = 'rgba(255,255,255,.12)';
   ctx.beginPath();
-  ctx.arc(cx, cy, R, Math.PI * 0.75, Math.PI * 2.25);
+  ctx.arc(cx, cy, R, a0, a0 + span);
   ctx.stroke();
-  ctx.strokeStyle = c.gear === 'R' ? '#ff7a6a' : '#8fb8ff';
+  if (o.redFrom !== undefined) {
+    ctx.strokeStyle = 'rgba(240,138,43,.55)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, a0 + span * (o.redFrom / o.max), a0 + span);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = o.color;
+  ctx.lineWidth = R * 0.085;
   ctx.beginPath();
-  ctx.arc(cx, cy, R, Math.PI * 0.75, Math.PI * (0.75 + 1.5 * Math.min(1, c.speedKmh / 50)));
+  ctx.arc(cx, cy, R, a0, a0 + span * Math.max(0.003, Math.min(1, frac)));
   ctx.stroke();
-  ctx.fillStyle = '#e8edf3';
+  // 눈금
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `700 ${Math.round(h * 0.34)}px sans-serif`;
-  ctx.fillText(String(Math.round(c.speedKmh)), cx, cy - h * 0.02);
-  ctx.fillStyle = '#66758a';
-  ctx.font = `${Math.round(h * 0.09)}px sans-serif`;
-  ctx.fillText('km/h', cx, cy + h * 0.22);
-  // 기어 (P R N D)
-  ctx.font = `700 ${Math.round(h * 0.14)}px sans-serif`;
-  ['P', 'R', 'N', 'D'].forEach((g, i) => {
-    ctx.fillStyle = g === c.gear ? (g === 'R' ? '#ff7a6a' : '#ffffff') : '#3a4656';
-    ctx.fillText(g, cx - h * 0.35 + i * h * 0.23, h * 0.9);
-  });
-  // 좌/우 정보
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#9aa8b8';
-  ctx.font = `${Math.round(h * 0.09)}px sans-serif`;
-  ctx.fillText(`RPM ${Math.round(c.rpm)} (시뮬레이션)`, 10, h * 0.1);
-  ctx.textAlign = 'right';
-  ctx.fillText(`조향 ${Math.round(Math.abs(c.steerDeg))}°`, w - 10, h * 0.1);
-  // 방향지시등
-  ctx.font = `700 ${Math.round(h * 0.2)}px sans-serif`;
+  for (let v = 0; v <= o.max + 1e-6; v += o.minor) {
+    const a = a0 + span * (v / o.max);
+    const isMajor = Math.abs(v / o.major - Math.round(v / o.major)) < 1e-6;
+    const r0 = R - R * (isMajor ? 0.2 : 0.13);
+    const r1 = R - R * 0.07;
+    ctx.strokeStyle = isMajor ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.3)';
+    ctx.lineWidth = isMajor ? R * 0.028 : R * 0.016;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.stroke();
+    if (isMajor) {
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.font = `600 ${o.fontPx}px ${FONT}`;
+      const rl = R - R * 0.36;
+      ctx.fillText(String(Math.round(v / o.labelDiv)), cx + Math.cos(a) * rl, cy + Math.sin(a) * rl);
+    }
+  }
+}
+
+const chip = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, text: string, on: boolean, col: string, fontPx: number): void => {
+  ctx.fillStyle = on ? col + '33' : 'rgba(255,255,255,.05)';
+  ctx.strokeStyle = on ? col : 'rgba(255,255,255,.14)';
+  ctx.lineWidth = Math.max(1, h * 0.06);
+  ctx.beginPath();
+  ctx.roundRect(x - w / 2, y - h / 2, w, h, h * 0.3);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = on ? '#ffffff' : 'rgba(255,255,255,.35)';
+  ctx.font = `700 ${fontPx}px ${FONT}`;
   ctx.textAlign = 'center';
-  ctx.fillStyle = c.signalLeft || c.hazard ? '#7fe08a' : '#1c2530';
-  ctx.fillText('◀', w * 0.1, cy);
-  ctx.fillStyle = c.signalRight || c.hazard ? '#7fe08a' : '#1c2530';
-  ctx.fillText('▶', w * 0.9, cy);
-  // 상태등
-  ctx.font = `700 ${Math.round(h * 0.1)}px sans-serif`;
-  ctx.fillStyle = c.lowBeam ? '#5da2ff' : '#2a3544';
-  ctx.fillText(c.lightMode, w * 0.1, h * 0.8);
-  ctx.fillStyle = c.handbrake ? '#ff5a4d' : '#2a3544';
-  ctx.fillText('(P)', w * 0.9, h * 0.8);
-  const warn = c.pdcLevel === 'critical' ? '#ff3b30' : c.pdcLevel === 'near' ? '#f08a2b' : c.pdcLevel === 'mid' ? '#f1d13a' : c.pdcLevel === 'far' ? '#7fc24d' : '#2a3544';
-  ctx.fillStyle = warn;
-  ctx.fillText('PDC', w * 0.9, h * 0.55 + h * 0.2);
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y + h * 0.04);
+};
+
+const arrow = (ctx: CanvasRenderingContext2D, x: number, y: number, s: number, dir: 1 | -1, on: boolean): void => {
+  ctx.fillStyle = on ? '#4cd964' : 'rgba(255,255,255,.1)';
+  ctx.beginPath();
+  ctx.moveTo(x + dir * s, y);
+  ctx.lineTo(x - dir * s * 0.2, y - s * 0.8);
+  ctx.lineTo(x - dir * s * 0.2, y - s * 0.32);
+  ctx.lineTo(x - dir * s, y - s * 0.32);
+  ctx.lineTo(x - dir * s, y + s * 0.32);
+  ctx.lineTo(x - dir * s * 0.2, y + s * 0.32);
+  ctx.lineTo(x - dir * s * 0.2, y + s * 0.8);
+  ctx.closePath();
+  ctx.fill();
+};
+
+/**
+ * 1인칭 디지털 계기판 (v0.4.9). 검정 바탕 + 흰색 중심, 경고만 색상.
+ *  좌: 속도계(디지털 속도 + 눈금) / 중앙: 기어(P R N D) · 핸들 각도 · 층/미션 · 점등 상태 / 우: 회전계(시뮬레이션 값, 명시).
+ *  데이터는 모두 실제 게임 상태이며 RPM 만 시뮬레이션 근사(화면에 표기)다.
+ */
+export function drawCluster(ctx: CanvasRenderingContext2D, w: number, h: number, c: ClusterData): void {
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#0c1016');
+  bg.addColorStop(1, '#030405');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+  const reverse = c.gear === 'R';
+  const accent = reverse ? '#ff7a6a' : '#e9eef5';
+  const R = h * 0.4;
+  const cy = h * 0.55;
+  const lx = w * 0.205;
+  const rx = w * 0.795;
+  // ---- 속도계 / 회전계 ----
+  dial(ctx, lx, cy, R, c.speedKmh / 60, { max: 60, major: 10, minor: 5, labelDiv: 1, color: accent, fontPx: Math.round(h * 0.075) });
+  dial(ctx, rx, cy, R, c.rpm / 6000, { max: 6000, major: 1000, minor: 500, labelDiv: 1000, color: '#9fb4cf', redFrom: 5000, fontPx: Math.round(h * 0.075) });
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 ${Math.round(h * 0.3)}px ${FONT}`;
+  ctx.fillText(String(Math.round(c.speedKmh)), lx, cy - h * 0.02);
+  ctx.fillStyle = 'rgba(255,255,255,.55)';
+  ctx.font = `600 ${Math.round(h * 0.075)}px ${FONT}`;
+  ctx.fillText('km/h', lx, cy + h * 0.17);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 ${Math.round(h * 0.17)}px ${FONT}`;
+  ctx.fillText((Math.round(c.rpm / 10) * 10).toString(), rx, cy - h * 0.02);
+  ctx.fillStyle = 'rgba(255,255,255,.45)';
+  ctx.font = `600 ${Math.round(h * 0.062)}px ${FONT}`;
+  ctx.fillText('RPM · 시뮬레이션', rx, cy + h * 0.15);
+  // ---- 중앙: 기어 ----
+  const cx = w / 2;
+  ctx.fillStyle = reverse ? '#ff7a6a' : '#ffffff';
+  ctx.font = `800 ${Math.round(h * 0.34)}px ${FONT}`;
+  ctx.fillText(c.gear, cx, h * 0.4);
+  ctx.font = `700 ${Math.round(h * 0.085)}px ${FONT}`;
+  ['P', 'R', 'N', 'D'].forEach((g, i) => {
+    ctx.fillStyle = g === c.gear ? (g === 'R' ? '#ff7a6a' : '#ffffff') : 'rgba(255,255,255,.22)';
+    ctx.fillText(g, cx + (i - 1.5) * h * 0.14, h * 0.66);
+  });
+  // 핸들 각도 아이콘 + 값
+  const wd = c.wheelDeg ?? c.steerDeg * 8;
+  ctx.save();
+  ctx.translate(cx - h * 0.2, h * 0.8);
+  ctx.rotate((-wd * Math.PI) / 180);
+  ctx.strokeStyle = 'rgba(255,255,255,.8)';
+  ctx.lineWidth = h * 0.016;
+  ctx.beginPath();
+  ctx.arc(0, 0, h * 0.062, 0, Math.PI * 2);
+  ctx.moveTo(-h * 0.062, 0);
+  ctx.lineTo(h * 0.062, 0);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, h * 0.062);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = 'rgba(255,255,255,.7)';
+  ctx.font = `600 ${Math.round(h * 0.07)}px ${FONT}`;
+  ctx.textAlign = 'left';
+  const sd = Math.round(Math.abs(wd));
+  ctx.fillText(`${sd}°${sd < 3 ? '' : wd > 0 ? ' 좌' : ' 우'}`, cx - h * 0.1, h * 0.8);
+  // ---- 상단: 방향지시등 / 층 / 미션 ----
+  arrow(ctx, w * 0.09, h * 0.1, h * 0.065, -1, c.signalLeft || c.hazard);
+  arrow(ctx, w * 0.91, h * 0.1, h * 0.065, 1, c.signalRight || c.hazard);
+  ctx.textAlign = 'center';
+  if (c.floor) chip(ctx, cx - w * 0.1, h * 0.1, h * 0.26, h * 0.1, c.floor, true, '#6fa8ff', Math.round(h * 0.07));
+  ctx.fillStyle = 'rgba(255,255,255,.7)';
+  ctx.font = `600 ${Math.round(h * 0.066)}px ${FONT}`;
+  const mission = (c.navText ?? c.mission ?? '').slice(0, 20);
+  ctx.fillText(mission, c.floor ? cx + h * 0.1 : cx, h * 0.1);
+  // ---- 하단: 점등/경고 ----
+  const by = h * 0.93;
+  const cw = h * 0.3;
+  const ch = h * 0.1;
+  chip(ctx, w * 0.07, by, cw, ch, c.lightMode === 'AUTO' ? 'AUTO' : c.lightMode, c.lowBeam && !c.highBeam, '#5da2ff', Math.round(h * 0.062));
+  chip(ctx, w * 0.07 + cw * 1.12, by, cw * 0.72, ch, '상향', !!c.highBeam, '#5da2ff', Math.round(h * 0.062));
+  chip(ctx, w * 0.5 - cw * 0.3, by, cw * 0.6, ch, 'P', c.handbrake, '#ff5a4d', Math.round(h * 0.07));
+  chip(ctx, w * 0.5 + cw * 0.6, by, cw * 0.9, ch, '비상등', c.hazard, '#ffb020', Math.round(h * 0.058));
+  const lvlCol = PDC_COL[c.pdcLevel];
+  const pdcOn = c.pdcOn !== false;
+  chip(ctx, w * 0.93 - cw * 0.5, by, cw * 1.1, ch, pdcOn ? 'PDC' : 'PDC OFF', pdcOn && !!lvlCol, lvlCol ?? '#7fc24d', Math.round(h * 0.062));
+  if (c.pdcLevel === 'critical' && pdcOn) {
+    ctx.fillStyle = '#ff3b30';
+    ctx.font = `800 ${Math.round(h * 0.075)}px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('장애물 근접', cx, h * 0.54);
+  }
 }

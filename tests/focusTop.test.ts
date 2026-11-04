@@ -21,7 +21,7 @@ function ndc(f: ReturnType<typeof frameView>, p: { x: number; y: number; z: numb
 describe('전/후방 집중 탑뷰: 자기 차량의 해당 범퍼·차체 일부가 반드시 화면에 보인다 (v0.4.7)', () => {
   for (const spec of SELECTABLE_VEHICLES) {
     for (const view of ['topFront', 'topRear'] as const) {
-      for (const gap of [null, 0.5, 1, 2, 4, 6]) {
+      for (const gap of [null, 0.3, 0.5, 1, 2, 4, 6]) {
         it(`${spec.id} ${view} 장애물 ${gap === null ? '없음' : gap + 'm'}`, () => {
           const pose = { x: 5, z: -3, heading: 0.7, y: 0 };
           const s = view === 'topFront' ? 1 : -1;

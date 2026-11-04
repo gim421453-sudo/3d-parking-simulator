@@ -6,9 +6,10 @@ import { centerOf, createVehicleState, obbOf } from '../src/vehicle/physics';
 import { VEHICLES } from '../src/vehicle/spec';
 
 describe('맵 데이터 무결성', () => {
-  it('맵이 4개(평면 3 + 다층 주차타워)이며 id가 고유하다', () => {
-    expect(MAPS.length).toBe(4);
-    expect(new Set(MAPS.map((m) => m.id)).size).toBe(4);
+  it('기존 맵 4개 + 신규 맵(v0.4.9)이 등록되고 id가 고유하다', () => {
+    for (const id of ['lot', 'underground', 'outdoor', 'tower']) expect(MAPS.some((m) => m.id === id), id).toBe(true);
+    expect(MAPS.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(MAPS.map((m) => m.id)).size).toBe(MAPS.length);
   });
 
   for (const map of MAPS) {

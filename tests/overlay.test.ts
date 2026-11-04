@@ -20,7 +20,7 @@ describe('카메라 영상용 장애물 구역(overlay)', () => {
     expect(z.length).toBeGreaterThan(0);
     for (const q of z) {
       expect(q.group).toBe('rear');
-      for (const c of q.corners) expect(worldToLocal(pose.x, pose.z, pose.heading, c.x, c.z).z).toBeLessThan(-spec.length / 2 + 0.05);
+      for (const c of q.corners) expect(worldToLocal(pose.x, pose.z, pose.heading, c.x, c.z).z).toBeLessThan(-spec.length / 2 + 0.2); // 모서리 센서(넓은 시야)의 비스듬한 구역 허용
     }
   });
   it('요청한 그룹만 반환 (전방 카메라에는 후방 구역 없음)', () => {

@@ -55,7 +55,7 @@ export interface ViewPolicyConfig {
   minHoldSec: number; // 전환 후 최소 유지 시간
   cooldownSec: number; // 전환 사이 최소 간격
 }
-export const DEFAULT_VIEW_POLICY: ViewPolicyConfig = { enterRank: 3, exitRank: 2, minHits: 3, enterConfirmSec: 0.3, releaseSec: 1.6, minHoldSec: 1.4, cooldownSec: 0.9 };
+export const DEFAULT_VIEW_POLICY: ViewPolicyConfig = { enterRank: 3, exitRank: 2, minHits: 3, enterConfirmSec: 0.5, releaseSec: 1.6, minHoldSec: 2.2, cooldownSec: 1.8 };
 
 export interface ViewDecision {
   view: AssistView;

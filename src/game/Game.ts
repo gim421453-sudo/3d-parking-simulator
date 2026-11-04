@@ -25,6 +25,7 @@ import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
 import { buildPdcState, type PdcState } from '../pdc/pdcModel';
 import { WHEEL_LOCK_DEG } from '../core/wheel';
 import { ceilingAbove, groundAt, levelAt } from '../maps/terrain';
+import { gateViewRisk } from '../pdc/viewGate';
 import { buildTowerVisual, type TowerVisual } from '../maps/towerBuilder';
 import { chooseBeepTarget } from '../sensors/beepPlan';
 import { buildCameraTiles, buildWarnLines } from '../pdc/overlay';
@@ -36,7 +37,7 @@ import { segmentBlocked } from '../pdc/visibility';
 import { allowedViews, autoViewAllowed, cameraCycle, clampView, restrictAssist } from '../pdc/capabilities';
 import { ASSIST_VIEW_NAME, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
 import { InfotainmentController, type InfoOutput, type InfoSettings } from '../infotainment/controller';
-import { drawCenterScreen, drawCluster, type CabinHit } from '../infotainment/cabinScreens';
+import { drawCenterScreen, drawCluster, type CabinHit, type ClusterData } from '../infotainment/cabinScreens';
 import { Navigator, type NavState } from '../nav/navigator';
 import { drawNavMap } from '../nav/navView';
 import { SHIFTER_ORDER } from '../ui/shifter';
@@ -83,6 +84,11 @@ export class Game {
   riskOut: RiskOutput | null = null;
   private cabinHits: CabinHit[] = [];
   private tower: TowerVisual | null = null;
+  private cullLevelY = NaN;
+  lastClusterData: ClusterData | null = null;
+  lastHitId = '';
+  /** 테스트 전용: 자동 시점 게이트 입력을 덮어쓴다(정지 상태에서 "그 쪽으로 조향하며 접근 중"인 상황을 재현). steer 'closest' = 더 가까운 쪽으로 조향 */
+  debugViewCtx: { v?: number; steer?: number | 'closest'; pathCut?: number } | null = null;
   private overlayView = '';
   private latch: LocalFrame | null = null;
   private relatchGate = new RelatchGate();
@@ -313,12 +319,14 @@ export class Game {
     }
     const tier = this.settings.quality;
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+    this.cullLevelY = NaN;
     this.built = buildMap(map, {
       textureSize: tier === 'low' ? 128 : tier === 'medium' ? 256 : 512,
       anisotropy: tier === 'low' ? 1 : Math.min(tier === 'medium' ? 4 : 8, maxAniso),
       shadows: this.shadowMapSize() > 0,
     });
     this.scene.add(this.built.group);
+    this.built.setLevelVisibility(map.spawn.y ?? 0); // 다층 맵: 시작 층에서 먼 층의 주차 차량 모델은 처음부터 그리지 않는다
     if (map.terrain) {
       this.tower = buildTowerVisual(map, map.terrain);
       this.scene.add(this.tower.group);
@@ -843,6 +851,7 @@ export class Game {
       car.slope = pslope;
       car.v = 0;
       this.contactClear = 0;
+      this.lastHitId = hit ? hit.id : 'edge'; // 테스트/디버그
       if (!this.inContact && Math.abs(pv) > 0.1) {
         this.inContact = true;
         this.collisions++;
@@ -1050,7 +1059,16 @@ export class Game {
   }
 
   /** 방향별 위험(차체 외곽~장애물 간격, 접근 속도) + 측면 3D 시점의 시야 가림 검사 (화면 전환 정책의 입력) */
+  /** 현재 기어 방향 예상 이동 경로가 장애물과 만나는 거리(m, 없으면 4.5) — 카메라 전환 판단용 */
+  private pathCut = 4.5;
+  private pathAcc = 99;
   private updateRisk(dt: number): void {
+    this.pathAcc += dt;
+    if (this.pathAcc >= 0.1) {
+      this.pathAcc = 0;
+      const pz = this.poseNow();
+      this.pathCut = guideCutDistance(this.spec, this.car.steer, this.car.gear === 'R' ? -1 : 1, pz, this.colliders, pz.y + this.spec.sensorHeight);
+    }
     this.riskOut = this.risk.update(dt, this.sensorSnap, obbOf(this.car, this.spec), this.spec);
     const hits = this.allHits();
     if (hits.length) {
@@ -1092,7 +1110,19 @@ export class Game {
     const r = this.riskOut;
     if (!r) return undefined;
     const pick = <T,>(f: (g: RiskOutput['groups'][keyof RiskOutput['groups']]) => T): Record<'front' | 'rear' | 'left' | 'right', T> => ({ front: f(r.groups.front), rear: f(r.groups.rear), left: f(r.groups.left), right: f(r.groups.right) });
-    return { threat: pick((g) => g.threat), veryClose: pick((g) => g.veryClose), pillar: pick((g) => g.pillar), narrow: r.narrow, gap: pick((g) => g.gap), sideBlocked: { ...this.sideBlocked } };
+    // v0.4.9: 장애물이 "있다"는 이유만으로 시점을 바꾸지 않는다. 실제 충돌 가능성이 있을 때만 보조 시점 후보가 된다.
+    //  - 진행 방향(D=전방/R=후방): 매우 가까운 장애물이 예상 이동 경로(조향 반영) 위에 있을 때만 집중 탑뷰 후보
+    //  - 측면: 그 쪽으로 조향하며 실제로 움직이고 있고 간격이 좁을 때만 측면뷰 후보 (나란히 서 있는 벽/차량만으로는 전환 안 함)
+    const dbg = this.debugViewCtx;
+    const gaps = pick((g) => g.gap);
+    const steer = dbg?.steer === 'closest' ? ((gaps.left ?? 9) <= (gaps.right ?? 9) ? 0.3 : -0.3) : (dbg?.steer ?? this.car.steer);
+    const gated = gateViewRisk(
+      { threat: pick((g) => g.threat), veryClose: pick((g) => g.veryClose), gap: gaps },
+      { gear: this.car.gear, v: dbg?.v ?? this.car.v, steer, pathCut: dbg?.pathCut ?? this.pathCut },
+    );
+    const threat = gated.threat;
+    const veryClose = gated.veryClose;
+    return { threat, veryClose, pillar: pick((g) => g.pillar), narrow: r.narrow, gap: pick((g) => g.gap), sideBlocked: { ...this.sideBlocked } };
   }
 
   private sideObservation(snap: SensorSnapshot): SideObservation {
@@ -1185,7 +1215,7 @@ export class Game {
     const m = this.model!;
     const prevBody = m.bodyGroup.visible;
     const prevCockpit = m.cockpit.visible;
-    const show3d = view === 'left' || view === 'right' || view === 'top' || view === 'topZoom' || view === 'topFront' || view === 'topRear' || view === 'oblique';
+    const show3d = true; // v0.4.9: 전/후방 카메라도 자기 차체(범퍼 윗면) 일부가 영상 하단에 보여야 하므로 모든 시점에서 차체를 그린다
     if (show3d) {
       m.bodyGroup.visible = true;
       m.cockpit.visible = false;
@@ -1298,14 +1328,12 @@ export class Game {
       m.cockpit.visible = prevCockpit;
       this.assistPanel.blitSurround(this.canvas, 0, this.canvas.height - Math.round(vh * pr), Math.round(vw * pr), Math.round(vh * pr));
     }
-    const lines = this.settings.sensorEnabled ? buildWarnLines(this.sensorSnap, obbOf(this.car, this.spec), this.settings.sensorRange, this.settings.sensorCritical) : [];
     const sdir: 1 | -1 = this.assistOut.focus === 'rear' ? -1 : 1;
     const sGuideMax = this.settings.assistGuides ? guideCutDistance(this.spec, this.car.steer, sdir, pose, this.colliders, gy + this.spec.sensorHeight) : 0;
     /** 테스트/디버그: 서라운드 예측선이 사용한 값 (메인 카메라 예측선과 같은 guidelines 계산) */
     this.surPathDbg = { steer: this.car.steer, dir: sdir, guideMax: sGuideMax, renders: (this.surPathDbg?.renders ?? 0) + 1 };
     this.assistPanel.drawWarnLines({
       camera: cam,
-      lines,
       y: gy,
       path: this.settings.assistGuides
         ? {
@@ -1361,7 +1389,7 @@ export class Game {
     cab.center.texture.needsUpdate = true;
     const L = this.currentLighting();
     const spd = Math.abs(c.v) * 3.6;
-    drawCluster(cab.cluster.ctx, cab.cluster.canvas.width, cab.cluster.canvas.height, {
+    const clusterData: ClusterData = {
       speedKmh: spd,
       gear: c.gear,
       rpm: c.gear === 'P' || c.gear === 'N' ? 800 + Math.abs(this.throttle) * 1500 : Math.min(5500, 850 + spd * 55 + this.throttle * 700),
@@ -1370,10 +1398,17 @@ export class Game {
       hazard: this.hazard && this.blinkOn,
       lightMode: LIGHT_MODE_NAME[this.lightMode],
       lowBeam: L.low,
+      highBeam: L.high,
       handbrake: c.handbrake,
       pdcLevel: this.pdcState?.overall ?? 'none',
+      pdcOn: this.settings.sensorEnabled,
       steerDeg: c.steer / DEG,
-    });
+      wheelDeg: (c.steer / this.spec.maxSteer) * 540,
+      floor: this.map.terrain ? levelAt(this.map.terrain, c.y).name : null,
+      mission: this.mission ? this.mission.def.name.replace(/ \(임시\)/, '') : '자유주행',
+    };
+    this.lastClusterData = clusterData; // 테스트/디버그: 계기판이 실제 게임 상태와 일치하는지 검사
+    drawCluster(cab.cluster.ctx, cab.cluster.canvas.width, cab.cluster.canvas.height, clusterData);
     cab.cluster.texture.needsUpdate = true;
   }
 
@@ -1420,6 +1455,10 @@ export class Game {
     };
     if (this.map.terrain) {
       const lv = levelAt(this.map.terrain, this.car.y);
+      if (this.cullLevelY !== lv.y) {
+        this.cullLevelY = lv.y;
+        this.built?.setLevelVisibility(this.car.y);
+      }
       this.hud.setFloor(lv.name);
       this.hud.minimap.setLevel(lv.y);
     } else this.hud.setFloor(null);

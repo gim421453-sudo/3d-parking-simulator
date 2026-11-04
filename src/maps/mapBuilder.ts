@@ -17,6 +17,8 @@ export interface BuiltMap {
   sun: THREE.DirectionalLight | null;
   textures: TextureSet;
   setTarget(slot: ParkingSlot | null): void;
+  /** 다층 맵 성능: 플레이어 높이에서 ±maxDy 밖 층의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 반환: 숨긴 개수 */
+  setLevelVisibility(playerY: number, maxDy?: number): number;
   animate(t: number): void;
   dispose(): void;
 }
@@ -141,6 +143,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   const cones: ObstacleDef[] = [];
   const drums: ObstacleDef[] = [];
 
+  const levelObjects: { obj: THREE.Object3D; y: number }[] = [];
   for (const o of map.obstacles) {
     switch (o.tag) {
       case 'cone':
@@ -174,6 +177,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         car.root.position.set(o.x, o.y0 ?? 0, o.z);
         car.root.rotation.y = o.rot ?? 0;
         group.add(car.root);
+        if ((o.y0 ?? 0) !== 0 || map.terrain) levelObjects.push({ obj: car.root, y: o.y0 ?? 0 });
         break;
       }
       case 'building': {
@@ -298,6 +302,15 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
 
   const result: BuiltMap = {
     group,
+    setLevelVisibility(playerY, maxDy = 1.7) {
+      let hidden = 0;
+      for (const l of levelObjects) {
+        const vis = Math.abs(l.y - playerY) <= maxDy;
+        if (l.obj.visible !== vis) l.obj.visible = vis;
+        if (!vis) hidden++;
+      }
+      return hidden;
+    },
     sun,
     textures: tex,
     setTarget(slot) {
@@ -308,7 +321,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       }
       targetMesh.visible = true;
       targetMesh.scale.set(slot.w - 0.12, slot.l - 0.12, 1);
-      targetMesh.position.set(slot.x, 0.03, slot.z);
+      targetMesh.position.set(slot.x, (slot.y ?? 0) + 0.05, slot.z); // 다층: 해당 층 바닥 위
       targetMesh.rotation.set(-Math.PI / 2, 0, -slot.dir, 'YXZ');
       // 평면 회전: Y축(heading) 기준으로 먼저 회전 후 눕힘
       targetMesh.rotation.order = 'YXZ';
@@ -316,7 +329,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       targetMesh.rotation.x = -Math.PI / 2;
       targetMesh.rotation.z = 0;
       beam.visible = true;
-      beam.position.set(slot.x, 3, slot.z);
+      beam.position.set(slot.x, (slot.y ?? 0) + 3, slot.z);
     },
     animate(t) {
       const p = 0.28 + 0.12 * Math.sin(t * 3);
