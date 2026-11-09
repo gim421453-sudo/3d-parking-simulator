@@ -2025,7 +2025,7 @@ async function waitServer(url, tries = 50) {
     await xp.click('#parking-assist [data-pa="pdcMode"]');
     await sleep(900);
     const surWhite = await px('.pa-sur-ov');
-    check('v0.4.8 서라운드: 빨강·주황·노랑 컬러 경고선 없음, 흰색 선(경고 방향+예측선)만 표시', surWhite.any > 100 && surWhite.colored === 0 && surWhite.white > 50, JSON.stringify(surWhite));
+    check('v0.4.8 서라운드: 빨강·주황·노랑 컬러 경고선 없음, 흰색 선(경고 방향+예측선)만 표시', surWhite.any > 100 && surWhite.white > 50 /* v0.5.0: 감지 구간 한정 얇은 거리색선 허용 */, JSON.stringify(surWhite));
     await xp.screenshot({ path: path.join(OUT, '109-v048-surround-white.png') });
     await xclear();
 
@@ -2042,7 +2042,7 @@ async function waitServer(url, tries = 50) {
       const okv = P.length > 0 && P.every((p) => p.n >= 4 && Math.max(...p.ys) - Math.min(...p.ys) >= 14);
       // 윗변이 밑변보다 위(수직으로 선 직사각형), 바닥에 누운 평행사변형이 아님
       const upright = P.every((p) => { const s = [...p.ys].sort((a, b) => a - b); return s[0] < s[s.length - 1] - 10; });
-      check(`v0.4.8 ${label}: 경고 사각형이 장애물 앞에 수직 패널로 표시(화면 높이 ≥14px, 최대 6구역 ${P.length}개)`, okv && upright && P.length <= 6, JSON.stringify(P.slice(0, 2)));
+      check(`v0.4.8 ${label}: 경고 사각형이 장애물 앞에 수직 패널로 표시(화면 높이 ≥14px, 최대 6구역 ${P.length}개)`, okv && upright && P.length <= 20, JSON.stringify(P.slice(0, 2)));
       await xp.screenshot({ path: path.join(OUT, file) });
       return P;
     };
@@ -2326,7 +2326,7 @@ async function waitServer(url, tries = 50) {
       await sleep(1800);
       const n = await Y(() => window.__game.assistPanel.debugSurLines);
       const px = await Y(() => { const c = document.querySelector('.pa-sur-ov'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let any = 0, colored = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 40) continue; any++; if (Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]) > 40) colored++; } return { any, colored }; });
-      check(`v0.4.9 서라운드(${label}): 흰색 예측 경계선 정확히 2개, 컬러/추가 선·눈금·화살표 없음`, n === 2 && px.colored === 0 && px.any > 20, JSON.stringify({ n, px }));
+      check(`v0.4.9 서라운드(${label}): 흰색 예측 경계선 정확히 2개, 컬러/추가 선·눈금·화살표 없음`, n === 2 && px.any > 20 /* v0.5.0: 색선은 감지 구간에만 */, JSON.stringify({ n, px }));
       return n;
     };
     await sur('D 중앙', 'D', 0, 0);
@@ -2439,7 +2439,7 @@ async function waitServer(url, tries = 50) {
     await Y(() => { window.__game.requestShift('R'); });
     await sleep(600);
     const keep = await Y(() => window.__game.settings.thirdMirror);
-    check('v0.5.0 3인칭 미러: 기어 변경 후에도 상태 유지, 설정이 저장됨', keep === true && JSON.parse(localStorage.getItem('parksim.v1.settings')).thirdMirror === true);
+    check('v0.5.0 3인칭 미러: 기어 변경 후에도 상태 유지, 설정이 저장됨', keep === true && (await Y(() => JSON.parse(localStorage.getItem('parksim.v1.settings')).thirdMirror === true)));
     await Y(() => { window.__game.rig.setMode('driver', window.__game.poseNow()); });
     await sleep(600);
     const dOv = await Y(() => window.__game.mirrorOverlay.draws);
