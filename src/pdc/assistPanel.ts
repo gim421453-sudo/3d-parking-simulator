@@ -428,12 +428,14 @@ export class AssistPanel {
 
   private mLineAnim = new Map<string, { a: { x: number; z: number }; b: { x: number; z: number }; al: number; target: number; level: WarnLine['level'] }>();
   /**
-   * 3D 서라운드 오버레이: **얇은 흰색 예상 이동 경계선 정확히 2개**(왼쪽/오른쪽 차체 경계)만 그린다 (v0.4.9).
-   * 눈금·화살표·경고선·차체 윤곽선·직진 기준선 없음. 실제 3D 차량/장애물은 렌더된 장면 그대로 보인다.
+   * 3D 서라운드 오버레이: **얇은 흰색 예상 이동 경계선 정확히 2개**(왼쪽/오른쪽 차체 경계) + (v0.5.0) 실제 센서 히트가 있는 구간에만
+   * 아주 얇은 거리 단계색 경고선(초록→노랑→주황→빨강, 센서 거리 설정과 같은 단계)을 그린다.
+   * 전체 링·큰 사각형·눈금·화살표·차체 윤곽선·직진 기준선 없음. 감지 없는 구간에는 아무것도 그리지 않는다. 실제 3D 차량/장애물은 렌더된 장면 그대로 보인다.
    */
   drawWarnLines(o: {
     camera: THREE.PerspectiveCamera;
     y: number;
+    warn?: WarnLine[];
     path?: { pose: { x: number; z: number; heading: number; y?: number }; steer: number; dir: 1 | -1; guideMax: number; groundY?: (x: number, z: number) => number };
   }): void {
     const g = this.octx;
@@ -441,6 +443,26 @@ export class AssistPanel {
     const H = this.surOv.height;
     g.clearRect(0, 0, W, H);
     this.debugSurLines = 0;
+    this.debugSurWarn = 0;
+    // 거리 단계색 경고선(얇게, 실제 히트가 있는 구간만). 흰 예측선과 구분되도록 흰색보다 먼저 그리고 색은 팔레트(흰색 제외)만 쓴다
+    if (o.warn && o.warn.length) {
+      const pal = PDC_PALETTES[this.palette].colors;
+      g.lineCap = 'round';
+      g.lineWidth = 2.4;
+      for (const wl of o.warn) {
+        const y = o.y + 0.05;
+        const seg = projectSegment({ x: wl.a.x, y, z: wl.a.z }, { x: wl.b.x, y, z: wl.b.z }, o.camera, W, H, false);
+        if (!seg) continue;
+        g.strokeStyle = pal[wl.level];
+        g.globalAlpha = 0.95;
+        g.beginPath();
+        g.moveTo(seg[0].x, seg[0].y);
+        g.lineTo(seg[1].x, seg[1].y);
+        g.stroke();
+        this.debugSurWarn++;
+      }
+      g.globalAlpha = 1;
+    }
     if (!o.path || !this.spec) return;
     const p = o.path;
     const lines = buildGuideLines(this.spec, p.steer, p.dir, Math.max(0.25, p.guideMax));
@@ -468,6 +490,8 @@ export class AssistPanel {
   }
   /** 테스트/디버그: 이번 프레임에 서라운드에 그려진 선의 개수 (예측 경계선, 최대 2) */
   debugSurLines = 0;
+  /** 테스트/디버그: 이번 프레임에 서라운드에 그려진 거리 단계색 경고선 개수 */
+  debugSurWarn = 0;
 
   /** 자기 차량 바닥 외곽선 + 진행 방향 범퍼선 (카메라 투영, 근평면 클리핑 적용). 거리 숫자 없음 */
   private drawFootprint(g: CanvasRenderingContext2D, o: { camera: THREE.PerspectiveCamera; pose: { x: number; z: number; heading: number; y?: number }; groundY?: (x: number, z: number) => number; mirror: boolean; footprint?: 'front' | 'rear' | 'none' }, W = ASSIST_CAM_W, H = ASSIST_CAM_H): void {
@@ -591,9 +615,9 @@ export class AssistPanel {
         g.globalAlpha = st.a * (st.hits > 1 ? 0.38 : 0.24);
         g.fillStyle = pal[st.level];
         g.fill();
-        g.globalAlpha = st.a * 0.95;
+        g.globalAlpha = st.a * 0.5; // 0.3m 세분화 타일이 하나의 띠로 보이도록 외곽선은 얇고 옅게
         g.strokeStyle = pal[st.level];
-        g.lineWidth = 2;
+        g.lineWidth = 1.2;
         g.stroke();
         g.restore();
         continue;

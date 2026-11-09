@@ -112,6 +112,7 @@ export class Hud {
         <div class="iconbar">
           ${ab('assistToggle', '인포테인먼트 화면 열기/닫기 (B)', ICON.display)}
           ${ab('camera', '카메라 변경 (C)', ICON.camera)}
+          ${ab('mirrorToggle', '3인칭 미러 켜기/끄기 (U)', ICON.mirror)}
           ${ab('sensorView', '주차 센서 3D 화면 (V)', ICON.sensor)}
           ${ab('sensorToggle', '주차 센서 켜기/끄기', ICON.parkAssist)}
           ${ab('soundToggle', '경고음 켜기/끄기', ICON.volume)}
@@ -327,6 +328,11 @@ export class Hud {
 
   setAssistOpen(on: boolean): void {
     this.root.classList.toggle('assist-open', on);
+  }
+
+  /** 버튼의 켜짐 표시를 바꾼다 (HUD 데이터와 무관한 토글용) */
+  setOn(a: string, v: boolean): void {
+    this.btns.get(a)?.classList.toggle('on', v);
   }
 
   hint(text: string | null): void {

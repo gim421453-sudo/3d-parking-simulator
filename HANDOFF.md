@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.3.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,25 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.5.0 진행 상황 (실차형 GLB · 승강기식 기계식 주차장 · PDC/서라운드/미러)
+
+기준 `711c4e2`. 상세·완료/부분/미구현 구분: **`docs/V050.md`**. 테스트 수치는 `docs/TESTING.md`.
+
+**한 일**
+- 실차형 GLB: Khronos Car Concept(CC-BY-4.0) 가공본 `public/models/concept-coupe.glb` 를 차량 선택(7번째)에 적용 — 앞바퀴 조향 피벗/4바퀴 회전/램프 연결. **BMW M4/X6 는 Sketchfab 로그인 필요로 확보 못 함(우회 안 함)**. 가공 스크립트 `scripts/prepare-car-glb.mjs`, 출처/라이선스 `public/models/LICENSE-concept-coupe.md`, `docs/ASSETS.md`.
+- 기계식 주차장 `mechpark`(승강기식 팔레트): `src/mech/{limits,machine,controller,mechBuilder}.ts`, `maps/mapMechPark.ts`, `mission/mech.ts`, `ui/mechPanel.ts`. 팔레트 바퀴 홈 + 실제 3D V자 리브(InstancedMesh), 노랑/검정 가이드, 앞바퀴 정지턱, Reflector 전방 거울, 문 안전센서/인터록, 승강/이송/저장/출고, 허용치(폭 1.95/높이 1.55/길이 5.2/중량 2300kg) 초과 거부, G/J/K/X 키.
+- 전/후방 카메라 경고 패널을 0.3m 폭 타일 + 화각 폭(±1.6m)으로 세분화. 서라운드에 감지 구간 한정 얇은 거리색 경고선(흰 예측선 2개 유지). 3인칭 미러 토글(키 U, 기본 OFF, 저장).
+
+**남은 일 / 알려진 문제**
+- BMW 실모델(사용자가 로그인해 받은 GLB 필요), 컨셉 쿠페의 앞 방향지시등/DRL/실내 없음, 모바일 실기기 성능 미측정.
+- 기계식: 저장 중 차량 렌더 최적화, V홈 실제 규격 미확인, 사람 감지 시뮬레이션 없음(하차는 게임 상태). 법규 인증 사양 아님.
+- 카메라 패널 가림(occlusion), 카메라별 타이어 시각 검증은 부분 완료.
+
+**규칙(재발 방지)**
+- 기계식 차량은 장치가 동작 중(`mech.m.locked`)이면 물리/입력을 건너뛰고 `MechController.applyLocked` 로 팔레트 상대 위치를 유지한다. 새 장치 동작은 `machine.ts` 순수 로직에 먼저 추가하고 테스트.
+- `createVehicleState(spec, cx, cz, heading)` 의 x,z 는 **차체 중심**(뒷축이 아님) — 뒷축 좌표를 넣을 땐 `car.x/z` 를 직접 설정. (출고 미션 시작 위치가 어긋났던 버그의 원인: 팔레트 상대 좌표는 팔레트 방향으로 회전한 로컬 좌표여야 함)
+- 외부 GLB 는 라이선스/출처 문서(`public/models/LICENSE-*.md`)와 `docs/ASSETS.md` 기록 후에만 추가.
 
 ## v0.4.9 진행 상황 (신규 맵 4종 + PDC/카메라/서라운드/계기판)
 

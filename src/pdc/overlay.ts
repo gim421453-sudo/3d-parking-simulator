@@ -79,8 +79,15 @@ export function zoneLocalCorners(z: ObstacleZone, pose: { x: number; z: number; 
 }
 
 // ---------------------------------------------------------------- 전/후방 카메라: 가로 N 개 독립 타일
-export const TILE_COUNT = 6;
-const TILE_MARGIN = 0.35; // 차체 폭 좌우 여유 (m)
+/** v0.5.0: 카메라 화각 전체(중앙·좌우 모서리·가장자리)를 덮도록 차체 폭 밖 1.6m 까지 0.3m 폭 타일로 세분화 (이전: 6칸/폭+0.35m) */
+export const TILE_W = 0.3;
+export const TILE_LAT = 1.6; // 차체 폭 좌우로 더 보는 범위 (m)
+export const TILE_CORNER = 0.15; // 범퍼 앞/뒤 끝에서 이만큼 옆(beyond<0)에 걸친 모서리 히트도 포함
+export function tileLayout(hw: number): { half: number; n: number; w: number } {
+  const half = hw + TILE_LAT;
+  const n = Math.max(1, Math.ceil((2 * half) / TILE_W));
+  return { half, n, w: (2 * half) / n };
+}
 const TILE_DEPTH = 0.45; // 장애물 표면 앞쪽(차량 쪽) 바닥으로 칠하는 깊이
 
 /**
@@ -96,7 +103,7 @@ export function buildCameraTiles(snap: SensorSnapshot | null, spec: VehicleSpec,
   if (!snap) return [];
   const hw = body.hw;
   const hl = body.hl;
-  const half = hw + TILE_MARGIN;
+  const { half, n: TILE_COUNT, w } = tileLayout(hw);
   const bins: { gap: number; hits: number; ids: Set<string> }[] = Array.from({ length: TILE_COUNT }, () => ({ gap: Infinity, hits: 0, ids: new Set<string>() }));
   spec.sensors.forEach((_m, i) => {
     const r = snap.readings[i];
@@ -104,16 +111,15 @@ export function buildCameraTiles(snap: SensorSnapshot | null, spec: VehicleSpec,
     for (const h of r.hits) {
       const l = worldToLocal(body.x, body.z, body.rot, h.x, h.z);
       const beyond = dir === 'front' ? l.z - hl : -l.z - hl;
-      if (beyond < 0 || Math.abs(l.x) > half) continue;
+      if (beyond < -TILE_CORNER || Math.abs(l.x) > half) continue;
       const bi = Math.min(TILE_COUNT - 1, Math.max(0, Math.floor(((half - l.x) / (2 * half)) * TILE_COUNT)));
       const b = bins[bi];
       b.hits++;
       b.ids.add(h.colliderId);
-      if (beyond < b.gap) b.gap = beyond;
+      if (Math.max(0, beyond) < b.gap) b.gap = Math.max(0, beyond);
     }
   });
   const out: ObstacleZone[] = [];
-  const w = (2 * half) / TILE_COUNT;
   bins.forEach((b, i) => {
     if (b.hits === 0 || b.gap > range) return;
     const level = proximityLevel(b.gap, range, critical);

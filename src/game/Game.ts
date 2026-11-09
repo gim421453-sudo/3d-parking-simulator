@@ -48,7 +48,7 @@ import { drawNavMap } from '../nav/navView';
 import { SHIFTER_ORDER } from '../ui/shifter';
 import { shiftGear, type ShiftDecision } from '../vehicle/transmission';
 import { mapGamepad } from './gamepad';
-import { MirrorSystem } from './mirrors';
+import { MirrorOverlay, MirrorSystem } from './mirrors';
 import { exportVehicleGlb } from './devGlb';
 import { proximityLevel, type ProximityLevel } from '../sensors/sensorSystem';
 import { applyGlbVisual, createCarModel, type CarModel } from '../vehicle/carModel';
@@ -124,6 +124,7 @@ export class Game {
   private navAcc = 0;
   private destIndex = 0;
   readonly mirrors = new MirrorSystem();
+  readonly mirrorOverlay = new MirrorOverlay();
   private assistCamAcc = 0;
   private assistLastCamera = '';
 
@@ -415,6 +416,7 @@ export class Game {
     this.mech.reset();
     if (map.mech && this.missionDef?.kind === 'mech-out') this.mech.presetStored(this.spec, this.car);
     this.mechPanel.setVisible(!!map.mech);
+    this.hud.setOn('mirrorToggle', this.settings.thirdMirror);
     this.lightMode = 'auto'; // 어두운 곳(지하)에서는 자동으로 하향등
     this.levelPitch = 0;
     this.lastV = 0;
@@ -572,6 +574,12 @@ export class Game {
         if (i >= 0 && i < SHIFTER_ORDER.length) this.requestShift(SHIFTER_ORDER[i]);
         break;
       }
+      case 'mirrorToggle':
+        this.settings.thirdMirror = !this.settings.thirdMirror;
+        saveSettings(this.settings);
+        this.hud.setOn('mirrorToggle', this.settings.thirdMirror);
+        this.hud.toast(this.settings.thirdMirror ? '3인칭 미러 ON' : '3인칭 미러 OFF');
+        break;
       case 'mechExit':
       case 'mechStart':
       case 'mechRetrieve':
@@ -1005,6 +1013,12 @@ export class Game {
     this.rig.frontCamera.aspect = w / h;
     this.rig.frontCamera.updateProjectionMatrix();
     this.renderer.render(this.scene, this.rig.active);
+    // 3인칭 미러(좌/룸/우): 설정이 켜져 있고 3인칭일 때만 렌더 (OFF 이면 거울 렌더 자체를 하지 않는다). 1인칭 실내 미러와 겹치지 않는다
+    if (!firstPerson && this.settings.thirdMirror && this.model?.mirrors && this.state === 'playing') {
+      const fps = this.settings.quality === 'low' ? 10 : Math.min(15, this.settings.mirrorFps > 0 ? this.settings.mirrorFps : 10);
+      this.mirrors.update(this.renderer, this.scene, this.model, pose, this.spec, dt, fps);
+      this.mirrorOverlay.draw(this.renderer, this.mirrors.textures(), w, h);
+    }
 
     this.hud.renderWheel();
     // HUD / 미니맵 / 센서 화면은 낮은 빈도로 갱신
@@ -1377,6 +1391,7 @@ export class Game {
     this.assistPanel.drawWarnLines({
       camera: cam,
       y: gy,
+      warn: this.settings.sensorEnabled && this.spec.assist.virtualSurround3D ? buildWarnLines(this.sensorSnap, obbOf(this.car, this.spec), this.settings.sensorRange, this.settings.sensorCritical) : [],
       path: this.settings.assistGuides
         ? {
             pose,

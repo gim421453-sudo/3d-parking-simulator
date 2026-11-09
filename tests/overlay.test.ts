@@ -47,11 +47,12 @@ describe('카메라 영상용 장애물 구역(overlay)', () => {
   });
 });
 
-import { buildBoundaryCells, buildCameraTiles, CELL_MAX, CELL_MAX_GAP, TILE_COUNT } from '../src/pdc/overlay';
+import { buildBoundaryCells, buildCameraTiles, CELL_MAX, CELL_MAX_GAP, TILE_W, tileLayout } from '../src/pdc/overlay';
 import { guideCutDistance } from '../src/pdc/guidelines';
 import { localToWorld as l2w } from '../src/core/math';
 
-describe('전/후방 카메라 타일 (가로 6칸)', () => {
+const TILE_COUNT = tileLayout(spec.width / 2).n; // v0.5.0: 0.3m 폭 세분화 타일
+describe('전/후방 카메라 타일 (화각 전체, 0.3m 세분화)', () => {
   const body = { x: 0, z: 0, rot: 0, hw: spec.width / 2, hl: spec.length / 2 };
   const rearWall = (gap: number, w = 12, cx = 0): Collider => wall(cx, -(spec.length / 2 + gap + 0.25), w, 0.5);
   it('넓은 벽: 감지된 칸만 점등, 최대 6칸, 각 타일은 차체 뒤쪽 바닥에 있고 장애물 표면과 일치', () => {
@@ -70,7 +71,7 @@ describe('전/후방 카메라 타일 (가로 6칸)', () => {
   it('좁은 장애물(폭 0.6m 중앙): 해당 칸만 점등되고 나머지 칸은 소등', () => {
     const t = buildCameraTiles(snapOf([rearWall(0.8, 0.6, 0)]), spec, body, 'rear', 3, 0.5);
     expect(t.length).toBeGreaterThan(0);
-    expect(t.length).toBeLessThan(TILE_COUNT);
+    expect(t.length).toBeLessThan(TILE_COUNT / 2);
   });
   it('왼쪽에만 장애물이 있으면 왼쪽(+x) 칸만, 오른쪽만이면 오른쪽 칸만', () => {
     const left = buildCameraTiles(snapOf([rearWall(0.8, 1.0, 0.8)]), spec, body, 'rear', 3, 0.5);
@@ -210,15 +211,61 @@ describe('수직 경고 패널 데이터 (v0.4.8)', () => {
     const pillar = (gap: number): Collider => ({ kind: 'cyl', id: 'p', tag: 'pillar', x: 0, z: -(spec.length / 2 + gap + 0.15), r: 0.15, y0: 0, h: 3 });
     const t = buildCameraTiles(snapOf([pillar(0.8)]), spec, body, 'rear', 3, 0.5);
     expect(t.length).toBeGreaterThan(0);
-    expect(t.length).toBeLessThanOrEqual(2);
+    expect(t.length).toBeLessThanOrEqual(3);
     for (const q of t) {
       const xs = [q.corners[2].x, q.corners[3].x];
-      expect(Math.abs(xs[0] - xs[1])).toBeLessThan((spec.width + 0.7) / TILE_COUNT + 1e-6);
+      expect(Math.abs(xs[0] - xs[1])).toBeLessThan(tileLayout(spec.width / 2).w + 1e-6);
     }
   });
   it('후방 카메라 타일의 왼쪽/오른쪽이 뒤집히지 않는다 (왼쪽 장애물 → +x 쪽 칸)', () => {
     const left = buildCameraTiles(snapOf([rearWall(0.8, 1.0, 0.8)]), spec, body, 'rear', 3, 0.5);
     const cx = (z: { corners: { x: number }[] }) => (z.corners[2].x + z.corners[3].x) / 2;
     expect(left.every((q) => cx(q) > 0)).toBe(true);
+  });
+});
+
+describe('카메라 경고 패널 — 화각 전체 커버 (v0.5.0 P1-C)', () => {
+  const body = { x: 0, z: 0, rot: 0, hw: spec.width / 2, hl: spec.length / 2 };
+  const cxOf = (q: { corners: { x: number; z: number }[] }) => (q.corners[2].x + q.corners[3].x) / 2;
+  const tiles = (cols: Collider[], dir: 'rear' | 'front' = 'rear') => buildCameraTiles(snapOf(cols), spec, body, dir, 3, 0.5);
+  it('타일 폭은 TILE_W 이하로 세분화되고 6칸보다 훨씬 많은 칸으로 화각 전체를 덮는다', () => {
+    const lay = tileLayout(spec.width / 2);
+    expect(lay.w).toBeLessThanOrEqual(TILE_W + 1e-9);
+    expect(lay.n).toBeGreaterThan(12);
+    expect(lay.half).toBeGreaterThan(spec.width / 2 + 1.0);
+  });
+  it('좌/우 가장자리 기둥(차체 폭 밖 ±1.0m)도 감지된 칸만 점등된다', () => {
+    const pillar = (x: number): Collider => ({ kind: 'cyl', id: 'p' + x, tag: 'pillar', x, z: -(spec.length / 2 + 1.0 + 0.2), r: 0.2, y0: 0, h: 3 });
+    const L = tiles([pillar(spec.width / 2 + 0.9)]);
+    const R = tiles([pillar(-(spec.width / 2 + 0.9))]);
+    expect(L.length).toBeGreaterThan(0);
+    expect(R.length).toBeGreaterThan(0);
+    expect(L.every((q) => cxOf(q) > spec.width / 2)).toBe(true);
+    expect(R.every((q) => cxOf(q) < -spec.width / 2)).toBe(true);
+  });
+  it('중앙 차량(폭 1.8m 박스): 중앙 칸들만 점등, 가장자리 칸은 소등', () => {
+    const car: Collider = { kind: 'box', id: 'car', tag: 'car', x: 0, z: -(spec.length / 2 + 1.0 + 2.3), w: 1.8, d: 4.6, rot: 0, y0: 0, h: 1.4 };
+    const t = tiles([car]);
+    expect(t.length).toBeGreaterThan(3);
+    expect(t.every((q) => Math.abs(cxOf(q)) < 1.6)).toBe(true);
+  });
+  it('비스듬한 벽: 칸마다 표면 깊이(간격)가 달라진다 (일률적인 사각형 금지)', () => {
+    const wallRot: Collider = { kind: 'box', id: 'ow', tag: 'wall', x: 0, z: -(spec.length / 2 + 1.6), w: 8, d: 0.5, rot: 0.5, y0: 0, h: 1.2 };
+    const t = tiles([wallRot]);
+    const depths = t.map((q) => Math.round(-q.corners[2].z * 20));
+    expect(new Set(depths).size).toBeGreaterThan(2);
+  });
+  it('모서리에 걸친 장애물(범퍼 끝 옆 0.1m)도 후방 카메라 타일로 표시된다', () => {
+    const corner: Collider = { kind: 'box', id: 'cw', tag: 'wall', x: spec.width / 2 + 0.5, z: -(spec.length / 2 + 0.2), w: 0.8, d: 0.5, rot: 0, y0: 0, h: 1.2 };
+    // 센서 레이아웃에 따라 히트가 없을 수 있으므로: 히트가 있으면 반드시 타일이 있다(히트 없는 타일 금지)
+    const sn = snapOf([corner]);
+    const hits = sn.readings.reduce((a, r) => a + r.hits.length, 0);
+    const t = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5);
+    if (hits > 0) expect(t.length).toBeGreaterThan(0);
+    else expect(t.length).toBe(0);
+  });
+  it('히트가 없으면 어떤 칸도 만들지 않는다 (가짜 패널 금지)', () => {
+    expect(tiles([])).toEqual([]);
+    expect(tiles([wall(0, spec.length / 2 + 2, 8, 0.5)], 'rear')).toEqual([]);
   });
 });

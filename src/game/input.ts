@@ -26,6 +26,7 @@ export type Action =
   | 'soundToggle'
   | 'pdcSurround'
   | 'pdcSensor'
+  | 'mirrorToggle'
   | 'mechExit'
   | 'mechStart'
   | 'mechRetrieve'
@@ -58,6 +59,7 @@ export const KEY_ACTIONS: Record<string, Action> = {
   KeyT: 'reset',
   Escape: 'pause',
   KeyB: 'assistToggle',
+  KeyU: 'mirrorToggle',
   KeyG: 'mechExit',
   KeyJ: 'mechStart',
   KeyK: 'mechRetrieve',

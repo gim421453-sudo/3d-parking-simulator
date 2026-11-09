@@ -8,6 +8,7 @@ export const ICON = {
   pause: svg('<path d="M8 5v14M16 5v14"/>'),
   restart: svg('<path d="M4.5 12a7.5 7.5 0 1 0 2.4-5.5"/><path d="M4 4v4h4"/>'),
   reset: svg('<path d="M12 4v3M12 17v3M4 12h3M17 12h3"/><circle cx="12" cy="12" r="3.2"/>'),
+  mirror: svg('<path d="M5 7.5c0-1.4 1.1-2.5 2.5-2.5h9C17.9 5 19 6.1 19 7.5v6c0 1.4-1.1 2.5-2.5 2.5h-9C6.1 16 5 14.9 5 13.5z"/><path d="M12 16v3.5M8.5 19.5h7"/><path d="M8 12l3-3"/>'),
   sensor: svg('<path d="M12 18v2"/><path d="M8.5 15.5a5 5 0 0 1 7 0"/><path d="M5.5 12.5a9 9 0 0 1 13 0"/><path d="M2.8 9.6a13 13 0 0 1 18.4 0"/>'),
   volume: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
   volumeOff: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),

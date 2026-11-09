@@ -97,11 +97,11 @@ async function waitServer(url, tries = 50) {
   await shot('02-controls');
   await page.click('#back');
   await page.click('#m-car');
-  check('차량 선택 화면 (기본 3종 + M4/X6 프로필 + GLB 시험)', (await page.locator('#cars .option').count()) === 6);
+  check('차량 선택 화면 (기본 3종 + M4/X6 프로필 + GLB 시험 + 실차형 GLB 컨셉 쿠페)', (await page.locator('#cars .option').count()) === 7);
   await shot('03-vehicles');
   await page.click('#back');
   await page.click('#m-map');
-  check('맵 선택 화면 (기존 4종 + v0.4.9 신규 4종 = 8개)', (await page.locator('#maps .option').count()) === 8);
+  check('맵 선택 화면 (기존 4종 + v0.4.9 신규 4종 + v0.5.0 기계식 = 9개)', (await page.locator('#maps .option').count()) === 9);
   await sleep(400);
   await shot('04-maps');
   await page.click('#back');
@@ -2383,6 +2383,150 @@ async function waitServer(url, tries = 50) {
     await sleep(800);
     await pg.screenshot({ path: path.join(OUT, '124-v049-cabin-cluster-garage5.png') });
     await ctx49.close();
+  }
+
+  // ================= v0.5.0 =================
+  {
+    const ctx50 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const pg = await ctx50.newPage();
+    pg.on('pageerror', (e) => errors.push('v050 pageerror: ' + e.message));
+    await pg.addInitScript(() => { if (!localStorage.getItem('parksim.v1.settings')) localStorage.setItem('parksim.v1.settings', JSON.stringify({ quality: 'low', resolutionScale: 0.6, shadows: 'off', vehicleId: 'sedan', assistCameraFps: 60, infoAutoHide: false })); });
+    await pg.goto(URL);
+    await pg.waitForSelector('#m-start');
+    await pg.click('#m-start');
+    await pg.waitForSelector('#hud:not(.hidden)', { timeout: 20000 });
+    await sleep(1200);
+    const Y = (fn, arg) => pg.evaluate(fn, arg);
+    const yuntil = (fn, arg, timeout = 120000) => pg.waitForFunction(fn, arg, { timeout, polling: 100 }).then(() => true).catch(() => false);
+    const loadMap = async (mapId, missionId, veh) => {
+      await Y(([mapId, missionId, veh]) => { const G = window.__game; G.updateSettings({ mapId, missionId, vehicleId: veh }); G.startRun(); }, [mapId, missionId, veh]);
+      await yuntil((id) => window.__game.map.id === id && window.__game.state === 'playing', mapId, 30000);
+      await sleep(1000);
+    };
+    const mst = () => Y(() => { const G = window.__game; return { x: G.car.x, z: G.car.z, y: G.car.y, v: G.car.v, phase: G.mech.m.phase, door: G.mech.m.door, pY: G.mech.m.palletY, pZ: G.mech.m.palletZ, hits: G.mech.stopperHits, mission: G.mission && G.mission.status, state: G.state, msg: G.mech.m.message }; });
+
+    // ---- P0-A: 실차형 GLB(컨셉 쿠페) 실제 주행 모델 ----
+    await loadMap('lot', 'free', 'concept-coupe');
+    const glbOk = await yuntil(() => { const m = window.__game.model; return window.__game.spec.visual.kind === 'glb' && m.rollers.length === 4 && m.frontPivots.length === 2; }, undefined, 40000);
+    check('v0.5.0 실차형 GLB(컨셉 쿠페) 로드: 바퀴 4개 회전축 + 앞바퀴 조향 피벗 2개', glbOk);
+    await Y(() => { const G = window.__game; G.car.steer = 0.4; G.car.v = 3; G.car.gear = 'D'; G.car.handbrake = false; G.debugInput = { throttle: 0.3, brake: 0, steerInput: 0.4 }; });
+    await sleep(1200);
+    const wh = await Y(() => { const m = window.__game.model; return { steer: m.frontPivots.map((p) => p.rotation.y), roll: m.rollers.map((r) => r.rotation.x) }; });
+    check('v0.5.0 GLB 앞바퀴가 조향각만큼 돌고(좌/우 같은 부호), 4바퀴가 회전한다', wh.steer.every((v) => Math.abs(v) > 0.05 && Math.sign(v) === Math.sign(wh.steer[0])) && wh.roll.every((r) => Math.abs(r) > 0.01), JSON.stringify(wh));
+    await Y(() => { const G = window.__game; G.debugInput = { throttle: 0, brake: 1, steerInput: 0.4 }; });
+    await yuntil(() => Math.abs(window.__game.car.v) < 0.02, undefined, 30000);
+    const r1 = await Y(() => window.__game.model.rollers.map((r) => r.rotation.x));
+    await sleep(600);
+    const r2 = await Y(() => window.__game.model.rollers.map((r) => r.rotation.x));
+    const st2 = await Y(() => window.__game.model.frontPivots.map((p) => p.rotation.y));
+    check('v0.5.0 정차하면 바퀴 회전이 멈추고 조향각은 유지된다', r1.every((v, i) => Math.abs(v - r2[i]) < 1e-6) && st2.every((v) => Math.abs(v) > 0.05), JSON.stringify({ r1, r2, st2 }));
+    await Y(() => { window.__game.debugInput = null; });
+
+    // ---- P2-F: 3인칭 미러 ON/OFF (기본 OFF, 실제 렌더, OFF 이면 렌더 중단) ----
+    await loadMap('lot', 'free', 'sedan');
+    await Y(() => { const G = window.__game; G.settings.thirdMirror = false; G.rig.setMode('chase', G.poseNow()); });
+    await sleep(800);
+    const m0 = await Y(() => ({ r: window.__game.mirrors.renders, d: window.__game.mirrorOverlay.draws, on: window.__game.settings.thirdMirror }));
+    await sleep(900);
+    const m0b = await Y(() => ({ r: window.__game.mirrors.renders, d: window.__game.mirrorOverlay.draws }));
+    check('v0.5.0 3인칭 미러: 기본 OFF 이고 OFF 동안 거울 렌더/오버레이 호출이 없다', m0.on === false && m0b.r === m0.r && m0b.d === m0.d, JSON.stringify({ m0, m0b }));
+    await pg.keyboard.press('KeyU');
+    await sleep(1800);
+    const m1 = await Y(() => ({ r: window.__game.mirrors.renders, d: window.__game.mirrorOverlay.draws, on: window.__game.settings.thirdMirror, btn: document.querySelector('[data-a="mirrorToggle"]').classList.contains('on'), rects: window.__game.mirrorOverlay.lastRects }));
+    check('v0.5.0 3인칭 미러 ON: 좌/룸/우 거울이 실제로 렌더되고 버튼이 켜진 상태로 표시', m1.on && m1.r > m0b.r && m1.d > m0b.d && m1.btn && Object.keys(m1.rects).length === 3, JSON.stringify(m1));
+    await pg.screenshot({ path: path.join(OUT, '130-v050-third-mirror-on.png') });
+    // 기어 변경 후에도 유지
+    await Y(() => { window.__game.requestShift('R'); });
+    await sleep(600);
+    const keep = await Y(() => window.__game.settings.thirdMirror);
+    check('v0.5.0 3인칭 미러: 기어 변경 후에도 상태 유지, 설정이 저장됨', keep === true && JSON.parse(localStorage.getItem('parksim.v1.settings')).thirdMirror === true);
+    await Y(() => { window.__game.rig.setMode('driver', window.__game.poseNow()); });
+    await sleep(600);
+    const dOv = await Y(() => window.__game.mirrorOverlay.draws);
+    await sleep(900);
+    const dOv2 = await Y(() => window.__game.mirrorOverlay.draws);
+    check('v0.5.0 1인칭에서는 3인칭 미러 오버레이를 그리지 않는다(실내 미러와 충돌 없음)', dOv2 === dOv);
+    await Y(() => { window.__game.rig.setMode('chase', window.__game.poseNow()); });
+    await pg.keyboard.press('KeyU');
+    await sleep(700);
+    const o0 = await Y(() => window.__game.mirrors.renders);
+    await sleep(1000);
+    const o1 = await Y(() => ({ r: window.__game.mirrors.renders, on: window.__game.settings.thirdMirror }));
+    check('v0.5.0 3인칭 미러 OFF: 거울 렌더가 멈춘다', o1.on === false && o1.r === o0);
+
+    // ---- P1-D: 서라운드 얇은 거리색 경고선 (감지된 곳만) ----
+    await loadMap('lot', 'free', 'suv-x6');
+    const place = (cx, cz, h, gear) => Y(({ cx, cz, h, gear }) => { const G = window.__game; const c = G.car; const off = G.spec.length / 2 - G.spec.rearOverhang; c.x = cx - Math.sin(h) * off; c.z = cz - Math.cos(h) * off; c.heading = h; c.v = 0; c.steer = 0; c.gear = gear; c.handbrake = true; G.hud.wheel.reset(); }, { cx, cz, h, gear });
+    await Y(() => { const G = window.__game; G.colliders = G.colliders.filter((c) => !String(c.id).startsWith('t-')); G.rig.colliders = G.colliders; });
+    await place(0, 10, 0, 'R');
+    await yuntil(() => window.__game.surPathDbg && window.__game.surPathDbg.renders > 4, undefined, 40000);
+    await sleep(900);
+    const w0 = await Y(() => ({ warn: window.__game.assistPanel.debugSurWarn, white: window.__game.assistPanel.debugSurLines }));
+    check('v0.5.0 서라운드: 장애물이 없으면 색 경고선 0개(흰 예측선 2개만)', w0.warn === 0 && w0.white === 2, JSON.stringify(w0));
+    const L50 = await Y(() => window.__game.spec.length);
+    await Y(([L]) => { const c = { kind: 'box', id: 't-w50', tag: 'wall', x: 0, z: 10 - L / 2 - 1.1 - 0.25, w: 6, d: 0.5, rot: 0, y0: 0, h: 1.4 }; window.__game.colliders.push(c); window.__game.colliderById.set(c.id, c); }, [L50]);
+    await sleep(1500);
+    const w1 = await Y(() => ({ warn: window.__game.assistPanel.debugSurWarn, white: window.__game.assistPanel.debugSurLines }));
+    check('v0.5.0 서라운드: 후방 장애물이 감지되면 얇은 색 경고선이 생기고 흰 예측선 2개는 그대로', w1.warn > 0 && w1.warn <= 12 && w1.white === 2, JSON.stringify(w1));
+    await pg.screenshot({ path: path.join(OUT, '131-v050-surround-warn-lines.png') });
+    await Y(() => { const G = window.__game; G.colliders = G.colliders.filter((c) => !String(c.id).startsWith('t-')); G.rig.colliders = G.colliders; });
+
+    // ---- P0-B: 기계식 주차장 입고(정지턱→하차→입고→승강→저장)/출고/허용치 거부 ----
+    await loadMap('mechpark', 'mech-in-1', 'sedan');
+    check('v0.5.0 기계식 맵: 기계 장치/미러/리브가 생성되고 패널이 보인다', await Y(() => !!window.__game.mechBuilt && window.__game.mechBuilt.ribCount > 100 && !document.getElementById('mech-panel').classList.contains('hidden')));
+    await Y(() => { const G = window.__game; G.car.gear = 'D'; G.car.handbrake = false; G.debugInput = { throttle: 0.5, brake: 0, steerInput: 0 }; });
+    await yuntil(() => window.__game.mech.stopperHits > 0, undefined, 120000);
+    await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+    await yuntil(() => Math.abs(window.__game.car.v) < 0.05, undefined, 60000);
+    await Y(() => { const G = window.__game; G.debugInput = null; G.car.gear = 'P'; G.car.handbrake = true; });
+    const pre = await Y(() => window.__game.mech.items.filter((c) => !c.ok).map((c) => c.key));
+    check('v0.5.0 기계식: 정지턱에서 멈추면 정렬/홈/가이드/정지턱 조건이 충족되고 남은 조건은 운전자 하차뿐', pre.length === 1 && pre[0] === 'occupant', JSON.stringify(pre));
+    await pg.keyboard.press('KeyJ'); await sleep(300);
+    check('v0.5.0 기계식: 하차하지 않으면 입고가 거부된다', (await mst()).phase === 'waiting');
+    await pg.keyboard.press('KeyG'); await sleep(300);
+    await pg.keyboard.press('KeyJ');
+    await yuntil(() => window.__game.mech.m.phase === 'toBay', undefined, 60000);
+    const closed = await mst();
+    check('v0.5.0 기계식: 문이 완전히 닫힌 뒤에만 승강이 시작된다(인터록)', closed.door === 0 && closed.pY < 0.01);
+    await yuntil(() => window.__game.mech.m.palletY > 1.5, undefined, 60000);
+    const lift = await mst();
+    check('v0.5.0 기계식: 승강 중 차량이 팔레트와 함께 올라간다(상대 위치 고정)', Math.abs(lift.y - lift.pY) < 1e-6 && Math.abs(lift.z - lift.pZ) < 0.3);
+    await pg.screenshot({ path: path.join(OUT, '132-v050-mech-lifting.png') });
+    await yuntil(() => window.__game.state === 'result', undefined, 120000);
+    const done = await mst();
+    check('v0.5.0 기계식 입고 미션 성공(저장 완료)', done.mission === 'success' && done.phase === 'stored' && done.y === 3, JSON.stringify(done));
+    // 출고
+    await loadMap('mechpark', 'mech-out-1', 'sedan');
+    await pg.keyboard.press('KeyK');
+    await yuntil(() => window.__game.mech.m.phase === 'exit', undefined, 120000);
+    const ex = await mst();
+    check('v0.5.0 기계식 출고: 팔레트가 내려와 문이 열리고 차량이 지상으로 복귀', ex.y === 0 && ex.pZ === 0 && ex.door === 1 && Math.abs(ex.z) < 0.01, JSON.stringify(ex));
+    await pg.keyboard.press('KeyG'); await sleep(300);
+    await Y(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'R'; G.debugInput = { throttle: 0.6, brake: 0, steerInput: 0 }; });
+    await yuntil(() => window.__game.car.x < -25.0, undefined, 120000);
+    await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+    await yuntil(() => window.__game.state === 'result', undefined, 60000);
+    check('v0.5.0 기계식 출고 미션 성공(후진 출차 후 출구 구역 정차)', (await mst()).mission === 'success');
+    // 허용치 초과 거부
+    await loadMap('mechpark', 'mech-in-1', 'concept-coupe');
+    await Y(() => { const G = window.__game; G.car.x = -3.45; G.car.z = 0; G.car.heading = Math.PI / 2; G.car.gear = 'P'; G.car.handbrake = true; G.car.v = 0; });
+    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ'); await sleep(400);
+    const ov = await mst();
+    check('v0.5.0 기계식: 차폭 초과 차량(2.34m)은 입고가 거부되고 이유가 표시된다', ov.phase === 'waiting' && /차폭/.test(ov.msg), ov.msg);
+    await loadMap('mechpark', 'mech-in-1', 'suv');
+    await Y(() => { const G = window.__game; G.car.x = -3.5; G.car.z = 0; G.car.heading = Math.PI / 2; G.car.gear = 'P'; G.car.handbrake = true; G.car.v = 0; });
+    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ'); await sleep(400);
+    const ov2 = await mst();
+    check('v0.5.0 기계식: SUV(높이 1.72m > 1.55m)는 높이 초과로 거부된다', ov2.phase === 'waiting' && /차고/.test(ov2.msg), ov2.msg);
+    // 전방 거울(Reflector) 실제 갱신
+    await loadMap('mechpark', 'mech-in-1', 'sedan');
+    await sleep(1500);
+    const mr = await Y(() => ({ n: window.__game.mechBuilt.mirrorRenders }));
+    await sleep(1200);
+    const mr2 = await Y(() => ({ n: window.__game.mechBuilt.mirrorRenders }));
+    check('v0.5.0 기계식 전방 확인 거울: 실제 Three.js 반사 렌더가 간헐(제한 FPS)로 갱신된다', mr2.n > mr.n && mr2.n - mr.n < 40, JSON.stringify({ mr, mr2 }));
+    await pg.screenshot({ path: path.join(OUT, '133-v050-mech-entry.png') });
+    await ctx50.close();
   }
 
   // ---------- 10. 오류 ----------
