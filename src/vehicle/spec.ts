@@ -220,6 +220,29 @@ export const VEHICLE_EXTRAS: VehicleSpec[] = [
   },
 ];
 /**
+ * v0.5.0: 외부에서 확보한 **실차형 GLB** (Khronos glTF-Sample-Assets "Car Concept", CC-BY-4.0, 원본 Unity Fan CC0).
+ * 출처/라이선스/변경 내역: docs/ASSETS.md, public/models/LICENSE-concept-coupe.md. BMW 원본이 아니다(BMW 모델은 인증 필요로 미확보).
+ * 크기는 GLB 실측(길이 4.357, 미러 포함 폭 2.34, 높이 1.149, 축거 2.80, 타이어 반경 0.384)에 맞췄고 충돌체/센서/카메라는 이 제원을 기준으로 한다.
+ */
+export const CONCEPT_COUPE: VehicleSpec = {
+  ...make({
+    id: 'concept-coupe',
+    name: '컨셉 스포츠 쿠페 (실차형 GLB · CC BY)',
+    desc: '외부 실차형 GLB 모델(Khronos Car Concept, CC-BY 4.0). 앞바퀴 조향/4바퀴 회전/램프 연동. BMW 원본 아님.',
+    length: 4.357,
+    width: 2.34,
+    height: 1.149,
+    wheelbase: 2.8,
+    rearOverhang: 0.626,
+    color: 0xaa0000,
+    body: 'sedan',
+    wheelRadius: 0.384,
+  }),
+  visual: { kind: 'glb', body: 'sedan', url: './models/concept-coupe.glb', scale: 1, offset: { x: 0, y: 0, z: -0.2385 }, rotY: 0 },
+  plate: '123가 4567',
+};
+
+/**
  * 차량 2대 프로필 (v0.4.1). 외형은 승인된 에셋이 없어 **임시 절차 모델**이다(Blender 작업 후 GLB 로 교체).
  * - coupe-m4: M4(G82) 계열 제원. 후방카메라 전용 (전방카메라/서라운드/3D 시점 없음).
  * - suv-x6: X6(G06) xDrive40i 계열 제원. 전/후방 + 가상 3D 서라운드.
@@ -271,7 +294,7 @@ export const PROFILE_VEHICLES: VehicleSpec[] = [
   },
 ];
 
-export const SELECTABLE_VEHICLES: VehicleSpec[] = [...VEHICLES, ...PROFILE_VEHICLES, ...VEHICLE_EXTRAS];
+export const SELECTABLE_VEHICLES: VehicleSpec[] = [...VEHICLES, ...PROFILE_VEHICLES, ...VEHICLE_EXTRAS, CONCEPT_COUPE];
 
 export const getVehicle = (id: string): VehicleSpec => SELECTABLE_VEHICLES.find((v) => v.id === id) ?? VEHICLES[1];
 

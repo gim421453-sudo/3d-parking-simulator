@@ -432,7 +432,8 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       const l = model.lights;
       if (!l) return;
       const L = s.lighting;
-      l.head.emissiveIntensity = L.high ? 2.6 : L.low ? 1.6 : 0;
+      // GLB 에 별도 DRL 재질(Lamp_DRL)이 없으면 주간주행등은 헤드램프 재질을 약하게 켜서 표현한다
+      l.head.emissiveIntensity = L.high ? 2.6 : L.low ? 1.6 : root.userData.glbNoDrl ? L.drl * 0.9 : 0;
       l.drl.emissiveIntensity = L.drl * 2.2;
       l.tail.emissiveIntensity = s.brake ? 2.4 : L.tail > 0 ? 0.8 : 0.06; // 브레이크등은 미등보다 더 밝다
       l.rev.emissiveIntensity = s.reverse ? 2.0 : 0;
@@ -519,6 +520,8 @@ export function attachGlbScene(
       } else mesh.material = l[key]; // 같은 이름의 재질은 하나로 공유
     }
   });
+  model.root.userData.glbNoDrl = !lampSeen.has('drl');
+  model.root.userData.glbLamps = [...lampSeen]; // 테스트/문서: GLB 에서 실제로 연결된 램프 재질
   // 기존 프로시저럴 차체 제거 (번호판은 보존해 GLB 외곽에 다시 부착)
   const plates = model.bodyGroup.children.filter((c) => c.name === 'Plate_Front' || c.name === 'Plate_Rear');
   for (const c of [...model.bodyGroup.children]) model.bodyGroup.remove(c);

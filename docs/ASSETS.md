@@ -22,6 +22,7 @@
 | 파일 | 이름 | 제작자 | 출처 URL | 라이선스 | 저작자 표시 필요 | 수정 여부 | 추가일 |
 |---|---|---|---|---|---|---|---|
 | public/models/sedan-test.glb | 시험용 세단 | 이 프로젝트(자체 생성) | - | 프로젝트 자체 | 불필요 | - | v0.4 |
+| public/models/concept-coupe.glb | Car Concept (컨셉 스포츠 쿠페) | Khronos Group (기반 모델 "Free Concept Car 004": Unity Fan, CC0) | https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept | **CC-BY-4.0** (원본 CC0 기반, 로고/상표 제외) | **필요** (앱 크레딧·이 표·`public/models/LICENSE-concept-coupe.md`) | 있음 — 실내 제거·바퀴 재구성·램프 재질 개명·단순화(`scripts/prepare-car-glb.mjs`) | v0.5.0 |
 
 - CC-BY 계열은 저작자 표시를 앱 내 "크레딧" 또는 이 문서에 남겨야 합니다.
 - "개인/비상업적 사용만 허용"·"재배포 금지" 에셋은 GitHub Pages/APK 배포에 쓸 수 없습니다.

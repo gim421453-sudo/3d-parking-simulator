@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { createCarModel, type CarModel } from '../vehicle/carModel';
+import { applyGlbVisual, createCarModel, type CarModel } from '../vehicle/carModel';
 import type { VehicleSpec } from '../vehicle/spec';
 
 /**
@@ -75,17 +75,21 @@ export class Showroom {
     this.model = createCarModel(spec, { blobTexture: this.blob });
     this.model.root.rotation.y = 0.6 + this.t * 0.3;
     this.scene.add(this.model.root);
-    // 조명은 켠 상태로 보여 준다
-    this.model.setState({
-      steer: 0,
-      roll: 0,
-      lighting: { effective: 'position', drl: 1, tail: 1, low: false, high: false },
-      levelPitch: 0,
-      brake: false,
-      reverse: false,
-      signalLeft: false,
-      signalRight: false,
-    });
+    // 조명은 켠 상태로 보여 준다 (GLB 차량은 로드가 끝난 뒤에도 같은 상태를 다시 적용)
+    const model = this.model;
+    const apply = (): void =>
+      model.setState({
+        steer: 0,
+        roll: 0,
+        lighting: { effective: 'position', drl: 1, tail: 1, low: false, high: false },
+        levelPitch: 0,
+        brake: false,
+        reverse: false,
+        signalLeft: false,
+        signalRight: false,
+      });
+    apply();
+    if (spec.visual.kind === 'glb') void applyGlbVisual(model, spec).then((ok) => ok && apply());
   }
 
   setAspect(w: number, h: number): void {
