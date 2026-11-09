@@ -2479,6 +2479,7 @@ async function waitServer(url, tries = 50) {
     await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
     await yuntil(() => Math.abs(window.__game.car.v) < 0.05, undefined, 60000);
     await Y(() => { const G = window.__game; G.debugInput = null; G.car.gear = 'P'; G.car.handbrake = true; });
+    await sleep(400);
     const pre = await Y(() => window.__game.mech.items.filter((c) => !c.ok).map((c) => c.key));
     check('v0.5.0 기계식: 정지턱에서 멈추면 정렬/홈/가이드/정지턱 조건이 충족되고 남은 조건은 운전자 하차뿐', pre.length === 1 && pre[0] === 'occupant', JSON.stringify(pre));
     await pg.keyboard.press('KeyJ'); await sleep(300);
