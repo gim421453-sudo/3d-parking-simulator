@@ -7,7 +7,7 @@ import { buildBestRoadGraph, distToCollider, isClear } from '../src/nav/roadGrap
 import { dijkstra, findRoute, simplify } from '../src/nav/router';
 
 describe('도로 그래프 (맵의 실제 충돌체에서 계산)', () => {
-  for (const map of MAPS.filter((m) => !m.terrain)) {
+  for (const map of MAPS.filter((m) => !m.terrain && !m.mech)) {
     describe(map.name, () => {
       const g = buildBestRoadGraph(map);
       const solids = mapColliders(map).filter(colliderIsSolidForCar);

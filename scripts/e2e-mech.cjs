@@ -1,0 +1,41 @@
+/** 기계식 주차장 브라우저 검증: node scripts/e2e-mech.cjs  (dist 필요) → docs/screenshots/v050/mech-*.png + 콘솔 JSON */
+const { chromium } = require('playwright'); const { spawn } = require('child_process');
+const fs = require('fs'); const path = require('path');
+const OUT = path.join(__dirname, '..', 'docs', 'screenshots', 'v050'); fs.mkdirSync(OUT, { recursive: true });
+const veh = process.argv[2] || 'sedan';
+(async () => {
+  const srv = spawn('npx', ['vite', 'preview', '--port', '4211', '--host', '127.0.0.1', '--strictPort'], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 3500));
+  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'] });
+  const p = await (await b.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+  const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
+  await p.addInitScript((v) => localStorage.setItem('parksim.v1.settings', JSON.stringify({ quality: 'medium', resolutionScale: 0.8, shadows: 'off', vehicleId: v, mapId: 'mechpark', missionId: 'mech-in-1' })), veh);
+  await p.goto('http://127.0.0.1:4211/'); await p.waitForSelector('#m-start');
+  await p.click('#m-start');
+  await p.waitForSelector('#hud:not(.hidden)', { timeout: 30000 }).catch(async (e) => { console.log('ERRS', JSON.stringify(errs)); await p.screenshot({ path: path.join(OUT, 'mech-fail.png') }); throw e; }); await p.waitForTimeout(2500);
+  const shot = async (n) => p.screenshot({ path: path.join(OUT, `mech-${n}.png`) });
+  const st = () => p.evaluate(() => { const G = window.__game; return { x: +G.car.x.toFixed(2), z: +G.car.z.toFixed(2), y: +G.car.y.toFixed(2), h: +G.car.heading.toFixed(3), v: +G.car.v.toFixed(2), phase: G.mech.m.phase, locked: G.mech.m.locked, occ: G.mech.m.occupant, door: +G.mech.m.door.toFixed(2), pY: +G.mech.m.palletY.toFixed(2), pZ: +G.mech.m.palletZ.toFixed(2), hits: G.mech.stopperHits, mission: G.mission && G.mission.status, coll: G.collisions }; });
+  const out = { vehicle: veh, log: [] };
+  await shot('01-wait-chase');
+  // 직진 진입: 정지턱에 걸릴 때까지 (게임 상태를 기다림)
+  await p.evaluate(() => { const G = window.__game; G.car.gear = 'D'; G.debugInput = { throttle: 0.5, brake: 0, steerInput: 0 }; });
+  await p.waitForFunction(() => window.__game.car.x > -12, null, { timeout: 90000 }); await shot('02-approach-door');
+  await p.waitForFunction(() => window.__game.car.x > -6.2, null, { timeout: 90000 }); await shot('03-in-door');
+  await p.waitForFunction(() => window.__game.mech.stopperHits > 0, null, { timeout: 90000 });
+  await p.evaluate(() => { const G = window.__game; G.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+  await p.waitForFunction(() => Math.abs(window.__game.car.v) < 0.05, null, { timeout: 60000 });
+  await p.evaluate(() => { const G = window.__game; G.debugInput = null; G.car.gear = 'P'; G.car.handbrake = true; });
+  out.atStopper = await st(); await shot('04-at-stopper');
+  out.checkBefore = await p.evaluate(() => window.__game.mech.items.filter((c) => !c.ok).map((c) => c.key));
+  await p.keyboard.press('KeyG'); await p.waitForTimeout(300);
+  out.checkAfterExit = await p.evaluate(() => window.__game.mech.items.filter((c) => !c.ok).map((c) => c.key));
+  await p.keyboard.press('KeyJ');
+  await p.waitForFunction(() => window.__game.mech.m.phase === 'toBay', null, { timeout: 90000 }); out.doorClosed = await st(); await shot('05-door-closed');
+  await p.waitForFunction(() => window.__game.mech.m.palletY > 2, null, { timeout: 90000 }); out.lifting = await st(); await shot('06-lifting');
+  await p.waitForFunction(() => window.__game.mech.m.phase === 'stored' || window.__game.state === 'result', null, { timeout: 120000 }); out.stored = await st();
+  await p.waitForTimeout(500); await shot('07-stored-or-result');
+  out.state = await p.evaluate(() => window.__game.state);
+  out.errors = errs.slice(0, 8);
+  console.log(JSON.stringify(out, null, 1));
+  await b.close(); srv.kill();
+})().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

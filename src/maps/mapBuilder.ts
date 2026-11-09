@@ -152,6 +152,8 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       case 'drum':
         drums.push(o);
         break;
+      case 'guide':
+        break; // 팔레트 가이드는 이동하는 팔레트 모델(mech/mechBuilder)이 그린다
       case 'lamp': {
         const pole = new THREE.Mesh(poleGeo, lampMat);
         pole.position.set(o.x, 0, o.z);

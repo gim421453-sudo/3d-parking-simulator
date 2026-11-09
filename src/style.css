@@ -362,3 +362,12 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #gear-panel > * { pointer-events: auto; }
 #gear-panel #gear-big { pointer-events: none !important; }
 #gear-panel #shifter { right: auto; bottom: auto; }
+
+/* v0.5.0 기계식 주차 패널 (좌측 컬럼 안) */
+#mech-panel { padding: 9px 12px; font-size: 12px; border-radius: var(--r-md); }
+#mech-panel .mech-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 8px; }
+#mech-panel .mech-btns button { min-height: var(--ctl); font-size: 12px; padding: 0 4px; border-radius: var(--r-sm); border: 1px solid var(--hair-2); background: var(--accent-dim); color: var(--txt); }
+#mech-panel .mech-btns button.estop { background: rgba(229, 55, 47, .25); border-color: rgba(229, 55, 47, .6); }
+#mech-panel .mc-list li[data-ok="0"] b { color: var(--bad); }
+#mech-panel .mc-list li[data-ok="1"] b { color: var(--ok); }
+#mech-panel .mc-list li i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

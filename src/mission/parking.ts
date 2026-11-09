@@ -1,6 +1,6 @@
 import { DEG, angleDiff, localToWorld, normAngle, worldToLocal, clamp } from '../core/math';
 
-export type MissionKind = 'perpendicular-front' | 'perpendicular-reverse' | 'parallel';
+export type MissionKind = 'perpendicular-front' | 'perpendicular-reverse' | 'parallel' | 'mech-in' | 'mech-out';
 
 /** 주차 구획. (x,z)=중심, w=가로(진행 방향에 수직), l=세로(진행 방향), dir=앞으로 주차할 때 차량 앞이 향하는 heading */
 export interface ParkingSlot {
@@ -31,6 +31,8 @@ export const HEADING_TOLERANCE: Record<MissionKind, number> = {
   'perpendicular-front': 10 * DEG,
   'perpendicular-reverse': 10 * DEG,
   parallel: 8 * DEG,
+  'mech-in': 10 * DEG,
+  'mech-out': 12 * DEG,
 };
 export const CORNER_EPS = 0.02; // 선 두께 오차(m)
 export const STOP_SPEED = 0.08; // m/s
@@ -52,7 +54,10 @@ export interface ParkingCheck {
 export function expectedHeadings(kind: MissionKind, slot: ParkingSlot): number[] {
   switch (kind) {
     case 'perpendicular-front':
+    case 'mech-in':
       return [slot.dir];
+    case 'mech-out':
+      return [slot.dir, normAngle(slot.dir + Math.PI)]; // 기계식은 후진 출고가 일반적 — 어느 쪽을 향해도 출구 구역 정차를 인정
     case 'perpendicular-reverse':
       return [normAngle(slot.dir + Math.PI)];
     case 'parallel':

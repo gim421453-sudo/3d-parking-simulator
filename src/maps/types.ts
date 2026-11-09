@@ -13,6 +13,7 @@ export type ObstacleTag =
   | 'planter'
   | 'curb'
   | 'drum'
+  | 'guide'
   | 'car';
 
 export interface ObstacleDef {
@@ -73,6 +74,8 @@ export interface MapData {
   terrain?: Terrain;
   /** 상층 바닥 도색 등 층별 시각 데이터 (terrain 이 있을 때) */
   levelPaint?: (PaintRect & { y: number })[];
+  /** 승강기식 기계식 주차장 장치가 있는 맵 (src/mech) */
+  mech?: boolean;
   /** 최종 확정된 맵이 아니라 검증용 임시 레이아웃인가 */
   provisional?: boolean;
   surfaces: SurfaceRect[];

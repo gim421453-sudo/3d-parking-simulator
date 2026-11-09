@@ -7,6 +7,11 @@ import { getMap, mapColliders } from '../maps';
 import { buildMap, type BuiltMap } from '../maps/mapBuilder';
 import type { MapData, MapMission, MapSlot } from '../maps/types';
 import { HOLD_SECONDS, HEADING_TOLERANCE, MissionRunner } from '../mission/parking';
+import { MechInRunner } from '../mission/mech';
+import { MechController } from '../mech/controller';
+import { buildMech, type MechBuilt } from '../mech/mechBuilder';
+import { STATION } from '../mech/machine';
+import { MechPanel } from '../ui/mechPanel';
 import { Beeper } from '../sensors/beeper';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
 import {
@@ -84,6 +89,10 @@ export class Game {
   riskOut: RiskOutput | null = null;
   private cabinHits: CabinHit[] = [];
   private tower: TowerVisual | null = null;
+  /** v0.5.0 승강기식 기계식 주차장 (map.mech) */
+  readonly mech = new MechController();
+  mechBuilt: MechBuilt | null = null;
+  private mechPanel!: MechPanel;
   private cullLevelY = NaN;
   lastClusterData: ClusterData | null = null;
   lastHitId = '';
@@ -181,6 +190,7 @@ export class Game {
       shifter: { request: (g) => this.requestShift(g), context: () => this.shiftContext() },
     });
     this.hud.bindExtra();
+    this.mechPanel = new MechPanel((this.hud.root.querySelector('#left-col') as HTMLElement) ?? this.hud.root, (a) => this.onAction(a));
     this.assistPanel = new AssistPanel(root, {
       onToggleSensor: () => this.onAction('sensorToggle'),
       onToggleSound: () => this.onAction('soundToggle'),
@@ -317,6 +327,11 @@ export class Game {
       this.tower.dispose();
       this.tower = null;
     }
+    if (this.mechBuilt) {
+      this.scene.remove(this.mechBuilt.group);
+      this.mechBuilt.dispose();
+      this.mechBuilt = null;
+    }
     const tier = this.settings.quality;
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
     this.cullLevelY = NaN;
@@ -330,6 +345,11 @@ export class Game {
     if (map.terrain) {
       this.tower = buildTowerVisual(map, map.terrain);
       this.scene.add(this.tower.group);
+    }
+    if (map.mech) {
+      const lowTier = this.settings.quality === 'low';
+      this.mechBuilt = buildMech({ mirrorSize: lowTier ? 192 : 384, mirrorFps: Math.max(1, Math.min(this.settings.mirrorFps || 10, lowTier ? 10 : 20)) });
+      this.scene.add(this.mechBuilt.group);
     }
     this.scene.background = new THREE.Color(map.env.sky);
     this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : new THREE.Fog(map.env.sky, 100, 320);
@@ -352,7 +372,7 @@ export class Game {
     this.map = map;
     this.missionDef = map.missions.find((m) => m.id === this.settings.missionId) ?? null;
     this.targetSlot = this.missionDef ? (map.slots.find((s) => s.id === this.missionDef!.slotId) ?? null) : null;
-    this.mission = this.missionDef && this.targetSlot ? new MissionRunner(this.missionDef, this.targetSlot) : null;
+    this.mission = this.missionDef && this.targetSlot ? (this.missionDef.kind === 'mech-in' ? new MechInRunner(this.missionDef, this.targetSlot, () => this.mech.m) : new MissionRunner(this.missionDef, this.targetSlot)) : null;
     this.built!.setTarget(this.targetSlot);
 
     if (this.model) {
@@ -392,6 +412,9 @@ export class Game {
       this.car.pitch = Math.atan2(yF - yR, wb);
       this.car.slope = Math.sin(this.car.pitch);
     }
+    this.mech.reset();
+    if (map.mech && this.missionDef?.kind === 'mech-out') this.mech.presetStored(this.spec, this.car);
+    this.mechPanel.setVisible(!!map.mech);
     this.lightMode = 'auto'; // 어두운 곳(지하)에서는 자동으로 하향등
     this.levelPitch = 0;
     this.lastV = 0;
@@ -547,6 +570,15 @@ export class Game {
       case 'gearStepDown': {
         const i = SHIFTER_ORDER.indexOf(this.car.gear) + (a === 'gearStepUp' ? -1 : 1);
         if (i >= 0 && i < SHIFTER_ORDER.length) this.requestShift(SHIFTER_ORDER[i]);
+        break;
+      }
+      case 'mechExit':
+      case 'mechStart':
+      case 'mechRetrieve':
+      case 'mechEstop': {
+        if (!this.map.mech) break;
+        const r = this.mech.onAction(a, this.spec, this.car);
+        if (r) this.hud.toast(r.msg, r.kind);
         break;
       }
       case 'handbrake':
@@ -723,15 +755,24 @@ export class Game {
   }
 
   private simulate(dt: number): void {
-    const vin = this.readInput(dt);
+    let vin = this.readInput(dt);
+    const mech = this.map.mech ? this.mech : null;
+    if (mech?.blocksDriving()) vin = { throttle: 0, brake: 1, steerInput: 0 }; // 하차했거나 팔레트에 고정된 동안 운전 불가
     this.acc += dt;
     let steps = 0;
     while (this.acc >= STEP && steps < 12) {
-      this.physicsStep(vin, STEP);
+      if (mech?.m.locked) mech.applyLocked(this.car);
+      else this.physicsStep(vin, STEP);
       this.acc -= STEP;
       steps++;
     }
     if (steps >= 12) this.acc = 0;
+
+    if (mech) {
+      mech.step(dt, this.spec, this.car);
+      this.mechBuilt?.update(mech.m, dt, this.car.x < STATION.palletX + 14 && this.car.x > STATION.doorX - 28);
+      this.mechPanel.update(mech.m, mech.items);
+    }
 
     // 깜빡이
     this.blinkT += dt;
@@ -865,6 +906,7 @@ export class Game {
       this.contactClear += dt;
       if (this.contactClear > 0.4) this.inContact = false;
     }
+    if (this.map.mech) this.mech.stopper(this.spec, car); // 앞바퀴 정지턱
   }
 
   private finishMission(): void {
@@ -1489,6 +1531,7 @@ function tagName(tag: string): string {
     planter: '화단',
     curb: '연석',
     drum: '드럼통',
+    guide: '팔레트 가이드',
     car: '주차된 차량',
   };
   return t[tag] ?? '장애물';

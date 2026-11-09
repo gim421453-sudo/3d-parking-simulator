@@ -25,7 +25,11 @@ export type Action =
   | 'sensorToggle'
   | 'soundToggle'
   | 'pdcSurround'
-  | 'pdcSensor';
+  | 'pdcSensor'
+  | 'mechExit'
+  | 'mechStart'
+  | 'mechRetrieve'
+  | 'mechEstop';
 
 const HELD: Record<string, HeldKey> = {
   KeyW: 'throttle',
@@ -54,6 +58,10 @@ export const KEY_ACTIONS: Record<string, Action> = {
   KeyT: 'reset',
   Escape: 'pause',
   KeyB: 'assistToggle',
+  KeyG: 'mechExit',
+  KeyJ: 'mechStart',
+  KeyK: 'mechRetrieve',
+  KeyX: 'mechEstop',
 };
 
 /** 키보드와 화면 버튼(터치)이 같은 상태/액션 경로를 쓴다. */

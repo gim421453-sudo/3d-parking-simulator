@@ -185,3 +185,39 @@ describe('기계식 주차 — 입고/승강/출고', () => {
     expect(ALIGN_TOL.lateral).toBeLessThan(0.2);
   });
 });
+
+import { MechController } from '../src/mech/controller';
+import { createVehicleState } from '../src/vehicle/physics';
+
+describe('기계식 주차 — 컨트롤러', () => {
+  it('출고 미션 시작(저장 상태)의 차량 위치는 베이 A1 위 (회귀: 상대 좌표 회전 버그)', () => {
+    const c = new MechController();
+    const car = createVehicleState(sedan, -3.4, 0, STATION.heading);
+    c.presetStored(sedan, car);
+    expect(car.z).toBeCloseTo(3.6, 3);
+    expect(car.y).toBeCloseTo(3, 3);
+    expect(car.x).toBeCloseTo(STATION.stopperX - sedan.wheelbase, 3);
+    // 출고 → 팔레트가 스테이션 높이/중앙으로 돌아오면 차량도 정중앙
+    c.onAction('mechRetrieve', sedan, car);
+    for (let i = 0; i < 60 * 40; i++) c.step(1 / 60, sedan, car);
+    expect(c.m.phase).toBe('exit');
+    expect(car.z).toBeCloseTo(0, 3);
+    expect(car.y).toBeCloseTo(0, 3);
+  });
+  it('정지턱: 컨트롤러가 앞바퀴를 되밀고 속도 0', () => {
+    const c = new MechController();
+    const car = createVehicleState(sedan, 0, 0, STATION.heading);
+    car.x = STATION.stopperX - sedan.wheelbase + 0.4; // 뒷축 기준
+    car.z = 0;
+    car.v = 1;
+    expect(c.stopper(sedan, car)).toBeGreaterThan(0.3);
+    expect(car.v).toBe(0);
+    expect(stopperPushback(sedan, { x: car.x, z: car.z, heading: car.heading, v: 0, gear: 'P', handbrake: true })).toBeLessThan(0.01);
+  });
+  it('입고 중에는 주행 입력을 막고 하차 상태에서도 막는다', () => {
+    const c = new MechController();
+    expect(c.blocksDriving()).toBe(false);
+    c.m.occupant = 'out';
+    expect(c.blocksDriving()).toBe(true);
+  });
+});
