@@ -2532,7 +2532,7 @@ async function waitServer(url, tries = 50) {
     await loadMap('mechpark', 'mech-in-rev', 'sedan');
     const rv0 = await M();
     check('v0.5.2 후진 입고 시작: 안내판이 후진 입고 방향을 안내("후진")', rv0.guide === 'back' && Math.abs(Math.sin(rv0.h)) > 0.99 && Math.sin(rv0.h) < 0, JSON.stringify(rv0));
-    await creepIn('R', 0.4, -8.5, -0.85);
+    await creepIn('R', 0.4, -8.5, -0.76);
     const rv1 = await M();
     check('v0.5.2 후진 입고: 뒷바퀴가 정지 홈에 안착(이벤트), 안내판 "정지"', rv1.seat >= 1 && rv1.guide === 'stop', JSON.stringify(rv1));
     await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
