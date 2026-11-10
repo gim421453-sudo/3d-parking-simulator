@@ -370,7 +370,7 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #mech-panel .mc-sub { margin-top: 4px; min-height: 15px; line-height: 1.25; white-space: normal; }
 #mech-panel .mc-sub[data-ok="1"] { color: var(--ok); }
 #mech-panel .mech-btns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 6px; }
-#mech-panel .mech-btns button { min-height: 32px; font-size: 11px; padding: 0 2px; border-radius: var(--r-sm); border: 1px solid var(--hair-2); background: var(--accent-dim); color: var(--txt); }
+#mech-panel .mech-btns button { min-height: 32px; font-size: 11px; padding: 0 2px; white-space: nowrap; overflow: hidden; border-radius: var(--r-sm); border: 1px solid var(--hair-2); background: var(--accent-dim); color: var(--txt); }
 #mech-panel .mech-btns button.estop { background: rgba(229, 55, 47, .25); border-color: rgba(229, 55, 47, .6); }
 
 /* v0.5.1: 낮은 화면(가로 폰/태블릿, 높이 ≤ 420px) — 핸들/페달과 겹치지 않도록 미션 패널과 기계식 패널을 더 줄인다 */

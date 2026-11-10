@@ -1027,7 +1027,7 @@ export class Game {
         car.z = tz;
         if (!findVehicleCollision(obbOf(car, this.spec), this.colliders, lvl ? car.y : undefined, lvl ? this.spec.height : undefined)) {
           hit = null;
-          car.v = pv * 0.6; // 접촉 마찰/충격 감쇠 (완전 정지가 아니다)
+          car.v = pv * 0.995; // 접촉 마찰/충격 감쇠 (완전 정지가 아니다)
           this.lastHitId = '';
           break;
         }

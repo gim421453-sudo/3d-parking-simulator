@@ -285,12 +285,15 @@ async function waitServer(url, tries = 50) {
     // ---- 낮은 가이드/볼라드 접촉 물리 ----
     await loadMap('mechpark', 'mech-in-1', 'sedan');
     check('v0.5.2 팔레트 가이드는 낮은 구조물(0.12m < 지상고 0.2m), 볼라드 4개 금속 원통 충돌체(센서 높이보다 높음)', await Y(() => { const G = window.__game; const g = G.colliders.filter((c) => c.tag === 'guide'); const b = G.colliders.filter((c) => c.tag === 'bollard'); return g.length === 2 && g.every((c) => c.h < 0.2) && b.length === 4 && b.every((c) => c.h > 0.55) && G.mechBuilt.bollards.count === 4; }));
-    // 볼라드 측면 접촉: 완전 정지하지 않고 접촉면을 따라 미끄러진 뒤 조향/후진으로 이탈 가능, 관통 불가
-    await Y(() => { const G = window.__game; const c = G.car; c.x = -14; c.z = 0.2; c.heading = Math.PI / 2 - 0.35; c.v = 0; c.gear = 'D'; c.handbrake = false; G.debugInput = { throttle: 0.45, brake: 0, steerInput: 0 }; });
-    await sleep(3500);
-    const bol = await Y(() => { const G = window.__game; const b = G.colliders.find((c) => c.id === 'bol-1n'); return { x: G.car.x, z: G.car.z, v: G.car.v, hit: G.lastHitId, coll: G.collisions, bx: b.x, bz: b.z }; });
-    await Y(() => { window.__game.debugInput = null; });
-    check('v0.5.2 볼라드 접촉: 차량이 볼라드를 관통하지 않고 접촉면을 따라 계속 진행(즉시 정지 아님)', bol.x > -13.2 && Math.hypot(bol.x - bol.bx, bol.z - bol.bz) > 0.1 + 0.4, JSON.stringify(bol));
+    // 볼라드 접촉: 정면으로 부딪히면 관통하지 않고 멈추며, 후진으로 이탈할 수 있다(끼임 없음)
+    await Y(() => { const G = window.__game; const c = G.car; c.x = -14; c.z = 0.2; c.heading = Math.PI / 2 - 0.35; c.v = 0; c.gear = 'D'; c.handbrake = false; G.debugInput = { throttle: 0.45, brake: 0, steerInput: 0 }; window.__minD = 99; window.__bolIv = setInterval(() => { for (const id of ['bol-1n', 'bol-2n']) { const b = G.colliders.find((q) => q.id === id); window.__minD = Math.min(window.__minD, Math.hypot(G.car.x - b.x, G.car.z - b.z)); } }, 30); });
+    await yuntil(() => window.__game.lastHitId === 'bol-1n' || window.__game.lastHitId === 'bol-2n', undefined, 120000); // 게임 상태를 기다린다
+    await yuntil(() => Math.abs(window.__game.car.v) < 0.05, undefined, 30000);
+    const bol = await Y(() => { const G = window.__game; return { x: G.car.x, z: G.car.z, v: G.car.v, coll: G.collisions, minD: window.__minD, hit: G.lastHitId }; });
+    await Y(() => { const G = window.__game; G.car.gear = 'R'; G.debugInput = { throttle: 0.4, brake: 0, steerInput: -0.5 }; });
+    await yuntil(([x0]) => window.__game.car.x < x0 - 0.8, [bol.x], 60000);
+    const esc = await Y(() => { clearInterval(window.__bolIv); const G = window.__game; G.debugInput = null; return { x: G.car.x, v: G.car.v }; });
+    check('v0.5.2 볼라드 접촉: 관통 불가(차체 중심과 볼라드 거리 > 반폭+r)이고 후진으로 이탈 가능(끼임 없음)', bol.minD > 0.1 + 0.4 && esc.x < bol.x - 0.8, JSON.stringify({ bol, esc }));
 
 
     // ---- v0.5.1: 전방카메라 범퍼 중앙 ----
