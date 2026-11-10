@@ -99,6 +99,9 @@ export class Game {
   private mechCtl!: MechControl;
   private mechDoorCol: Collider = { kind: 'box', id: 'mech-door', tag: 'wall', x: STATION.doorX, z: 0, w: 0.3, d: 2.4, rot: 0, y0: 0, h: 1.9 };
   private mechDoorOn = false;
+  private zoneAcc = 0;
+  /** 통합 맵: 현재 구역 id */
+  zoneId: string | null = null;
   /** 보관 슬롯별 차량 모델(플레이어가 입고한 차 / 미션에서 미리 보관된 차) */
   private storedModels = new Map<string, { model: CarModel; spec: VehicleSpec }>();
   private cullLevelY = NaN;
@@ -1679,6 +1682,22 @@ export class Game {
       mission: mh,
       fpsText: this.settings.showFps ? `FPS ${this.fpsInstant.toFixed(0)} · 평균 ${this.avgFps().toFixed(0)}` : null,
     };
+    // 통합 맵: 가까운 구역 중심 렌더(주차 차량 모델 거리 컬링) + 구역 이름 알림 + 기계식 패널은 기계식 구역 근처에서만
+    const zones = (this.map as unknown as { zones?: { id: string; label: string; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } }[] }).zones;
+    if (zones) {
+      this.zoneAcc += 1 / 60;
+      if (this.zoneAcc > 0.4) {
+        this.zoneAcc = 0;
+        this.built?.setViewCenter(this.car.x, this.car.z, 140);
+        const zn = zones.find((z) => this.car.x >= z.bounds.minX - 2 && this.car.x <= z.bounds.maxX + 2 && this.car.z >= z.bounds.minZ - 2 && this.car.z <= z.bounds.maxZ + 2) ?? null;
+        if (zn?.id !== this.zoneId) {
+          this.zoneId = zn?.id ?? null;
+          if (zn) this.hud.toast(`구역: ${zn.label}`);
+        }
+        const mz = zones.find((z) => z.id === 'mechpark');
+        if (mz) this.mechPanel.setVisible(this.car.x >= mz.bounds.minX - 12 && this.car.x <= mz.bounds.maxX + 4 && this.car.z >= mz.bounds.minZ - 12 && this.car.z <= mz.bounds.maxZ + 12);
+      }
+    }
     if (this.map.terrain) {
       const lv = levelAt(this.map.terrain, this.car.y);
       if (this.cullLevelY !== lv.y) {

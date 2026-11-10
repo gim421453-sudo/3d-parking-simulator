@@ -19,6 +19,8 @@ export interface BuiltMap {
   setTarget(slot: ParkingSlot | null): void;
   /** 다층 맵 성능: 플레이어 높이에서 ±maxDy 밖 층의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 반환: 숨긴 개수 */
   setLevelVisibility(playerY: number, maxDy?: number): number;
+  /** 통합 맵 성능: 플레이어 (x,z) 에서 반경 밖의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 숨긴 개수 반환 */
+  setViewCenter(x: number, z: number, radius: number): number;
   animate(t: number): void;
   dispose(): void;
 }
@@ -143,7 +145,9 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   const cones: ObstacleDef[] = [];
   const drums: ObstacleDef[] = [];
 
-  const levelObjects: { obj: THREE.Object3D; y: number }[] = [];
+  type CarEntry = { obj: THREE.Object3D; y: number; x: number; z: number; lv: boolean; dv: boolean };
+  const levelObjects: CarEntry[] = [];
+  const allCars: CarEntry[] = [];
   for (const o of map.obstacles) {
     switch (o.tag) {
       case 'cone':
@@ -180,7 +184,9 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         car.root.position.set(o.x, o.y0 ?? 0, o.z);
         car.root.rotation.y = o.rot ?? 0;
         group.add(car.root);
-        if ((o.y0 ?? 0) !== 0 || map.terrain) levelObjects.push({ obj: car.root, y: o.y0 ?? 0 });
+        const entry: CarEntry = { obj: car.root, y: o.y0 ?? 0, x: o.x, z: o.z, lv: true, dv: true };
+        allCars.push(entry);
+        if ((o.y0 ?? 0) !== 0 || map.terrain) levelObjects.push(entry);
         break;
       }
       case 'building': {
@@ -308,7 +314,19 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     setLevelVisibility(playerY, maxDy = 1.7) {
       let hidden = 0;
       for (const l of levelObjects) {
-        const vis = Math.abs(l.y - playerY) <= maxDy;
+        l.lv = Math.abs(l.y - playerY) <= maxDy;
+        const vis = l.lv && l.dv;
+        if (l.obj.visible !== vis) l.obj.visible = vis;
+        if (!vis) hidden++;
+      }
+      return hidden;
+    },
+    setViewCenter(x, z, radius) {
+      let hidden = 0;
+      const r2 = radius * radius;
+      for (const l of allCars) {
+        l.dv = (l.x - x) ** 2 + (l.z - z) ** 2 <= r2;
+        const vis = l.lv && l.dv;
         if (l.obj.visible !== vis) l.obj.visible = vis;
         if (!vis) hidden++;
       }
