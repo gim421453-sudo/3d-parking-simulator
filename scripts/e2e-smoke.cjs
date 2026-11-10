@@ -2510,7 +2510,7 @@ async function waitServer(url, tries = 50) {
     const exh = await Y(() => window.__game.car.heading);
     check('v0.5.1 기계식 출고: 턴테이블 회전 후 차량이 출입문(서쪽)을 향한다', Math.abs(Math.cos(exh)) < 0.05 && Math.sin(exh) < -0.99, String(exh));
     await Y(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'D'; G.debugInput = { throttle: 0.6, brake: 0, steerInput: 0 }; });
-    await yuntil(() => window.__game.car.x < -22.5, undefined, 120000);
+    await yuntil(() => window.__game.car.x < -21.0, undefined, 120000); // 제동 거리(약 2.6m) 만큼 앞서 브레이크 → 뒷축 ≈ -23.6 (출구 구역 안)
     await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
     await yuntil(() => window.__game.state === 'result', undefined, 60000);
     check('v0.5.0 기계식 출고 미션 성공(회전 후 전진 출차, 출구 구역 정차)', (await mst()).mission === 'success');
@@ -2550,7 +2550,7 @@ async function waitServer(url, tries = 50) {
     // ---- v0.5.1: 전방카메라 범퍼 중앙 ----
     await loadMap('lot', 'free', 'sedan');
     const fc = await Y(() => { const s = window.__game.spec; return { x: s.frontCam.x, z: s.frontCam.z - s.length / 2, y: s.frontCam.y, bumperTop: 0.42 * s.height }; });
-    check('v0.5.1 전방카메라: 차량 폭 중앙(x=0), 앞끝에서 20cm 이내 안쪽, 범퍼 윗면 바로 위(+0.1m) 높이', fc.x === 0 && fc.z < 0 && fc.z > -0.2 && Math.abs(fc.y - (fc.bumperTop + 0.1)) < 1e-6, JSON.stringify(fc));
+    check('v0.5.1 전방카메라: 차량 폭 중앙(x=0), 앞끝에서 20cm 이내 안쪽, 범퍼 윗면 바로 위(+0.05~0.2m, 차체별 튜닝) 높이', fc.x === 0 && fc.z < 0 && fc.z > -0.2 && fc.y >= fc.bumperTop + 0.05 && fc.y <= fc.bumperTop + 0.2, JSON.stringify(fc));
 
     // ---- v0.5.1: 경고 패널 가로로 넓고 낮게 ----
     await loadMap('lot', 'free', 'suv-x6');

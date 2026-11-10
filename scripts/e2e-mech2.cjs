@@ -21,13 +21,14 @@ const OUT = path.join(__dirname, '..', 'docs', 'screenshots', 'v050'); fs.mkdirS
   res.outStart = await st(p); await p.screenshot({ path: path.join(OUT, 'mech-out-01-stored.png') });
   await p.keyboard.press('KeyK');
   await p.waitForFunction(() => window.__game.mech.m.palletY > 1 && window.__game.mech.m.palletZ === 0, null, { timeout: 120000 }); res.outLifting = await st(p); await p.screenshot({ path: path.join(OUT, 'mech-out-02-lowering.png') });
+  await p.waitForFunction(() => window.__game.mech.m.phase === 'rotating' && window.__game.mech.m.yaw > 1, null, { timeout: 120000 }); res.rot = await st(p);
   await p.waitForFunction(() => window.__game.mech.m.phase === 'exit', null, { timeout: 120000 }); res.outExit = await st(p);
   await p.keyboard.press('KeyG'); await p.waitForTimeout(300); res.afterBoard = await st(p);
-  await p.evaluate(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'R'; G.debugInput = { throttle: 0.6, brake: 0, steerInput: 0 }; });
+  await p.evaluate(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'D'; G.debugInput = { throttle: 0.6, brake: 0, steerInput: 0 }; });
   await p.waitForFunction(() => window.__game.car.x < -8.5, null, { timeout: 120000 }); res.outDoor = await st(p); await p.screenshot({ path: path.join(OUT, 'mech-out-03-reversing-out.png') });
-  await p.waitForFunction(() => window.__game.car.x < -25.0, null, { timeout: 120000 });
+  await p.waitForFunction(() => window.__game.car.x < -22.5, null, { timeout: 120000 });
   await p.evaluate(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
-  await p.waitForFunction(() => window.__game.state === 'result', null, { timeout: 60000 }); res.outEnd = await st(p); res.outErrors = p.errs.slice(0, 5);
+  await p.waitForFunction(() => window.__game.state === 'result', null, { timeout: 60000 }).catch(() => {}); res.outEnd = await st(p); res.endCar = await p.evaluate(() => { const G = window.__game; return { x: G.car.x, z: G.car.z, h: G.car.heading, v: G.car.v, check: G.mission.check && { allInside: G.mission.check.allInside, headingOk: G.mission.check.headingOk, err: G.mission.check.headingErrorRad, corners: G.mission.check.corners, lat: G.mission.check.lateralOffset, lon: G.mission.check.longOffset }, status: G.mission.status, reason: G.mission.failReason, el: G.mission.elapsed, lim: G.mission.def.timeLimitSec }; }); res.outErrors = p.errs.slice(0, 5);
   await p.context().close();
   // B. 폭 초과 차량 거부 (컨셉 쿠페 2.34m)
   p = await open('concept-coupe', 'mech-in-1');
