@@ -117,6 +117,12 @@ export function defaultSensorLayout(length: number, width: number): SensorMount[
 
 /** 차체 벨트라인(하부 차체 윗면) 높이 — carModel 의 SHAPES.belt 와 같은 값. 전/후방 카메라가 차체 윗면 바로 위에 장착되도록 계산에 쓴다 */
 export const BELT_RATIO = { sedan: 0.86, hatch: 0.84, suv: 1.0 } as const;
+/** 전방카메라 장착(범퍼 중앙): 차체 종류별 튜닝값 {앞끝에서 안쪽 거리, 범퍼 윗면 위 높이, 아래로 기울기(도)} */
+export const FRONT_CAM_TUNE = { sedan: { inset: 0.03, up: 0.14, pitch: 18 }, hatch: { inset: 0.03, up: 0.14, pitch: 18 }, suv: { inset: 0.16, up: 0.1, pitch: 24 }, glb: { inset: 0.06, up: 0.1, pitch: 20 } } as const;
+export function frontCamOf(body: 'hatch' | 'sedan' | 'suv' | 'glb', length: number, height: number): { x: number; y: number; z: number; pitch: number } {
+  const t = FRONT_CAM_TUNE[body];
+  return { x: 0, y: bumperTopOf(height) + t.up, z: length / 2 - t.inset, pitch: t.pitch * DEG };
+}
 /** 앞 범퍼 윗면 높이(m) — 차고 비례 근사 */
 export const bumperTopOf = (height: number): number => 0.42 * height;
 export const beltOf = (body: 'hatch' | 'sedan' | 'suv', height: number): number => BELT_RATIO[body] * (height / 1.45);
@@ -157,9 +163,10 @@ function make(p: {
     driverEye: { x: 0.36, y: eyeY, z: -0.05 },
     // v0.4.9: 카메라를 차체 윗면 바로 위(트렁크 립/후드 끝)에 장착 — 영상 하단에 실제 차체(범퍼 윗면) 일부가 보인다
     rearCam: { x: 0, y: beltOf(p.body, p.height) + 0.14, z: -p.length / 2 + 0.035, pitch: 28 * DEG },
-    // v0.5.1: 전방카메라는 **앞 범퍼 중앙**(x=0)에 장착한다. 범퍼 윗면 높이(차고의 약 42%) 바로 위, 앞끝에서 16cm 안쪽 —
-    // 아래로 24° 기울여 영상 하단에 자기 범퍼 윗면이 살짝 보이고 중앙 시야는 가리지 않는다.
-    frontCam: { x: 0, y: bumperTopOf(p.height) + 0.1, z: p.length / 2 - 0.16, pitch: 24 * DEG },
+    // v0.5.1: 전방카메라는 **앞 범퍼 중앙**(x=0)에 장착한다 (범퍼 윗면 높이 = 차고의 약 42%). 모델의 앞부분 형상이 달라
+    // (앞끝에서의 안쪽 거리, 범퍼 위 높이, 기울기)는 차체 종류별로 실제 렌더에서 튜닝했다 — scripts/tune-frontcam.cjs.
+    // 목표: 영상 하단에 자기 범퍼 윗면이 살짝(화면 높이의 약 10~40%) 보이고 중앙 시야는 가리지 않는다.
+    frontCam: frontCamOf(p.body, p.length, p.height),
     sensorHeight: 0.55,
     sensors: defaultSensorLayout(p.length, p.width),
     assist: { ...FULL_ASSIST },
@@ -242,6 +249,7 @@ export const CONCEPT_COUPE: VehicleSpec = {
     body: 'sedan',
     wheelRadius: 0.384,
   }),
+  frontCam: frontCamOf('glb', 4.357, 1.149),
   visual: { kind: 'glb', body: 'sedan', url: './models/concept-coupe.glb', scale: 1, offset: { x: 0, y: 0, z: -0.2385 }, rotY: 0 },
   plate: '123가 4567',
 };
