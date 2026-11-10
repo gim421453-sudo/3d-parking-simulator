@@ -3,7 +3,7 @@ import { findVehicleCollision } from '../src/core/geometry';
 import { MAP_MECHPARK, BOLLARDS, BOLLARD_H, ROOM_HW } from '../src/maps/mapMechPark';
 import { mapColliders } from '../src/maps';
 import { MECH_LIMITS } from '../src/mech/limits';
-import { STATION } from '../src/mech/machine';
+import { STATION, alignment } from '../src/mech/machine';
 import { DEFAULT_SENSOR_CONFIG, readSensors } from '../src/sensors/sensorSystem';
 import { centerOf, createVehicleState, obbOf } from '../src/vehicle/physics';
 import { VEHICLES, getVehicle } from '../src/vehicle/spec';
@@ -51,9 +51,18 @@ describe('기계식 맵 — 볼라드/입구/승강장 (v0.5.1)', () => {
       }
     }
   });
-  it('팔레트 가이드/문틀 때문에 좌우 0.2m 이상 어긋나면 진입할 수 없다 (실제 충돌)', () => {
+  it('팔레트 가이드는 낮은 구조물(0.12m < 지상고 0.2m): 높이 구간을 검사하면 차체를 막지 않고, 타이어 침범은 정렬 불합격', () => {
     const car = place(sedan, STATION.stopperX - sedan.wheelbase - 1.0, 0.3);
-    expect(findVehicleCollision(obbOf(car, sedan), colliders)).not.toBeNull();
+    expect(findVehicleCollision(obbOf(car, sedan), colliders, 0, sedan.height)).toBeNull();
+    const g = colliders.filter((c) => c.tag === 'guide');
+    expect(g.length).toBe(2);
+    for (const c of g) expect(c.h).toBeLessThan(0.2);
+    const a = alignment(sedan, { x: car.x, z: car.z, heading: car.heading, v: 0, gear: 'P', handbrake: true });
+    expect(a.guideInvasion.some(Boolean)).toBe(true);
+  });
+  it('높은 구조물(승강장 측벽/문틀/기계실)은 높이 구간 검사에서도 차체를 막는다', () => {
+    const wallHit = place(sedan, STATION.stopperX - sedan.wheelbase - 1.0, 2.6); // 측벽 쪽으로 크게 어긋남
+    expect(findVehicleCollision(obbOf(wallHit, sedan), colliders, 0, sedan.height)).not.toBeNull();
   });
   it('승강장 안쪽 폭은 턴테이블 회전 반경(팔레트+가이드 대각선/2)을 수용한다', () => {
     const r = Math.hypot(MECH_LIMITS.palletLength / 2, MECH_LIMITS.palletWidth / 2 + 0.3);

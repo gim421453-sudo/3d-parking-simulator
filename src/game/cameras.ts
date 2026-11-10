@@ -346,12 +346,13 @@ export class CameraRig {
       case 'free': {
         cam.fov = 60;
         const cp = Math.cos(this.freePitch);
+        // v0.5.2: 차량 높이(승강/다층)를 따라간다 — 이전에는 y 를 지면 기준으로만 계산해 12층까지 올라가는 차량을 놓쳤다
         cam.position.set(
           pose.x + Math.sin(this.freeYaw) * cp * this.freeDist,
-          Math.max(0.4, Math.sin(this.freePitch) * this.freeDist),
+          gy + Math.max(0.4, Math.sin(this.freePitch) * this.freeDist),
           pose.z + Math.cos(this.freeYaw) * cp * this.freeDist,
         );
-        cam.lookAt(pose.x, 0.8, pose.z);
+        cam.lookAt(pose.x, gy + 0.8, pose.z);
         break;
       }
     }

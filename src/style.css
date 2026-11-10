@@ -369,7 +369,7 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 #mech-panel .mc-time { font-size: 11px; color: var(--accent); }
 #mech-panel .mc-sub { margin-top: 4px; min-height: 15px; line-height: 1.25; white-space: normal; }
 #mech-panel .mc-sub[data-ok="1"] { color: var(--ok); }
-#mech-panel .mech-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; }
+#mech-panel .mech-btns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 6px; }
 #mech-panel .mech-btns button { min-height: 32px; font-size: 11px; padding: 0 2px; border-radius: var(--r-sm); border: 1px solid var(--hair-2); background: var(--accent-dim); color: var(--txt); }
 #mech-panel .mech-btns button.estop { background: rgba(229, 55, 47, .25); border-color: rgba(229, 55, 47, .6); }
 
@@ -384,3 +384,23 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
   #mech-panel .mech-btns { margin-top: 3px; gap: 3px; }
   #mech-panel .mech-btns button { min-height: 24px; font-size: 10px; }
 }
+
+/* v0.5.2 기계식 제어반(확대 조작 화면): 필요할 때만 여는 모달 */
+#mech-ctl { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; padding: 10px 12px; z-index: 30; pointer-events: auto; }
+#mech-ctl .mc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+#mech-ctl button { min-height: var(--ctl); border-radius: var(--r-sm); border: 1px solid var(--hair-2); background: var(--accent-dim); color: var(--txt); font-size: 12px; padding: 0 8px; }
+.mctl-body { display: grid; grid-template-columns: 1fr 190px; gap: 10px; }
+.mctl-grid { display: grid; gap: 3px; max-height: 60vh; overflow: auto; }
+.mctl-row { display: grid; grid-template-columns: 38px 1fr 1fr; gap: 4px; align-items: center; }
+.mctl-fl { font-size: 11px; color: var(--txt-2); }
+.mctl-row button { min-height: 26px; }
+.mctl-row button[data-used="1"] { background: rgba(229, 55, 47, .28); border-color: rgba(229, 55, 47, .6); }
+.mctl-row button[data-used="0"] { background: rgba(127, 194, 77, .16); }
+.mctl-row button[data-sel="1"] { outline: 2px solid var(--accent); }
+.mctl-side { display: grid; gap: 6px; align-content: start; }
+.mctl-led { padding: 8px; border-radius: var(--r-sm); background: #05070a; color: var(--ok); font-weight: 700; text-align: center; min-height: 40px; display: grid; place-items: center; }
+.mctl-led[data-kind="blocked"], .mctl-led[data-kind="estop"], .mctl-led[data-kind="fault"] { color: var(--bad); }
+.mctl-led[data-kind="storing"] { color: var(--warn); }
+.mctl-sel { font-size: 11.5px; color: var(--txt-2); line-height: 1.4; }
+.mctl-side .estop { background: rgba(229, 55, 47, .25); border-color: rgba(229, 55, 47, .6); }
+@media (max-height: 420px) { .mctl-body { grid-template-columns: 1fr 150px; } .mctl-grid { max-height: 56vh; } #mech-ctl { padding: 6px 8px; } }

@@ -21,6 +21,7 @@ export class MechPanel {
         <button data-a="mechExit" title="하차/탑승 (G)">하차</button>
         <button data-a="mechStart" title="입고 시작 (J)">입고</button>
         <button data-a="mechRetrieve" title="출고 요청 (K)">출고</button>
+        <button data-a="mechPanel" title="제어반 (Z)">제어반</button>
         <button data-a="mechEstop" class="estop" title="비상 정지/해제 (X)">정지</button>
       </div>`;
     parent.appendChild(this.el);

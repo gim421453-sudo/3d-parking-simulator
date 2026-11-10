@@ -139,8 +139,16 @@ export function computeScore(i: ScoreInput): ScoreResult {
 
 export type MissionStatus = 'running' | 'success' | 'failed';
 
+/** 기계식 미션 옵션: 대상 보관 슬롯, 입고 방향, 미리 보관된 차량(출고 미션) */
+export interface MechMissionOpts {
+  slot: string;
+  mode?: 'fwd' | 'rev';
+  seed?: { slot: string; specId: string; mode: 'fwd' | 'rev' }[];
+}
+
 export interface MissionDef {
   id: string;
+  mech?: MechMissionOpts;
   name: string;
   kind: MissionKind;
   slotId: string;

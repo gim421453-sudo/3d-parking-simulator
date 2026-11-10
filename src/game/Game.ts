@@ -10,9 +10,11 @@ import { HOLD_SECONDS, HEADING_TOLERANCE, MissionRunner } from '../mission/parki
 import { MechInRunner } from '../mission/mech';
 import { MechController } from '../mech/controller';
 import { buildMech, type MechBuilt } from '../mech/mechBuilder';
-import { STATION } from '../mech/machine';
+import { STATION, storedPose } from '../mech/machine';
 import { playClunk } from '../mech/sfx';
 import { MechPanel } from '../ui/mechPanel';
+import { MechControl } from '../ui/mechControl';
+import { freeSlots } from '../mech/machine';
 import { Beeper } from '../sensors/beeper';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
 import {
@@ -94,8 +96,11 @@ export class Game {
   readonly mech = new MechController();
   mechBuilt: MechBuilt | null = null;
   private mechPanel!: MechPanel;
+  private mechCtl!: MechControl;
   private mechDoorCol: Collider = { kind: 'box', id: 'mech-door', tag: 'wall', x: STATION.doorX, z: 0, w: 0.3, d: 2.4, rot: 0, y0: 0, h: 1.9 };
   private mechDoorOn = false;
+  /** 보관 슬롯별 차량 모델(플레이어가 입고한 차 / 미션에서 미리 보관된 차) */
+  private storedModels = new Map<string, { model: CarModel; spec: VehicleSpec }>();
   private cullLevelY = NaN;
   lastClusterData: ClusterData | null = null;
   lastHitId = '';
@@ -194,6 +199,16 @@ export class Game {
       shifter: { request: (g) => this.requestShift(g), context: () => this.shiftContext() },
     });
     this.hud.bindExtra();
+    this.mechCtl = new MechControl(this.hud.root, {
+      action: (a) => this.onAction(a),
+      select: (slot) => {
+        this.mech.selectedSlot = slot;
+      },
+      auto: (v) => {
+        this.settings.mechAutoSlot = v;
+        saveSettings(this.settings);
+      },
+    });
     this.mechPanel = new MechPanel((this.hud.root.querySelector('#top-right') as HTMLElement) ?? this.hud.root, (a) => this.onAction(a));
     this.assistPanel = new AssistPanel(root, {
       onToggleSensor: () => this.onAction('sensorToggle'),
@@ -377,7 +392,7 @@ export class Game {
     this.map = map;
     this.missionDef = map.missions.find((m) => m.id === this.settings.missionId) ?? null;
     this.targetSlot = this.missionDef ? (map.slots.find((s) => s.id === this.missionDef!.slotId) ?? null) : null;
-    this.mission = this.missionDef && this.targetSlot ? (this.missionDef.kind === 'mech-in' ? new MechInRunner(this.missionDef, this.targetSlot, () => this.mech.m) : new MissionRunner(this.missionDef, this.targetSlot)) : null;
+    this.mission = this.missionDef && this.targetSlot ? (this.missionDef.kind === 'mech-in' ? new MechInRunner(this.missionDef, this.targetSlot, () => !!this.mech.m.slots[this.missionDef!.mech?.slot ?? ''], () => this.mech.m.phase === 'waiting') : new MissionRunner(this.missionDef, this.targetSlot)) : null;
     this.built!.setTarget(this.targetSlot);
 
     if (this.model) {
@@ -418,8 +433,11 @@ export class Game {
       this.car.slope = Math.sin(this.car.pitch);
     }
     this.mech.reset();
-    if (map.mech && this.missionDef?.kind === 'mech-out') this.mech.presetStored(this.spec, this.car);
+    this.clearStoredModels();
+    for (const sd of this.missionDef?.mech?.seed ?? []) this.mech.seedStored(sd.slot, sd.specId, sd.mode, getVehicle(sd.specId)); // 출고 미션: 미리 보관된 차량
+    if (this.missionDef?.mech?.slot) this.mech.selectedSlot = this.missionDef.mech.slot;
     this.mechPanel.setVisible(!!map.mech);
+    this.mechCtl.setOpen(false);
     this.hud.setOn('mirrorToggle', this.settings.thirdMirror);
     this.lightMode = 'auto'; // 어두운 곳(지하)에서는 자동으로 하향등
     this.levelPitch = 0;
@@ -584,11 +602,18 @@ export class Game {
         this.hud.setOn('mirrorToggle', this.settings.thirdMirror);
         this.hud.toast(this.settings.thirdMirror ? '3인칭 미러 ON' : '3인칭 미러 OFF');
         break;
+      case 'mechPanel':
+        if (this.map.mech) this.mechCtl.toggle();
+        break;
       case 'mechExit':
       case 'mechStart':
       case 'mechRetrieve':
       case 'mechEstop': {
         if (!this.map.mech) break;
+        if (a === 'mechStart' && this.settings.mechAutoSlot) {
+          const f = freeSlots(this.mech.m)[0];
+          if (f) this.mech.selectedSlot = f.id; // 자동: 빈 슬롯 중 가장 낮은 층
+        }
         const r = this.mech.onAction(a, this.spec, this.car);
         if (r) this.hud.toast(r.msg, r.kind);
         break;
@@ -782,6 +807,8 @@ export class Game {
 
     if (mech) {
       mech.step(dt, this.spec, this.car);
+      this.handleMechEvents();
+      this.syncStoredVisuals();
       if (!mech.m.locked && mech.settle(dt, this.spec, this.car)) playClunk(mech.lastSeatImpact, this.settings.sensorSound ? this.settings.sensorVolume : 0); // 앞바퀴 정지 홈 안착
       // 출입문(셔터) 충돌체: 문이 닫혀 가는 동안에는 차량이 통과할 수 없다
       const wantDoor = mech.doorBlocking();
@@ -798,6 +825,7 @@ export class Game {
       }
       this.mechBuilt?.update(mech.m, dt, this.car.x < STATION.palletX + 14 && this.car.x > STATION.doorX - 28, mech.guide);
       this.mechPanel.update(mech.m, mech.items, mech.guide);
+      this.mechCtl.update(mech.m, mech.selectedSlot, this.settings.mechAutoSlot);
     }
 
     // 깜빡이
@@ -880,6 +908,81 @@ export class Game {
     }
   }
 
+  // ------------------------------------------------------------ 기계식: 보관 차량 모델/교체
+  private clearStoredModels(): void {
+    for (const [, v] of this.storedModels) {
+      this.scene.remove(v.model.root);
+      v.model.dispose();
+    }
+    this.storedModels.clear();
+  }
+
+  private placeModel(model: CarModel, pose: { x: number; y: number; z: number; heading: number }): void {
+    model.root.position.set(pose.x, pose.y, pose.z);
+    model.root.rotation.order = 'YXZ';
+    model.root.rotation.y = pose.heading;
+  }
+
+  /** 미션에서 미리 보관된 차량(seed)의 모델을 만들어 슬롯에 놓는다 */
+  private syncStoredVisuals(): void {
+    for (const e of this.mech.storedList()) {
+      if (this.storedModels.has(e.slot) || !e.car.specId) continue;
+      const spec = getVehicle(e.car.specId);
+      const model = createCarModel(spec, { lite: true, blobTexture: this.built?.textures.blob });
+      if (spec.visual.kind === 'glb') void applyGlbVisual(model, spec);
+      this.scene.add(model.root);
+      this.placeModel(model, e.pose);
+      this.storedModels.set(e.slot, { model, spec });
+    }
+  }
+
+  /** 플레이어가 조종하는 차량을 바꾼다(출고된 다른 차량을 인수). 이전 모델은 폐기 */
+  private adoptVehicle(spec: VehicleSpec, model: CarModel | null): void {
+    if (this.model) {
+      this.scene.remove(this.model.root);
+      this.model.dispose();
+    }
+    this.spec = spec;
+    this.model = model ?? createCarModel(spec, { blobTexture: this.built!.textures.blob });
+    this.scene.add(this.model.root);
+    if (!model && spec.visual.kind === 'glb') void applyGlbVisual(this.model, spec);
+    this.sensorView.setSpec(spec);
+    this.assistPanel.setSpec(spec);
+    this.assistPanel.setPdcView(this.settings.pdcView);
+    this.assistPanel.setPalette(this.settings.pdcPalette);
+  }
+
+  /** 기계식 이벤트 처리: 입고 완료 → 모델을 슬롯에 남기고 새 차량 공급 / 인출 → 보관된 차량 인수 */
+  private handleMechEvents(): void {
+    const mech = this.mech;
+    for (const e of mech.events.splice(0)) {
+      if (e.type === 'rejected') continue;
+      if (e.type === 'stored' && e.slot && this.model) {
+        const sc = mech.m.slots[e.slot];
+        if (sc) {
+          this.storedModels.set(e.slot, { model: this.model, spec: this.spec });
+          this.placeModel(this.model, { ...storedPose(e.slot, sc) });
+          this.model = null as unknown as CarModel;
+          // 다음 입고를 위한 새 차량(같은 차종)을 입구 대기 위치에 공급한다
+          const sp = this.missionDef?.spawn ?? this.map.spawn;
+          const spec = this.spec;
+          this.car = createVehicleState(spec, sp.x, sp.z, sp.heading);
+          this.adoptVehicle(spec, null);
+        }
+      } else if (e.type === 'picked' && e.slot) {
+        const entry = this.storedModels.get(e.slot);
+        const sc = mech.m.carrying;
+        const spec = entry?.spec ?? getVehicle(sc?.specId || this.spec.id);
+        this.storedModels.delete(e.slot);
+        this.adoptVehicle(spec, entry?.model ?? null);
+        this.car.gear = 'P';
+        this.car.handbrake = true;
+      } else if (e.type === 'retrieved') {
+        this.hud.toast('출고 완료 — 탑승(G) 후 출차하세요', 'good');
+      }
+    }
+  }
+
   private physicsStep(vin: VehicleInput, dt: number): void {
     const car = this.car;
     const px = car.x;
@@ -908,7 +1011,29 @@ export class Game {
     const c = centerOf(car, this.spec);
     const b = this.map.bounds;
     const outside = c.x < b.minX || c.x > b.maxX || c.z < b.minZ || c.z > b.maxZ || offGround;
-    const hit = outside ? null : findVehicleCollision(obbOf(car, this.spec), this.colliders, this.map.terrain ? car.y : undefined, this.map.terrain ? this.spec.height : undefined);
+    // 기계식 맵은 평면이어도 높이 구간을 검사한다: 지상고(0.2m)보다 낮은 구조물(팔레트 가이드/정지턱)은 차체가 지나가고, 타이어 접촉은 mech.guideDrag/bump 가 처리
+    const lvl = !!(this.map.terrain || this.map.mech);
+    let hit = outside ? null : findVehicleCollision(obbOf(car, this.spec), this.colliders, lvl ? car.y : undefined, lvl ? this.spec.height : undefined);
+    if (hit && this.map.mech && !outside) {
+      // 접촉면을 따라 미끄러짐: 이전 자세에서 x 성분만 / z 성분만 이동해 보고 통과 가능하면 채택 (헤딩은 이전 값 유지). 통과 불가이면 아래에서 복원
+      const nx = car.x;
+      const nz = car.z;
+      car.heading = ph;
+      for (const [tx, tz] of [[nx, pz], [px, nz]] as const) {
+        car.x = tx;
+        car.z = tz;
+        if (!findVehicleCollision(obbOf(car, this.spec), this.colliders, lvl ? car.y : undefined, lvl ? this.spec.height : undefined)) {
+          hit = null;
+          car.v = pv * 0.6; // 접촉 마찰/충격 감쇠 (완전 정지가 아니다)
+          this.lastHitId = '';
+          break;
+        }
+      }
+      if (hit) {
+        car.x = nx;
+        car.z = nz;
+      }
+    }
     if (hit || outside) {
       car.x = px;
       car.z = pz;
@@ -932,7 +1057,10 @@ export class Game {
       this.contactClear += dt;
       if (this.contactClear > 0.4) this.inContact = false;
     }
-    if (this.map.mech) this.mech.stopper(this.spec, car); // 앞바퀴 정지턱
+    if (this.map.mech) {
+      this.mech.bump(this.spec, car, dt); // 낮은 정지턱: 타고 넘는 약한 저항 (멈추지 않음)
+      this.mech.guideDrag(this.spec, car, dt); // 낮은 가이드를 타이어가 타고 넘는 동안의 저항/경고
+    }
   }
 
   private finishMission(): void {
