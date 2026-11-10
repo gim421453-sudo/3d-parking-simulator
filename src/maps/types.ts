@@ -14,6 +14,7 @@ export type ObstacleTag =
   | 'curb'
   | 'drum'
   | 'guide'
+  | 'bollard'
   | 'car';
 
 export interface ObstacleDef {

@@ -117,6 +117,8 @@ export function defaultSensorLayout(length: number, width: number): SensorMount[
 
 /** 차체 벨트라인(하부 차체 윗면) 높이 — carModel 의 SHAPES.belt 와 같은 값. 전/후방 카메라가 차체 윗면 바로 위에 장착되도록 계산에 쓴다 */
 export const BELT_RATIO = { sedan: 0.86, hatch: 0.84, suv: 1.0 } as const;
+/** 앞 범퍼 윗면 높이(m) — 차고 비례 근사 */
+export const bumperTopOf = (height: number): number => 0.42 * height;
 export const beltOf = (body: 'hatch' | 'sedan' | 'suv', height: number): number => BELT_RATIO[body] * (height / 1.45);
 
 function make(p: {
@@ -155,7 +157,9 @@ function make(p: {
     driverEye: { x: 0.36, y: eyeY, z: -0.05 },
     // v0.4.9: 카메라를 차체 윗면 바로 위(트렁크 립/후드 끝)에 장착 — 영상 하단에 실제 차체(범퍼 윗면) 일부가 보인다
     rearCam: { x: 0, y: beltOf(p.body, p.height) + 0.14, z: -p.length / 2 + 0.035, pitch: 28 * DEG },
-    frontCam: { x: 0, y: beltOf(p.body, p.height) + 0.05, z: p.length / 2 - 0.11, pitch: 22 * DEG },
+    // v0.5.1: 전방카메라는 **앞 범퍼 중앙**(x=0)에 장착한다. 범퍼 윗면 높이(차고의 약 42%) 바로 위, 앞끝에서 16cm 안쪽 —
+    // 아래로 24° 기울여 영상 하단에 자기 범퍼 윗면이 살짝 보이고 중앙 시야는 가리지 않는다.
+    frontCam: { x: 0, y: bumperTopOf(p.height) + 0.1, z: p.length / 2 - 0.16, pitch: 24 * DEG },
     sensorHeight: 0.55,
     sensors: defaultSensorLayout(p.length, p.width),
     assist: { ...FULL_ASSIST },

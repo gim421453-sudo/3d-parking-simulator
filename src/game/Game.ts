@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { findVehicleCollision, type Collider } from '../core/geometry';
-import { DEG } from '../core/math';
+import { DEG, worldToLocal } from '../core/math';
 import { loadRecords, loadSettings, QUALITY_PRESETS, sanitizeSettings, saveRecords, saveSettings, type Records, type Settings } from '../core/settings';
 import { removeKey } from '../core/storage';
 import { getMap, mapColliders } from '../maps';
@@ -11,6 +11,7 @@ import { MechInRunner } from '../mission/mech';
 import { MechController } from '../mech/controller';
 import { buildMech, type MechBuilt } from '../mech/mechBuilder';
 import { STATION } from '../mech/machine';
+import { playClunk } from '../mech/sfx';
 import { MechPanel } from '../ui/mechPanel';
 import { Beeper } from '../sensors/beeper';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
@@ -93,6 +94,8 @@ export class Game {
   readonly mech = new MechController();
   mechBuilt: MechBuilt | null = null;
   private mechPanel!: MechPanel;
+  private mechDoorCol: Collider = { kind: 'box', id: 'mech-door', tag: 'wall', x: STATION.doorX, z: 0, w: 0.3, d: 2.4, rot: 0, y0: 0, h: 1.9 };
+  private mechDoorOn = false;
   private cullLevelY = NaN;
   lastClusterData: ClusterData | null = null;
   lastHitId = '';
@@ -191,7 +194,7 @@ export class Game {
       shifter: { request: (g) => this.requestShift(g), context: () => this.shiftContext() },
     });
     this.hud.bindExtra();
-    this.mechPanel = new MechPanel((this.hud.root.querySelector('#left-col') as HTMLElement) ?? this.hud.root, (a) => this.onAction(a));
+    this.mechPanel = new MechPanel((this.hud.root.querySelector('#top-right') as HTMLElement) ?? this.hud.root, (a) => this.onAction(a));
     this.assistPanel = new AssistPanel(root, {
       onToggleSensor: () => this.onAction('sensorToggle'),
       onToggleSound: () => this.onAction('soundToggle'),
@@ -354,7 +357,8 @@ export class Game {
     }
     this.scene.background = new THREE.Color(map.env.sky);
     this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : new THREE.Fog(map.env.sky, 100, 320);
-    this.colliders = mapColliders(map);
+    this.colliders = map.mech ? [...mapColliders(map)] : mapColliders(map); // 기계식 맵은 셔터 충돌체를 동적으로 넣고 빼므로 복사본을 쓴다
+    this.mechDoorOn = false;
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
     // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이
@@ -778,8 +782,22 @@ export class Game {
 
     if (mech) {
       mech.step(dt, this.spec, this.car);
-      this.mechBuilt?.update(mech.m, dt, this.car.x < STATION.palletX + 14 && this.car.x > STATION.doorX - 28);
-      this.mechPanel.update(mech.m, mech.items);
+      if (!mech.m.locked && mech.settle(dt, this.spec, this.car)) playClunk(mech.lastSeatImpact, this.settings.sensorSound ? this.settings.sensorVolume : 0); // 앞바퀴 정지 홈 안착
+      // 출입문(셔터) 충돌체: 문이 닫혀 가는 동안에는 차량이 통과할 수 없다
+      const wantDoor = mech.doorBlocking();
+      if (wantDoor !== this.mechDoorOn) {
+        this.mechDoorOn = wantDoor;
+        if (wantDoor) {
+          this.colliders.push(this.mechDoorCol);
+          this.colliderById.set(this.mechDoorCol.id, this.mechDoorCol);
+        } else {
+          const i = this.colliders.indexOf(this.mechDoorCol);
+          if (i >= 0) this.colliders.splice(i, 1);
+          this.colliderById.delete(this.mechDoorCol.id);
+        }
+      }
+      this.mechBuilt?.update(mech.m, dt, this.car.x < STATION.palletX + 14 && this.car.x > STATION.doorX - 28, mech.guide);
+      this.mechPanel.update(mech.m, mech.items, mech.guide);
     }
 
     // 깜빡이
@@ -1137,11 +1155,23 @@ export class Game {
       const pose = this.poseNow();
       for (const side of ['left', 'right'] as const) {
         if (this.riskOut.groups[side].threat || this.viewOut.view === side) {
-          const f = frameView({ view: side, pose, spec: this.spec, hits: this.frameHits(), colliders: this.colliders, aspect: 16 / 9 });
+          const f = frameView({ view: side, pose, spec: this.spec, hits: this.sideFrameHits(side, pose), colliders: this.colliders, aspect: 16 / 9 });
           this.sideBlocked[side] = !f.visible;
         } else this.sideBlocked[side] = false;
       }
     }
+  }
+
+  /**
+   * 측면(좌/우) 3D 시점의 가림 판정에 쓰는 히트점: 그 쪽 측면에 있고 차체 길이 구간(앞뒤 +0.35m, 측면 센서 zBound 와 같은 기준) 안의 것만.
+   * (이전: 뒤/앞 장애물의 히트까지 포함되어, 후방 벽만 생겨도 측면뷰가 "가려짐"으로 판정되어 시점이 풀리던 버그)
+   */
+  private sideFrameHits(side: 'left' | 'right', pose: { x: number; z: number; heading: number }): { x: number; z: number }[] {
+    const hl = this.spec.length / 2 + 0.35;
+    return this.frameHits().filter((h) => {
+      const l = worldToLocal(pose.x, pose.z, pose.heading, h.x, h.z);
+      return (side === 'left' ? l.x > 0 : l.x < 0) && Math.abs(l.z) <= hl;
+    });
   }
 
   /** 프레이밍에 쓰는 히트점: 현재 감지 + 짧은 유지(해제 대기 중 카메라가 튀지 않게) */
@@ -1154,7 +1184,10 @@ export class Game {
     const cam = this.rig.assistCamera;
     const body = obbOf(this.car, this.spec);
     const v = new THREE.Vector3();
+    const sideView = this.viewOut.view === 'left' || this.viewOut.view === 'right' ? this.viewOut.view : null;
+    const relevant = sideView ? new Set(this.sideFrameHits(sideView, this.poseNow()).map((h) => `${h.x}|${h.z}`)) : null; // 측면 시점은 그 쪽 측면 장애물만 본다(후방/전방 벽이 시점을 흔들지 않음)
     for (const h of this.allHits()) {
+      if (relevant && !relevant.has(`${h.x}|${h.z}`)) continue;
       if (pointToObbGap(h.x, h.z, body) > 1.2) continue;
       v.set(h.x, this.poseNow().y + 0.3, h.z).project(cam);
       if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.0 || Math.abs(v.y) > 1.0) return true;
@@ -1240,7 +1273,7 @@ export class Game {
       if (!this.latch || this.latch.view !== view || relatch) {
         const g = this.riskOut?.groups;
         const focusSide = g ? (g.left.veryClose || g.left.pillar ? 'left' : g.right.veryClose || g.right.pillar ? 'right' : g.left.threat ? 'left' : g.right.threat ? 'right' : null) : null;
-        const f = frameView({ view, pose, spec: this.spec, hits: this.frameHits(), colliders: this.colliders, aspect: ASSIST_CAM_W / ASSIST_CAM_H, focusSide });
+        const f = frameView({ view, pose, spec: this.spec, hits: view === 'left' || view === 'right' ? this.sideFrameHits(view, pose) : this.frameHits(), colliders: this.colliders, aspect: ASSIST_CAM_W / ASSIST_CAM_H, focusSide });
         this.latch = toLocalFrame(view, f, pose);
         this.relatchGate.reset();
         this.rig.beginTransition();
@@ -1323,6 +1356,14 @@ export class Game {
         const cx = z.corners.reduce((a, c) => a + c.x, 0) / 4;
         const cz = z.corners.reduce((a, c) => a + c.z, 0) / 4;
         return !segmentBlocked({ x: camPos.x, y: camPos.y, z: camPos.z }, { x: cx, y: (pose.y ?? 0) + 0.25, z: cz }, this.colliders, cbody, { ignoreIds: new Set(z.colliderIds), endMargin: 0.3, step: 0.3 });
+      });
+    }
+    if (isCar && zones.length > 1) {
+      // 앞에 있는 다른 장애물에 완전히 가려진 뒤쪽 패널은 그리지 않는다 (카메라 → 패널 중심 선분이 다른 충돌체를 지나면 가림)
+      zones = zones.filter((z) => {
+        const cx = (z.corners[2].x + z.corners[3].x) / 2;
+        const cz = (z.corners[2].z + z.corners[3].z) / 2;
+        return !segmentBlocked({ x: camPos.x, y: camPos.y, z: camPos.z }, { x: cx, y: (pose.y ?? 0) + Math.min(0.3, (z.panelHeight ?? 0.4) / 2), z: cz }, this.colliders, null, { ignoreIds: new Set(z.colliderIds), endMargin: 0.25, step: 0.2 });
       });
     }
     this.assistPanel.drawOverlay({
@@ -1547,6 +1588,7 @@ function tagName(tag: string): string {
     curb: '연석',
     drum: '드럼통',
     guide: '팔레트 가이드',
+    bollard: '볼라드',
     car: '주차된 차량',
   };
   return t[tag] ?? '장애물';

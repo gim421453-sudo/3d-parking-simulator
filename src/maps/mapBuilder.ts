@@ -152,6 +152,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       case 'drum':
         drums.push(o);
         break;
+      case 'bollard': // 금속 볼라드는 기계식 주차장 모델(mech/mechBuilder)이 그린다
       case 'guide':
         break; // 팔레트 가이드는 이동하는 팔레트 모델(mech/mechBuilder)이 그린다
       case 'lamp': {

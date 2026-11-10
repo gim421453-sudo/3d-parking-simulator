@@ -1,0 +1,43 @@
+/** v0.5.1 기계식 전체 동선 + 스크린샷: node scripts/shot-v051-mech.cjs → docs/screenshots/v051/mech-*.png + JSON */
+const { chromium } = require('playwright'); const { spawn } = require('child_process');
+const fs = require('fs'); const path = require('path');
+const OUT = path.join(__dirname, '..', 'docs', 'screenshots', 'v051'); fs.mkdirSync(OUT, { recursive: true });
+(async () => {
+  const srv = spawn('npx', ['vite', 'preview', '--port', '4222', '--host', '127.0.0.1', '--strictPort'], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 3500));
+  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'] });
+  const p = await (await b.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+  const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
+  await p.addInitScript(() => localStorage.setItem('parksim.v1.settings', JSON.stringify({ quality: 'medium', resolutionScale: 0.9, shadows: 'off', vehicleId: 'sedan', mapId: 'mechpark', missionId: 'mech-in-1', infoAutoShow: false })));
+  await p.goto('http://127.0.0.1:4222/'); await p.waitForSelector('#m-start'); await p.click('#m-start');
+  await p.waitForSelector('#hud:not(.hidden)', { timeout: 30000 }); await p.waitForTimeout(2000);
+  const shot = (n) => p.screenshot({ path: path.join(OUT, `mech-${n}.png`) });
+  const st = () => p.evaluate(() => { const G = window.__game; return { x: +G.car.x.toFixed(2), z: +G.car.z.toFixed(2), y: +G.car.y.toFixed(3), pitchDeg: +(G.car.pitch * 57.3).toFixed(2), phase: G.mech.m.phase, door: +G.mech.m.door.toFixed(2), yaw: +G.mech.m.yaw.toFixed(2), sign: G.mechBuilt.signState, seat: G.mech.seatCount, doorCol: G.colliders.some((c) => c.id === 'mech-door'), mission: G.mission && G.mission.status, hdg: +G.car.heading.toFixed(2) }; });
+  const out = { log: [] };
+  const close = async () => { await p.evaluate(() => { const G = window.__game; G.infoOut && 0; document.querySelector('#parking-assist [data-pa="close"]')?.click(); }); };
+  out.start = await st(); await shot('01-entrance-sign-forward');
+  await p.evaluate(() => { const G = window.__game; G.car.gear = 'D'; G.car.handbrake = false; G.debugInput = { throttle: 0.5, brake: 0, steerInput: 0 }; });
+  await p.waitForFunction(() => window.__game.car.x > -10, null, { timeout: 120000 }); out.nearDoor = await st(); await shot('02-bollards-guides');
+  await p.waitForFunction(() => window.__game.car.x > -6, null, { timeout: 120000 });
+  await p.waitForFunction(() => window.__game.mech.seatCount > 0, null, { timeout: 120000 }); out.seated = await st(); await shot('03-seat-in-groove');
+  await p.waitForFunction(() => window.__game.mech.stopperHits > 0, null, { timeout: 120000 });
+  await p.evaluate(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+  await p.waitForFunction(() => Math.abs(window.__game.car.v) < 0.05, null, { timeout: 60000 });
+  await p.evaluate(() => { const G = window.__game; G.debugInput = null; G.car.gear = 'P'; G.car.handbrake = true; });
+  await p.waitForTimeout(800); out.stopped = await st(); await shot('04-sign-stop');
+  await p.keyboard.press('KeyG'); await p.waitForTimeout(300); await p.keyboard.press('KeyJ');
+  await p.waitForFunction(() => window.__game.mech.m.door < 0.5, null, { timeout: 60000 }); out.shutterClosing = await st(); await shot('05-shutter-closing');
+  await p.waitForFunction(() => window.__game.state === 'result', null, { timeout: 180000 }); out.stored = await st();
+  await p.evaluate(() => { document.getElementById('hud'); });
+  console.log(JSON.stringify(out, null, 1));
+  // 출고: 회전
+  await p.evaluate(() => { const G = window.__game; G.updateSettings({ missionId: 'mech-out-1' }); G.startRun(); });
+  await p.waitForFunction(() => window.__game.mission && window.__game.mission.def.id === 'mech-out-1' && window.__game.state === 'playing', null, { timeout: 30000 });
+  await p.waitForTimeout(1200); await p.keyboard.press('KeyK');
+  await p.waitForFunction(() => window.__game.mech.m.phase === 'rotating' && window.__game.mech.m.yaw > 1.2, null, { timeout: 180000 });
+  const rot = await st(); await shot('06-turntable-rotating');
+  await p.waitForFunction(() => window.__game.mech.m.phase === 'exit', null, { timeout: 120000 });
+  const ex = await st(); await shot('07-exit-door-open');
+  console.log(JSON.stringify({ rot, ex, errors: errs.slice(0, 5) }, null, 1));
+  await b.close(); srv.kill();
+})().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

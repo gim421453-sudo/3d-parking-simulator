@@ -954,7 +954,8 @@ async function waitServer(url, tries = 50) {
   const cl0 = await camLocal();
   await addBox('extra', SX, SZ - Ls / 2 - 1.2, 3, 0.5); // 후방 장애물(진행 방향이 아니므로 시점을 바꾸지 않음)
   await g(() => { const c = window.__game.car; c.z += 0.6; });
-  await sleep(2500);
+  await sleep(800);
+  await until(() => window.__game.rig.assistSettled, undefined, 30000); // 게임 상태(카메라 전환 완료)를 기다린다 — 소프트웨어 렌더는 게임 시간이 느리다
   const cl1 = await camLocal();
   const stable = cl0.settled && Math.abs(cl0.lx - cl1.lx) < 0.05 && Math.abs(cl0.lz - cl1.lz) < 0.05 && Math.abs(cl0.y - cl1.y) < 0.02 && Math.abs(cl0.fov - cl1.fov) < 0.01;
   check('카메라 안정화: 전환 후 새 장애물/차량 이동에도 구도(차량 기준 위치·높이·FOV)가 고정되고 차량만 추적', stable, JSON.stringify({ cl0, cl1 }));

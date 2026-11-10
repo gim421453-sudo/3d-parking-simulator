@@ -95,9 +95,12 @@ const TILE_DEPTH = 0.45; // 장애물 표면 앞쪽(차량 쪽) 바닥으로 칠
  * 타일은 그 칸의 가장 가까운 장애물 표면에서 차량 쪽으로 TILE_DEPTH 만큼의 바닥 사각형이라 표면 위치와 일치한다.
  * 칸의 색 단계는 그 칸의 가장 가까운 거리로 정한다(숫자는 내보내지 않는다). 히트가 없는 칸은 만들지 않는다.
  */
-export const PANEL_H_DEFAULT = 1.0;
-export const PANEL_H_MIN = 0.35;
-export const PANEL_H_MAX = 1.3;
+/** v0.5.1: 패널은 가로로 길고 세로로 낮게 (이전 1.0/0.35/1.3m) */
+export const PANEL_H_DEFAULT = 0.42;
+export const PANEL_H_MIN = 0.2;
+export const PANEL_H_MAX = 0.5;
+/** 인접 칸을 하나의 넓은 패널로 합치는 조건: 같은 단계 + 표면 거리 차이가 이 값 미만 */
+export const MERGE_GAP = 0.3;
 
 export function buildCameraTiles(snap: SensorSnapshot | null, spec: VehicleSpec, body: Obb, dir: 'front' | 'rear', range: number, critical: number, topOf?: (colliderId: string) => number | undefined, baseY = 0): ObstacleZone[] {
   if (!snap) return [];
@@ -120,25 +123,37 @@ export function buildCameraTiles(snap: SensorSnapshot | null, spec: VehicleSpec,
     }
   });
   const out: ObstacleZone[] = [];
+  // 센서 계산은 0.3m 칸으로 촘촘하게 하고, 화면에는 인접한 같은 단계/비슷한 표면 거리의 칸을 하나의 넓은 패널로 합쳐 보여 준다
+  type Group = { i0: number; i1: number; gap: number; level: ProximityLevel; hits: number; ids: Set<string> };
+  const groups: Group[] = [];
   bins.forEach((b, i) => {
     if (b.hits === 0 || b.gap > range) return;
     const level = proximityLevel(b.gap, range, critical);
     if (level === 'none') return;
+    const g = groups[groups.length - 1];
+    if (g && g.i1 === i - 1 && g.level === level && Math.abs(b.gap - g.gap) < MERGE_GAP) {
+      g.i1 = i;
+      g.gap = Math.min(g.gap, b.gap);
+      g.hits += b.hits;
+      b.ids.forEach((id) => g.ids.add(id));
+    } else groups.push({ i0: i, i1: i, gap: b.gap, level, hits: b.hits, ids: new Set(b.ids) });
+  });
+  for (const g of groups) {
     // 화면 왼쪽 = 차량 왼쪽(+x). 로컬 x 는 왼쪽이 +.
-    const xl = half - i * w;
-    const xr = xl - w;
-    const zNear = (dir === 'front' ? 1 : -1) * (hl + Math.max(0, b.gap - TILE_DEPTH));
-    const zFar = (dir === 'front' ? 1 : -1) * (hl + b.gap);
+    const xl = half - g.i0 * w;
+    const xr = half - (g.i1 + 1) * w;
+    const zNear = (dir === 'front' ? 1 : -1) * (hl + Math.max(0, g.gap - TILE_DEPTH));
+    const zFar = (dir === 'front' ? 1 : -1) * (hl + g.gap);
     const P = (x: number, z: number): { x: number; z: number } => localToWorld(body.x, body.z, body.rot, x, z);
     // 수직 경고 패널 높이: 실제 장애물 윗면(충돌체 데이터)까지, 없으면 기본값. 없는 장애물을 키우지 않는다.
     let top = Infinity;
-    if (topOf) for (const id of b.ids) {
+    if (topOf) for (const id of g.ids) {
       const t = topOf(id);
       if (t !== undefined) top = Math.min(top, t - baseY);
     }
     const panelHeight = Number.isFinite(top) ? Math.min(PANEL_H_MAX, Math.max(PANEL_H_MIN, top)) : PANEL_H_DEFAULT;
-    out.push({ sensorId: `tile-${dir}-${i}`, group: dir, level, corners: [P(xl, zNear), P(xr, zNear), P(xr, zFar), P(xl, zFar)], hits: b.hits, colliderIds: [...b.ids], panelHeight });
-  });
+    out.push({ sensorId: `tile-${dir}-${g.i0}`, group: dir, level: g.level as Exclude<ProximityLevel, 'none'>, corners: [P(xl, zNear), P(xr, zNear), P(xr, zFar), P(xl, zFar)], hits: g.hits, colliderIds: [...g.ids], panelHeight });
+  }
   return out;
 }
 

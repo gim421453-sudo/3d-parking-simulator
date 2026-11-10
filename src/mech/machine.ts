@@ -119,9 +119,9 @@ export interface CheckItem {
   ok: boolean;
 }
 
-export type Phase = 'waiting' | 'closing' | 'toBay' | 'stored' | 'fromBay' | 'opening' | 'exit' | 'estop';
+export type Phase = 'waiting' | 'closing' | 'toBay' | 'stored' | 'fromBay' | 'rotating' | 'opening' | 'exit' | 'estop';
 
-export const TIMES = { door: 2.5, liftPerMeter: 1.6, transfer: 3.0 };
+export const TIMES = { door: 2.5, liftPerMeter: 1.6, transfer: 3.0, rotate: 4.0 };
 
 export interface MachineState {
   phase: Phase;
@@ -135,6 +135,8 @@ export interface MachineState {
   /** 팔레트 현재 위치 */
   palletY: number;
   palletZ: number;
+  /** 턴테이블 회전각(rad, 0..π): 출고 전 팔레트+차량이 함께 180° 회전해 차량이 출입문을 향하게 한다 */
+  yaw: number;
   occupant: 'in' | 'out';
   /** 차량이 팔레트에 고정(승강/이송 중)되어 운전 불가인가 */
   locked: boolean;
@@ -148,7 +150,7 @@ export interface MachineState {
 }
 
 export function newMachine(): MachineState {
-  return { phase: 'waiting', resume: null, t: 0, door: 1, bay: null, palletY: 0, palletZ: 0, occupant: 'in', locked: false, message: '', cycles: 0, doorBlocked: false, rel: null };
+  return { phase: 'waiting', resume: null, t: 0, door: 1, bay: null, palletY: 0, palletZ: 0, yaw: 0, occupant: 'in', locked: false, message: '', cycles: 0, doorBlocked: false, rel: null };
 }
 
 export function bayOf(id: BayId): (typeof STATION.bays)[number] {
@@ -300,11 +302,23 @@ export function stepMachine(m: MachineState, dt: number, doorClear: boolean): vo
         m.palletZ = 0;
         m.palletY = (1 - f) * b.y;
         if (f >= 1) {
-          m.phase = 'opening';
+          m.phase = 'rotating';
           m.t = 0;
           m.palletY = 0;
-          m.message = '출입문을 여는 중';
+          m.message = '턴테이블 회전 중 (180°)';
         }
+      }
+      break;
+    }
+    case 'rotating': {
+      // 인터록: 문이 닫혀 있고 차량이 팔레트에 고정되어 있을 때만 회전
+      if (m.door > 0 || !m.locked || m.occupant !== 'out') break;
+      m.t += dt;
+      m.yaw = Math.min(Math.PI, (Math.PI * m.t) / TIMES.rotate);
+      if (m.yaw >= Math.PI) {
+        m.phase = 'opening';
+        m.t = 0;
+        m.message = '출입문을 여는 중';
       }
       break;
     }
@@ -330,7 +344,7 @@ export function releaseVehicle(m: MachineState): void {
   m.occupant = 'in';
 }
 export function resetToWaiting(m: MachineState): void {
-  m.phase = 'waiting';
+  m.phase = 'waiting'; // yaw 는 차량이 팔레트를 벗어난 뒤 컨트롤러가 0 으로 되돌린다
   m.t = 0;
   m.locked = false;
   m.rel = null;
@@ -342,6 +356,49 @@ export function resetToWaiting(m: MachineState): void {
 /** 고정된 차량의 월드 pose (뒷축 중심, 팔레트 pose + 상대 위치) */
 export function lockedPose(m: MachineState): { x: number; z: number; y: number; heading: number } | null {
   if (!m.rel) return null;
-  const w = localToWorld(STATION.palletX, m.palletZ, STATION.heading, m.rel.x, m.rel.z);
-  return { x: w.x, z: w.z, y: m.palletY, heading: STATION.heading + m.rel.heading };
+  const w = localToWorld(STATION.palletX, m.palletZ, STATION.heading + m.yaw, m.rel.x, m.rel.z);
+  return { x: w.x, z: w.z, y: m.palletY, heading: STATION.heading + m.yaw + m.rel.heading };
+}
+
+
+// ---------------------------------------------------------------- 입구 안내 표시기 (전진/정지/후진)
+export type GuideState = 'forward' | 'stop' | 'back' | 'align' | 'blocked';
+export interface Guidance {
+  state: GuideState;
+  /** 짧은 안내 문구 (거리 숫자 없음) */
+  text: string;
+  /** 정렬 힌트: 차량을 어느 쪽으로 옮겨야 하는가 */
+  steer: 'left' | 'right' | null;
+}
+
+/**
+ * 입구 정면 LED 표시기의 상태. **차량의 실제 위치/방향/바퀴(앞바퀴 정지턱 거리, 좌우 오프셋, 헤딩)로만 정해진다**(시간/타이머 없음).
+ *  - blocked: 장치가 대기 상태가 아니거나 출입문이 열려 있지 않음
+ *  - back: 앞바퀴가 정지 위치를 지나침
+ *  - align: 팔레트 진입부(앞바퀴가 정지 위치 3.5m 이내)인데 좌우/방향이 허용 오차를 벗어남
+ *  - stop: 앞바퀴가 정지 위치에 있고 정렬 OK
+ *  - forward: 그 외(정지 위치보다 뒤에 있음)
+ */
+export function guidance(spec: VehicleSpec, s: AlignInput, m: MachineState): Guidance {
+  if (m.phase !== 'waiting' || m.door < 0.9) return { state: 'blocked', text: '진입 금지', steer: null };
+  const a = alignment(spec, s);
+  if (a.stopperGap < -STATION.stopperTol) return { state: 'back', text: '후진', steer: null };
+  const near = a.stopperGap < 3.5;
+  const latBad = Math.abs(a.lateral) > ALIGN_TOL.lateral;
+  const headBad = a.headingErrDeg > ALIGN_TOL.heading / DEG;
+  if (near && (latBad || headBad)) {
+    // 차량 진행 방향(+x) 기준 왼쪽 = -z. 중심선보다 +z 쪽(오른쪽)이면 왼쪽으로 옮겨야 한다
+    return { state: 'align', text: latBad ? (a.lateral > 0 ? '왼쪽으로' : '오른쪽으로') : '방향 정렬', steer: latBad ? (a.lateral > 0 ? 'left' : 'right') : null };
+  }
+  if (a.atStopper) return { state: 'stop', text: '정지', steer: null };
+  return { state: 'forward', text: '전진', steer: null };
+}
+
+/** 앞바퀴 안착 홈(정지 홈)의 깊이(m): 바퀴 중심 x 가 stopperX 근처 ±0.14m 에서 최대 3cm */
+export const POCKET = { depth: 0.03, halfWidth: 0.14, center: STATION.stopperX - 0.06 };
+export function pocketDepthAt(frontWheelX: number): number {
+  const d = Math.abs(frontWheelX - POCKET.center);
+  if (d >= POCKET.halfWidth) return 0;
+  const t = 1 - d / POCKET.halfWidth;
+  return POCKET.depth * t * t * (3 - 2 * t); // smoothstep
 }

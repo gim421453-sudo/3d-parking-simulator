@@ -47,7 +47,7 @@ describe('카메라 영상용 장애물 구역(overlay)', () => {
   });
 });
 
-import { buildBoundaryCells, buildCameraTiles, CELL_MAX, CELL_MAX_GAP, TILE_W, tileLayout } from '../src/pdc/overlay';
+import { buildBoundaryCells, buildCameraTiles, CELL_MAX, CELL_MAX_GAP, PANEL_H_MAX, PANEL_H_MIN, TILE_W, tileLayout } from '../src/pdc/overlay';
 import { guideCutDistance } from '../src/pdc/guidelines';
 import { localToWorld as l2w } from '../src/core/math';
 
@@ -200,12 +200,14 @@ describe('수직 경고 패널 데이터 (v0.4.8)', () => {
   });
   it('패널 높이는 실제 충돌체 윗면(topOf)에서 정해지고 상/하한으로 제한된다 — 없는 높이를 만들지 않음', () => {
     const sn = snapOf([rearWall(1.0, 12, 0, 1.2)]);
-    const low = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 0.6, 0);
-    expect(low.every((q) => Math.abs((q.panelHeight ?? 0) - 0.6) < 1e-9)).toBe(true);
+    const low = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 0.3, 0);
+    expect(low.every((q) => Math.abs((q.panelHeight ?? 0) - 0.3) < 1e-9)).toBe(true);
     const tall = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 3.0, 0);
-    expect(tall.every((q) => (q.panelHeight ?? 0) <= 1.3 + 1e-9)).toBe(true);
-    const elevated = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 4.6, 4.0); // 다층: 기준 높이 상대
-    expect(elevated.every((q) => Math.abs((q.panelHeight ?? 0) - 0.6) < 1e-9)).toBe(true);
+    expect(tall.every((q) => (q.panelHeight ?? 0) <= PANEL_H_MAX + 1e-9)).toBe(true);
+    const tiny = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 0.05, 0);
+    expect(tiny.every((q) => (q.panelHeight ?? 0) >= PANEL_H_MIN - 1e-9)).toBe(true);
+    const elevated = buildCameraTiles(sn, spec, body, 'rear', 3, 0.5, () => 4.3, 4.0); // 다층: 기준 높이 상대
+    expect(elevated.every((q) => Math.abs((q.panelHeight ?? 0) - 0.3) < 1e-9)).toBe(true);
   });
   it('좁은 기둥: 인접한 감지 안 된 칸까지 패널을 늘리지 않는다', () => {
     const pillar = (gap: number): Collider => ({ kind: 'cyl', id: 'p', tag: 'pillar', x: 0, z: -(spec.length / 2 + gap + 0.15), r: 0.15, y0: 0, h: 3 });
@@ -214,7 +216,7 @@ describe('수직 경고 패널 데이터 (v0.4.8)', () => {
     expect(t.length).toBeLessThanOrEqual(3);
     for (const q of t) {
       const xs = [q.corners[2].x, q.corners[3].x];
-      expect(Math.abs(xs[0] - xs[1])).toBeLessThan(tileLayout(spec.width / 2).w + 1e-6);
+      expect(Math.abs(xs[0] - xs[1])).toBeLessThan(tileLayout(spec.width / 2).w * 3 + 1e-6);
     }
   });
   it('후방 카메라 타일의 왼쪽/오른쪽이 뒤집히지 않는다 (왼쪽 장애물 → +x 쪽 칸)', () => {
@@ -246,8 +248,11 @@ describe('카메라 경고 패널 — 화각 전체 커버 (v0.5.0 P1-C)', () =>
   it('중앙 차량(폭 1.8m 박스): 중앙 칸들만 점등, 가장자리 칸은 소등', () => {
     const car: Collider = { kind: 'box', id: 'car', tag: 'car', x: 0, z: -(spec.length / 2 + 1.0 + 2.3), w: 1.8, d: 4.6, rot: 0, y0: 0, h: 1.4 };
     const t = tiles([car]);
-    expect(t.length).toBeGreaterThan(3);
+    expect(t.length).toBeGreaterThanOrEqual(1);
+    expect(t.length).toBeLessThanOrEqual(3); // 인접 칸은 하나의 넓은 패널로 합쳐진다
     expect(t.every((q) => Math.abs(cxOf(q)) < 1.6)).toBe(true);
+    const widest = Math.max(...t.map((q) => Math.abs(q.corners[2].x - q.corners[3].x)));
+    expect(widest).toBeGreaterThan(1.2); // 가로로 넓은 패널
   });
   it('비스듬한 벽: 칸마다 표면 깊이(간격)가 달라진다 (일률적인 사각형 금지)', () => {
     const wallRot: Collider = { kind: 'box', id: 'ow', tag: 'wall', x: 0, z: -(spec.length / 2 + 1.6), w: 8, d: 0.5, rot: 0.5, y0: 0, h: 1.2 };
@@ -268,4 +273,47 @@ describe('카메라 경고 패널 — 화각 전체 커버 (v0.5.0 P1-C)', () =>
     expect(tiles([])).toEqual([]);
     expect(tiles([wall(0, spec.length / 2 + 2, 8, 0.5)], 'rear')).toEqual([]);
   });
+});
+
+describe('v0.5.1 패널: 가로로 길고 세로로 낮게, 개수 감소', () => {
+  const body = { x: 0, z: 0, rot: 0, hw: spec.width / 2, hl: spec.length / 2 };
+  const wide = (gap: number): Collider => ({ kind: 'box', id: 'ww', tag: 'wall', x: 0, z: -(spec.length / 2 + gap + 0.25), w: 12, d: 0.5, rot: 0, y0: 0, h: 1.4 });
+  it('넓은 벽은 몇 개 안 되는 넓은 패널로 합쳐지고 높이는 0.5m 이하', () => {
+    const t = buildCameraTiles(snapOf([wide(1.0)]), spec, body, 'rear', 3, 0.5, () => 1.4, 0);
+    expect(t.length).toBeGreaterThan(0);
+    expect(t.length).toBeLessThanOrEqual(4);
+    for (const q of t) expect(q.panelHeight ?? 9).toBeLessThanOrEqual(PANEL_H_MAX + 1e-9);
+    const span = t.reduce((a, q) => a + Math.abs(q.corners[2].x - q.corners[3].x), 0);
+    expect(span).toBeGreaterThan(spec.width); // 가로 폭이 차체 폭 이상을 덮음
+  });
+  it('작은 기둥은 감지된 부분만 (0.9m 이하 폭)', () => {
+    const pillar: Collider = { kind: 'cyl', id: 'pp', tag: 'pillar', x: 0.3, z: -(spec.length / 2 + 1.0 + 0.15), r: 0.15, y0: 0, h: 1.5 };
+    const t = buildCameraTiles(snapOf([pillar]), spec, body, 'rear', 3, 0.5, () => 1.5, 0);
+    expect(t.length).toBeGreaterThan(0);
+    for (const q of t) expect(Math.abs(q.corners[2].x - q.corners[3].x)).toBeLessThan(0.95);
+  });
+  // 전/후방 × 정중앙/좌우 끝/좌우 사선: 실제 센서 히트가 있으면 패널이 생기고 해당 쪽에만 생긴다
+  const positions: { name: string; lx: number; gap: number }[] = [
+    { name: '정중앙', lx: 0, gap: 1.0 },
+    { name: '좌측 끝', lx: spec.width / 2 + 1.0, gap: 1.2 },
+    { name: '우측 끝', lx: -(spec.width / 2 + 1.0), gap: 1.2 },
+    { name: '좌측 사선', lx: spec.width / 2 + 0.5, gap: 0.8 },
+    { name: '우측 사선', lx: -(spec.width / 2 + 0.5), gap: 0.8 },
+  ];
+  for (const dir of ['rear', 'front'] as const) {
+    for (const p of positions) {
+      it(`${dir === 'rear' ? '후방' : '전방'} ${p.name}: 기둥을 실제 센서가 감지하면 그 방향의 패널로 표시된다`, () => {
+        const sgn = dir === 'rear' ? -1 : 1;
+        const pil: Collider = { kind: 'cyl', id: 'o', tag: 'pillar', x: p.lx, z: sgn * (spec.length / 2 + p.gap + 0.2), r: 0.2, y0: 0, h: 1.5 };
+        const sn = snapOf([pil]);
+        const hits = sn.readings.reduce((a, r) => a + r.hits.length, 0);
+        const t = buildCameraTiles(sn, spec, body, dir, 3, 0.5, () => 1.5, 0);
+        expect(hits, `${dir}/${p.name} 센서가 감지해야 함`).toBeGreaterThan(0);
+        expect(t.length, `${dir}/${p.name} 패널`).toBeGreaterThan(0);
+        const cx = t.reduce((a, q) => a + (q.corners[2].x + q.corners[3].x) / 2, 0) / t.length;
+        if (p.lx > 0.2) expect(cx).toBeGreaterThan(0);
+        if (p.lx < -0.2) expect(cx).toBeLessThan(0);
+      });
+    }
+  }
 });

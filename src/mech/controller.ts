@@ -1,10 +1,13 @@
-import { localToWorld, worldToLocal } from '../core/math';
+import { angleDiff, clamp, localToWorld, worldToLocal } from '../core/math';
 import { centerOf } from '../vehicle/physics';
 import type { VehicleState } from '../vehicle/physics';
 import type { VehicleSpec } from '../vehicle/spec';
 import type { Action } from '../game/input';
 import {
   STATION,
+  guidance,
+  pocketDepthAt,
+  type Guidance,
   type AlignInput,
   type BayId,
   type CheckItem,
@@ -24,6 +27,8 @@ import {
 } from './machine';
 
 /** 게임 루프와 순수 장치 로직(machine.ts)을 잇는 얇은 계층 (THREE 의존 없음 → 단위 테스트 가능) */
+const MECH_HALF = 1.1; // 정지 홈은 팔레트 중심 ±1.1m 안(좌우 홈 폭)에 있다
+
 export class MechController {
   m: MachineState = newMachine();
   /** 다음 입고에 쓸 베이 (번갈아 사용) */
@@ -32,8 +37,28 @@ export class MechController {
   /** 이번 프레임의 문 구역 점유 */
   doorClear = true;
   stopperHits = 0;
+  /** 입구 표시기 상태 (실제 차량 위치로 계산) */
+  guide: Guidance = { state: 'blocked', text: '', steer: null };
+  /** 앞바퀴 안착 홈: 현재 침하량(m), 안착 이벤트 횟수/마지막 충격 세기(0..1) */
+  dip = 0;
+  seatCount = 0;
+  lastSeatImpact = 0;
+  private seatArmed = true;
+  private kick = 0;
+  private kickT = 99;
+
+  /** 출입문(셔터) 충돌체가 필요한가: 문이 60% 이상 닫힌 상태 */
+  doorBlocking(): boolean {
+    return this.m.door < 0.6;
+  }
 
   reset(): void {
+    this.dip = 0;
+    this.seatCount = 0;
+    this.lastSeatImpact = 0;
+    this.seatArmed = true;
+    this.kick = 0;
+    this.kickT = 99;
     this.m = newMachine();
     this.nextBay = 0;
     this.items = [];
@@ -111,7 +136,44 @@ export class MechController {
     return hi >= STATION.doorX - 0.5 && lo <= STATION.doorX + 0.5;
   }
 
+  /**
+   * 팔레트 위에서 앞바퀴가 정지 홈에 걸려 살짝 내려앉는 느낌(저속 접촉 모델). 차량을 끌어당기지 않고 높이/피치만 3cm 이내로 바꾼다.
+   * 속도가 빠를수록 안착 시 충격(작은 진동)이 커진다. 이벤트는 홈을 벗어났다가 다시 들어올 때마다 1회.
+   */
+  settle(dt: number, spec: VehicleSpec, car: VehicleState): boolean {
+    const m = this.m;
+    let target = 0;
+    const onLine = !m.locked && m.yaw === 0 && Math.abs(angleDiff(car.heading, STATION.heading)) < 0.5;
+    if (onLine) {
+      const f = localToWorld(car.x, car.z, car.heading, 0, spec.wheelbase);
+      if (Math.abs(f.z) < MECH_HALF) target = pocketDepthAt(f.x);
+    }
+    let seated = false;
+    if (target > 0.6 * 0.03 && this.seatArmed) {
+      this.seatArmed = false;
+      seated = true;
+      this.seatCount++;
+      this.lastSeatImpact = clamp(Math.abs(car.v) / 1.2, 0.1, 1);
+      this.kick = 0.006 + 0.012 * this.lastSeatImpact; // rad
+      this.kickT = 0;
+    } else if (target < 0.2 * 0.03) this.seatArmed = true;
+    this.dip += (target - this.dip) * Math.min(1, dt * 14);
+    this.kickT += dt;
+    const osc = this.kickT < 0.6 ? this.kick * Math.exp(-this.kickT * 9) * Math.cos(this.kickT * 38) : 0;
+    if (!m.locked) {
+      car.pitch = -Math.atan2(this.dip, spec.wheelbase) + osc;
+      car.slope = 0;
+    }
+    return seated;
+  }
+
   step(dt: number, spec: VehicleSpec, car: VehicleState): void {
+    // 출고 후 차량이 팔레트를 벗어나면 턴테이블을 원위치(0°)로 되돌린다
+    if (this.m.phase === 'waiting' && this.m.yaw > 0 && !this.m.locked) {
+      const away = Math.hypot(car.x - STATION.palletX, car.z) > 4.2;
+      if (away) this.m.yaw = Math.max(0, this.m.yaw - dt * 0.9);
+    }
+    this.guide = guidance(spec, this.input(spec, car), this.m);
     this.doorClear = !this.bodyInDoorZone(spec, car) || this.m.locked; // 고정된 차량은 이미 안쪽에 있다
     this.m.doorBlocked = false;
     stepMachine(this.m, dt, this.doorClear);
