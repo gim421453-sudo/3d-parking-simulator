@@ -53,7 +53,7 @@ export class MechPanel {
     if (key === this.last) return;
     this.last = key;
     this.phaseEl.textContent = phase;
-    this.btnExit.textContent = observing ? '새 차량' : m.occupant === 'in' ? '하차' : '탑승';
+    this.btnExit.textContent = observing ? '새 차' : m.occupant === 'in' ? '하차' : '탑승';
     this.msgEl.textContent = line;
     this.msgEl.dataset.ok = m.phase === 'waiting' && failed.length === 0 ? '1' : '0';
   }

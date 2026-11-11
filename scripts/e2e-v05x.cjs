@@ -314,6 +314,14 @@ async function waitServer(url, tries = 50) {
     check('v0.5.2 핫픽스: 선택한 8F 차량만 출고(같은 모델·ID 인수), 12F 차량은 그대로, 기존 조작 차량은 삭제되지 않고 입구 밖에 주차', out8.own && out8.carried && out8.slot12 && !out8.slot08 && out8.n === 1 && Math.abs(out8.y12 - 33) < 0.05 && out8.parked === 1 && out8.y === 0, JSON.stringify(out8));
     await pg.screenshot({ path: path.join(OUT, '139-v052hf-retrieved.png') });
 
+    // ---- 통합 맵 megapark 의 기계식 구역에서도 동일: 12F 입고 후 차량 유지 ----
+    await loadMap('megapark', 'mech-in-12f', 'sedan');
+    await creepIn('D', 0.5, -9.5, -3.5);
+    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
+    await yuntil(() => window.__game.state === 'result', undefined, 300000);
+    const mg = await Y(() => { const G = window.__game; const e = G.storedModels.get('12A'); return { map: G.map.id, slot: G.playerStoredSlot, same: !!e && e.model === G.model, y: G.car.y, my: G.model.root.position.y, cy: G.mech.m.carriage.y, mission: G.mission.status, spawnDist: Math.hypot(G.car.x - (-30), G.car.z) }; });
+    check('v0.5.2 핫픽스: 통합 맵(megapark) 기계식 구역에서도 12F A 입고 후 차량이 슬롯에 남고(높이 33m) 캐리지 1층 복귀·미션 성공', mg.map === 'megapark' && mg.slot === '12A' && mg.same && Math.abs(mg.y - 33) < 1e-6 && Math.abs(mg.my - 33) < 0.05 && mg.cy === 0 && mg.mission === 'success' && mg.spawnDist > 20, JSON.stringify(mg));
+
     // ---- 슬롯 점유/제어반/거부 ----
     await loadMap('mechpark', 'mech-out-1', 'sedan'); // 8F A 가 점유된 상태
     await Y(() => { const G = window.__game; G.car.x = -3.4; G.car.z = 0; G.car.heading = Math.PI / 2; G.car.gear = 'P'; G.car.handbrake = true; G.car.v = 0; G.mech.selectedSlot = '08A'; });
