@@ -11,7 +11,7 @@ const PORT = 4311;
 (async () => {
   const srv = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--host', '127.0.0.1', '--strictPort'], { stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 3500));
-  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--enable-precise-memory-info'] });
+  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--enable-precise-memory-info', '--js-flags=--expose-gc'] });
   const out = { note: 'software WebGL (SwiftShader): 절대 FPS 는 실기기와 다름', mem: {}, mirror: {}, fps: {} };
   const open = async (quality) => {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 720 } });
@@ -24,7 +24,7 @@ const PORT = 4311;
     await p.waitForTimeout(1200);
     return { p, ctx };
   };
-  const stats = (p) => p.evaluate(() => { const G = window.__game; const i = G.renderer.info; return { geo: i.memory.geometries, tex: i.memory.textures, heap: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null }; });
+  const stats = (p) => p.evaluate(() => { if (window.gc) window.gc(); const G = window.__game; const i = G.renderer.info; return { geo: i.memory.geometries, tex: i.memory.textures, heap: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null }; });
   const load = (p, mapId, mission) => p.evaluate(([mapId, mission]) => { const G = window.__game; G.updateSettings({ mapId, missionId: mission }); G.startRun(); }, [mapId, mission]).then(() => p.waitForFunction((id) => window.__game.map.id === id && window.__game.state === 'playing', mapId, { timeout: 60000 })).then(() => p.waitForTimeout(800));
   const { p, ctx } = await open('medium');
   // 1) 맵 전환 반복
