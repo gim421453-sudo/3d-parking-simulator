@@ -409,3 +409,13 @@ kbd { background: rgba(255, 255, 255, 0.08); border: 1px solid var(--hair-2); bo
 .mctl-sel { font-size: 11.5px; color: var(--txt-2); line-height: 1.4; }
 .mctl-side .estop { background: rgba(229, 55, 47, .25); border-color: rgba(229, 55, 47, .6); }
 @media (max-height: 420px) { .mctl-body { grid-template-columns: 1fr 150px; } .mctl-grid { max-height: 56vh; } #mech-ctl { padding: 6px 8px; } }
+
+/* v0.5.3: 시동 버튼은 문자 라벨 없이 아이콘 + 색(ON=초록, 시동 중=깜박임)으로 상태를 표시 — 클러스터 폭 증가로 터치 핸들과 겹치지 않게 */
+#actionbar .ab[data-a="engineToggle"] .t { display: none; }
+#actionbar .ab[data-a="engineToggle"].on { color: #7fe08a; background: rgba(127, 224, 138, .14); border-color: rgba(127, 224, 138, .4); }
+#actionbar .ab[data-a="engineToggle"][data-engine="STARTING"], #actionbar .ab[data-a="engineToggle"][data-engine="STOPPING"] { color: var(--warn); animation: engblink .5s steps(2) infinite; }
+@keyframes engblink { 50% { opacity: .45; } }
+/* 낮은 화면: 주차 현황 요약 한 줄만 (추천 문구는 숨김) — 미션 패널이 터치 핸들과 겹치지 않게 */
+@media (max-height: 600px) { .mc-park span { display: none; } }
+/* v0.5.3: 필수 조작 버튼이 7개로 늘어(시동 추가) 클러스터를 조금 촘촘하게 — 터치 핸들과 겹치지 않게 */
+@media (min-height: 481px) { #cluster { gap: 8px; } #actionbar { gap: 3px; padding-left: 8px; } #actionbar .ab { min-width: 33px; padding: 0 6px; } #actionbar .ab[data-a="headlights"] { padding: 0 6px; } }
