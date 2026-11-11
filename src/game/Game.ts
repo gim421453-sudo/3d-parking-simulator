@@ -499,6 +499,8 @@ export class Game {
     this.engine = newEngine(profileOf(this.spec), !this.settings.engineStartOff);
     for (const f of this.facilities) f.ctl.reset();
     this.parkAcc = 99;
+    this.lastHitId = ''; // 이전 런의 충돌 기록이 새 런의 판정/테스트에 남지 않게
+    this.newCarCount = 0; // 새 차량 생성 횟수는 런마다 센다(자동 생성 0 검증용)
     this.activeFac = this.facilities.find((f) => f.cfg.id === this.missionDef?.mech?.facility) ?? this.facilities[0] ?? null;
     this.clearStoredModels();
     // 출고 미션: 첫 번째 시드는 **플레이어 자신의 차량**이 이미 그 슬롯에 보관된 상태로 시작한다(관찰 상태). 나머지 시드는 다른 보관 차량.
