@@ -394,7 +394,7 @@ async function waitServer(url, tries = 50) {
     await shot(`36-layout-${w}x${h}`);
     check(`화면 ${w}×${h}: 주차 보조 패널 표시 + 화면 안`, lay.open && lay.inView, JSON.stringify(lay.panel));
     check(`화면 ${w}×${h}: 패널이 클러스터/아이콘바/미니맵/터치버튼과 겹치지 않음`, lay.overlaps.length === 0, lay.overlaps.join(','));
-    check(`화면 ${w}×${h}: 필수 조작 버튼 6개 모두 화면 안 + 가려지지 않음`, lay.acts.length === 6 && lay.acts.every((a) => a.ok), JSON.stringify(lay.acts.map((a) => a.ok)));
+    check(`화면 ${w}×${h}: 필수 조작 버튼 7개(방향지시·비상등·조명·주차브레이크·시동·초기화 포함) 모두 화면 안 + 가려지지 않음`, lay.acts.length === 7 && lay.acts.every((a) => a.ok), JSON.stringify(lay.acts.map((a) => a.ok)));
     check(`화면 ${w}×${h}: 기어 레버가 화면 안에 있고 다른 UI 와 겹치지 않음`, lay.shIn && lay.shOver.length === 0, JSON.stringify({ in: lay.shIn, over: lay.shOver }));
     check(`화면 ${w}×${h}: 좌측 상단 큰 기어 표시(현재 기어 ≥ 30px)가 패널/미션/아이콘바/클러스터와 겹치지 않음`, lay.gear.over.length === 0 && lay.gear.fs >= 30 && lay.gear.top <= 24 && lay.gear.left <= 24 && lay.gear.inView, JSON.stringify(lay.gear));
     check(`화면 ${w}×${h}: 사이드 버튼 5개 높이 ≥ 32px`, lay.side.length === 5 && lay.side.every((v) => v >= 32), JSON.stringify(lay.side.map(Math.round)));
