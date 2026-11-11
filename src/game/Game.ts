@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { findVehicleCollision, type Collider } from '../core/geometry';
 import { DEG, worldToLocal } from '../core/math';
-import { loadRecords, loadSettings, QUALITY_PRESETS, sanitizeSettings, saveRecords, saveSettings, type Records, type Settings } from '../core/settings';
+import { loadRecords, loadSettings, mechMirrorTarget, QUALITY_PRESETS, sanitizeSettings, saveRecords, saveSettings, type Records, type Settings } from '../core/settings';
 import { removeKey } from '../core/storage';
 import { getMap, mapColliders } from '../maps';
 import { buildMap, type BuiltMap } from '../maps/mapBuilder';
@@ -16,6 +16,8 @@ import { MechPanel } from '../ui/mechPanel';
 import { MechControl } from '../ui/mechControl';
 import { freeSlots } from '../mech/machine';
 import { Beeper } from '../sensors/beeper';
+import { EngineSound } from '../audio/engineSound';
+import { ENGINE_PROFILES, newEngine, powerOn, engineOn, pressStartStop, profileOf, stepEngine, type Engine } from '../vehicle/engine';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
 import {
   DEFAULT_SENSOR_CONFIG,
@@ -81,6 +83,9 @@ export class Game {
   readonly rig = new CameraRig();
   readonly input = new Input();
   readonly beeper = new Beeper();
+  readonly engineSound = new EngineSound();
+  /** 엔진 상태기계 (v0.5.3). 시동 OFF 에서는 가속/크리프가 차단된다 */
+  engine: Engine = newEngine(ENGINE_PROFILES.sedan, true);
   readonly hud: Hud;
   readonly menu: Menu;
   readonly sensorView: SensorView;
@@ -290,6 +295,9 @@ export class Game {
     this.beeper.volume = this.settings.sensorVolume;
     this.beeper.enabled = this.settings.sensorSound && this.settings.sensorEnabled;
     if (!this.settings.sensorSound || !this.settings.sensorEnabled) this.beeper.silence();
+    this.engineSound.enabled = this.settings.engineSound;
+    this.engineSound.volume = this.settings.engineVolume;
+    if (!this.settings.engineSound) this.engineSound.silence();
   }
 
   private applyQuality(): void {
@@ -379,7 +387,7 @@ export class Game {
     }
     if (map.mech) {
       const lowTier = this.settings.quality === 'low';
-      this.mechBuilt = buildMech({ mirrorSize: lowTier ? 192 : 384, mirrorFps: Math.max(1, Math.min(this.settings.mirrorFps || 10, lowTier ? 10 : 20)) });
+      this.mechBuilt = buildMech({ mirrorSize: lowTier ? 224 : 384, mirrorFps: mechMirrorTarget(this.settings.quality, this.settings.mechMirrorFps) });
       this.scene.add(this.mechBuilt.group);
     }
     this.scene.background = new THREE.Color(map.env.sky);
@@ -398,6 +406,9 @@ export class Game {
 
   startRun(): void {
     this.beeper.init();
+    this.engineSound.init(); // 사용자 조작(시작 버튼) 이후 — 자동재생 정책
+    this.engineSound.enabled = this.settings.engineSound;
+    this.engineSound.volume = this.settings.engineVolume;
     this.beeper.volume = this.settings.sensorVolume;
     const map = getMap(this.settings.mapId);
     if (this.loadedMapId !== map.id || !this.built) this.loadMap(map);
@@ -444,6 +455,7 @@ export class Game {
       this.car.pitch = Math.atan2(yF - yR, wb);
       this.car.slope = Math.sin(this.car.pitch);
     }
+    this.engine = newEngine(profileOf(this.spec), !this.settings.engineStartOff);
     this.mech.reset();
     this.clearStoredModels();
     // 출고 미션: 첫 번째 시드는 **플레이어 자신의 차량**이 이미 그 슬롯에 보관된 상태로 시작한다(관찰 상태). 나머지 시드는 다른 보관 차량.
@@ -504,6 +516,7 @@ export class Game {
     this.input.clear();
     this.hud.resetTouchInputs();
     this.beeper.silence();
+    this.engineSound.silence();
     this.menu.showPause();
   }
 
@@ -520,6 +533,7 @@ export class Game {
     this.state = 'menu';
     this.input.enabled = false;
     this.beeper.silence();
+    this.engineSound.silence();
     this.hud.hide();
     this.assistPanel.setVisible(false);
     this.menu.showMain();
@@ -651,6 +665,16 @@ export class Game {
         }
         const r = this.mech.onAction(a, this.spec, this.car);
         if (r) this.hud.toast(r.msg, r.kind);
+        break;
+      }
+      case 'engineToggle': {
+        if (this.playerStoredSlot) {
+          this.hud.toast('보관된 차량입니다', 'warn');
+          break;
+        }
+        this.engineSound.init();
+        const r = pressStartStop(this.engine, { speed: Math.abs(this.car.v), gear: this.car.gear, brake: this.brake });
+        this.hud.toast(r.reason, r.ok ? 'good' : 'warn');
         break;
       }
       case 'handbrake':
@@ -828,8 +852,11 @@ export class Game {
 
   private simulate(dt: number): void {
     let vin = this.readInput(dt);
+    stepEngine(this.engine, dt, { throttle: this.throttle, speed: Math.abs(this.car.v), gear: this.car.gear });
+    vin.engineOn = powerOn(this.engine);
+    if (this.map.mech) this.mech.engineOn = engineOn(this.engine);
     const mech = this.map.mech ? this.mech : null;
-    if (mech?.blocksDriving()) vin = { throttle: 0, brake: 1, steerInput: 0 }; // 하차했거나 팔레트에 고정된 동안 운전 불가
+    if (mech?.blocksDriving()) vin = { throttle: 0, brake: 1, steerInput: 0, engineOn: vin.engineOn }; // 하차했거나 팔레트에 고정된 동안 운전 불가
     this.acc += dt;
     let steps = 0;
     while (this.acc >= STEP && steps < 12) {
@@ -932,6 +959,9 @@ export class Game {
       interval = beepIntervalMs(tgt ? tgt.distance : null, cfg.range, cfg.critical);
     }
     this.beeper.update(dt, interval, this.beepGroup);
+    this.engineSound.enabled = this.settings.engineSound;
+    this.engineSound.volume = this.settings.engineVolume;
+    this.engineSound.update(this.engine, this.playerStoredSlot ? 0 : Math.max(0, this.throttle), this.rig.mode === 'driver');
 
     // 미션
     if (this.mission) {
@@ -1000,7 +1030,7 @@ export class Game {
    * 조작 차량 교체. 이전 모델의 처리를 명시한다: 'dispose'(폐기), 'keep'(씬에 그대로 둠 — 보관/주차 차량).
    * `this.model` 을 null 로 두는 중간 상태를 만들지 않는다.
    */
-  private adoptVehicle(spec: VehicleSpec, model: CarModel | null, old: 'dispose' | 'keep' = 'dispose'): void {
+  private adoptVehicle(spec: VehicleSpec, model: CarModel | null, old: 'dispose' | 'keep' = 'dispose', engineRunning: boolean = !this.settings.engineStartOff): void {
     if (this.model && this.model !== model) {
       if (old === 'dispose' && !this.modelIsStored()) {
         this.scene.remove(this.model.root);
@@ -1009,6 +1039,7 @@ export class Game {
       // 'keep': 보관 슬롯/입구 밖에 서 있는 차량 — 씬에서 제거하지 않는다
     }
     this.spec = spec;
+    this.engine = newEngine(profileOf(spec), engineRunning);
     const next = model ?? createCarModel(spec, { blobTexture: this.built!.textures.blob });
     this.model = next;
     if (!next.root.parent) this.scene.add(next.root);
@@ -1057,7 +1088,7 @@ export class Game {
           this.parkOutsideCar();
         }
         this.storedModels.delete(e.slot);
-        this.adoptVehicle(spec, entry?.model ?? null, 'keep'); // 이전 모델은 보관/주차 차량으로 남는다
+        this.adoptVehicle(spec, entry?.model ?? null, 'keep', false); // 이전 모델은 보관/주차 차량으로 남는다. 출고된 차량은 시동 OFF (자동 시동 금지)
         this.car.gear = 'P';
         this.car.handbrake = true;
       } else if (e.type === 'retrieved') {
@@ -1751,7 +1782,8 @@ export class Game {
     const clusterData: ClusterData = {
       speedKmh: spd,
       gear: c.gear,
-      rpm: c.gear === 'P' || c.gear === 'N' ? 800 + Math.abs(this.throttle) * 1500 : Math.min(5500, 850 + spd * 55 + this.throttle * 700),
+      rpm: this.engine.rpm,
+      engineState: this.engine.state,
       signalLeft: (this.sigLeft || this.hazard) && this.blinkOn,
       signalRight: (this.sigRight || this.hazard) && this.blinkOn,
       hazard: this.hazard && this.blinkOn,
@@ -1809,6 +1841,7 @@ export class Game {
       cameraName: CAMERA_NAMES[this.rig.mode],
       sensorOn: this.settings.sensorEnabled,
       soundOn: this.settings.sensorSound,
+      engineState: this.engine.state,
       mission: mh,
       fpsText: this.settings.showFps ? `FPS ${this.fpsInstant.toFixed(0)} · 평균 ${this.avgFps().toFixed(0)}` : null,
     };

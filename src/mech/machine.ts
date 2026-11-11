@@ -66,6 +66,8 @@ export interface AlignInput {
   v: number;
   gear: 'P' | 'R' | 'N' | 'D';
   handbrake: boolean;
+  /** 시동이 걸려 있거나 걸리는 중 (입고/하차 전에는 시동 OFF 여야 한다) */
+  engineOn?: boolean;
 }
 
 export interface Alignment {
@@ -137,7 +139,7 @@ export function bumpDecel(spec: VehicleSpec, s: AlignInput): number {
   return Math.abs(a.stopperGap) <= BUMP.halfWidth ? BUMP.decel : 0;
 }
 
-export type CheckKey = 'size' | 'centered' | 'heading' | 'grooves' | 'guides' | 'wheelPos' | 'stopped' | 'parked' | 'occupant' | 'door' | 'slot';
+export type CheckKey = 'size' | 'centered' | 'heading' | 'grooves' | 'guides' | 'wheelPos' | 'stopped' | 'parked' | 'engine' | 'occupant' | 'door' | 'slot';
 export interface CheckItem {
   key: CheckKey;
   label: string;
@@ -267,6 +269,7 @@ export function checklist(spec: VehicleSpec, s: AlignInput, m: MachineState, slo
     { key: 'wheelPos', label: a.mode === 'fwd' ? '앞바퀴 정지 위치' : '뒷바퀴 정지 위치', ok: a.atStopper && a.onPallet },
     { key: 'stopped', label: '정차', ok: stopped },
     { key: 'parked', label: 'P 단 + 주차 브레이크', ok: s.gear === 'P' && s.handbrake },
+    { key: 'engine', label: '시동 OFF', ok: !s.engineOn },
     { key: 'occupant', label: '운전자 하차', ok: m.occupant === 'out' },
     { key: 'door', label: '출입문 안전센서 정상', ok: !m.doorBlocked },
   ];
@@ -286,6 +289,7 @@ export function toggleOccupant(s: AlignInput, m: MachineState): { ok: boolean; r
   if (m.occupant === 'in') {
     if (Math.abs(s.v) >= ALIGN_TOL.stopSpeed) return { ok: false, reason: '정차 후 하차하세요' };
     if (s.gear !== 'P' || !s.handbrake) return { ok: false, reason: 'P 단 + 주차 브레이크 후 하차하세요' };
+    if (s.engineOn) return { ok: false, reason: '시동을 끈(OFF) 뒤 하차하세요 — 브레이크를 밟고 시동 버튼(O)' };
     m.occupant = 'out';
     return { ok: true, reason: '하차했습니다' };
   }

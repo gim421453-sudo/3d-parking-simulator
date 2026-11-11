@@ -14,6 +14,7 @@ export const ICON = {
   volumeOff: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
   hazard: svg('<path d="M12 4l9 15.5H3z"/><path d="M12 10v4.5"/><circle cx="12" cy="17" r=".6" fill="currentColor"/>'),
   headlight: svg('<path d="M10 6.5c-3.5 0-6 2.5-6 5.5s2.5 5.5 6 5.5z"/><path d="M13.5 8h7M13.5 12h7M13.5 16h7"/>'),
+  power: svg('<path d="M12 3.5v8"/><path d="M7.2 6.8a7.5 7.5 0 1 0 9.6 0"/>'),
   parkBrake: svg('<circle cx="12" cy="12" r="8"/><path d="M10 16V8h3a2.5 2.5 0 0 1 0 5h-3"/>'),
   left: svg('<path d="M14.5 6l-6 6 6 6"/>'),
   right: svg('<path d="M9.5 6l6 6-6 6"/>'),

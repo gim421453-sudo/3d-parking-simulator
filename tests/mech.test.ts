@@ -11,6 +11,7 @@ import {
   STATION,
   TIMES,
   alignment,
+  checklist,
   bumpDecel,
   cancelOp,
   emergencyRelease,
@@ -619,5 +620,27 @@ describe('v0.5.2 핫픽스 — 차량 ID/보관 유지/자동 생성 없음 (상
     c.m.phase = 'returning';
     c.step(1 / 60, sedan, car);
     expect(c.guide.state).toBe('blocked');
+  });
+});
+
+describe('v0.5.3 시동 OFF 조건 (입고/하차 전 시동을 꺼야 한다)', () => {
+  it('시동이 걸린 채로는 하차할 수 없고, OFF 후에는 가능', () => {
+    const m = newMachine();
+    const s = { ...ideal(), engineOn: true };
+    const r = toggleOccupant(s, m);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('시동');
+    expect(m.occupant).toBe('in');
+    expect(toggleOccupant({ ...ideal(), engineOn: false }, m).ok).toBe(true);
+    expect(m.occupant).toBe('out');
+  });
+  it('체크리스트에 시동 OFF 항목이 있고, 시동 ON 이면 입고가 거부된다', () => {
+    const m = newMachine();
+    m.occupant = 'out';
+    const on = { ...ideal(), engineOn: true };
+    const items = checklist(sedan, on, m, '02A');
+    expect(items.find((c) => c.key === 'engine')?.ok).toBe(false);
+    expect(startStore(sedan, on, m, '02A')).toBe(false);
+    expect(startStore(sedan, { ...ideal(), engineOn: false }, m, '02A')).toBe(true);
   });
 });

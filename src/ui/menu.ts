@@ -254,6 +254,9 @@ export class Menu {
               `${chk('sensorEnabled', '주차 센서 켜기', '끄면 감지/표시/경고음 모두 중지', s.sensorEnabled)}
                ${chk('sensorSound', '경고음 켜기', '센서와 별도로 켜고 끌 수 있음', s.sensorSound)}
                ${rng('sensorVolume', '경고음 볼륨', '', 0, 1, 0.05, s.sensorVolume)}
+               ${chk('engineSound', '엔진음 켜기', '합성 엔진음(실제 차량 음원 아님). 경고음과 별도', s.engineSound)}
+               ${rng('engineVolume', '엔진음 볼륨', '', 0, 1, 0.05, s.engineVolume)}
+               ${chk('engineStartOff', '시동 OFF 로 시작', '켜면 시작/새 차량이 시동 꺼진 상태(브레이크+O 로 시동)', s.engineStartOff)}
                ${rng('sensorRange', '최대 감지 거리', '이 거리 안에서 경고 시작', 1, 4, 0.1, s.sensorRange)}
                ${rng('sensorCritical', '연속 경고 거리', '이 거리 이하에서 연속음', 0.1, 0.8, 0.05, s.sensorCritical)}
                ${chk('sensorDebug', '센서 디버그 모드', '개발자용: 감지 광선·센서 방향·충돌 대상·거리(m) 표시. 일반 화면에는 거리 숫자를 표시하지 않음', s.sensorDebug)}`,
@@ -269,6 +272,7 @@ export class Menu {
                ${chk('infoAutoHide', '인포테인먼트 자동 숨김', '끄면 주차 보조 종료 후에도 내비게이션을 표시하며 유지', s.infoAutoHide)}
                ${rng('infoAutoHideSec', '자동 숨김 지연', '주차 보조가 끝난 뒤 숨기기까지', 0.5, 10, 0.5, s.infoAutoHideSec)}
                ${rng('mirrorFps', '미러 갱신 속도 (0=끔)', '사이드/룸미러는 실제 장면을 작은 해상도로 렌더링 — 모바일 부하 조절', 0, 30, 5, s.mirrorFps)}
+               ${rng('mechMirrorFps', '기계식 주차장 거울 속도 (0=자동)', '자동: 높음 30 / 보통 24 / 낮음 16 FPS. 거울이 화면에 보일 때만 렌더링', 0, 30, 5, s.mechMirrorFps)}
                ${rng('cabinFps', '1인칭 실내 화면 갱신 속도', '낮추면 모바일 부하 감소', 5, 30, 5, s.cabinFps)}
                ${chk('assistGuides', '조향 연동 주차 가이드라인', '카메라 영상 위에 예상 경로 표시', s.assistGuides)}
                ${sel('pdcPalette', 'PDC 경고 색상', '', Object.entries(PDC_PALETTES).map(([k, v]) => [k, v.name] as [string, string]), s.pdcPalette)}
@@ -419,6 +423,8 @@ const FMT: Record<string, (v: number) => string> = {
   assistExitSec: (v) => `${v}초`,
   assistCameraFps: (v) => `${v} FPS`,
   cabinFps: (v) => `${v} FPS`,
+  mechMirrorFps: (v) => (v === 0 ? '자동' : `${v} FPS`),
+  engineVolume: (v) => `${Math.round(v * 100)}%`,
   mirrorFps: (v) => (v === 0 ? '끔' : `${v} FPS`),
   infoAutoHideSec: (v) => `${v}초`,
 };

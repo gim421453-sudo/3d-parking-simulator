@@ -142,6 +142,8 @@ export interface ClusterData {
   gear: string;
   /** 엔진 회전수 — 물리 엔진에 없는 **시뮬레이션 값**(속도/가속에서 만든 근사). 화면에도 "시뮬레이션"으로 표기한다 */
   rpm: number;
+  /** 엔진 상태 (OFF 이면 계기판에 표시) */
+  engineState?: string;
   signalLeft: boolean;
   signalRight: boolean;
   hazard: boolean;
@@ -272,7 +274,7 @@ export function drawCluster(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.fillText((Math.round(c.rpm / 10) * 10).toString(), rx, cy - h * 0.02);
   ctx.fillStyle = 'rgba(255,255,255,.45)';
   ctx.font = `600 ${Math.round(h * 0.062)}px ${FONT}`;
-  ctx.fillText('RPM · 시뮬레이션', rx, cy + h * 0.15);
+  ctx.fillText(c.engineState && c.engineState !== 'RUNNING' ? `ENGINE ${c.engineState}` : 'RPM · 시뮬레이션', rx, cy + h * 0.15);
   // ---- 중앙: 기어 ----
   const cx = w / 2;
   ctx.fillStyle = reverse ? '#ff7a6a' : '#ffffff';

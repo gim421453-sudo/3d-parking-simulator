@@ -61,3 +61,22 @@ describe('pdcView 설정 (v0.4.7)', () => {
     expect(sanitizeSettings({ ...DEFAULT_SETTINGS, pdcView: 'sensor' }).pdcView).toBe('sensor');
   });
 });
+
+import { mechMirrorTarget } from '../src/core/settings';
+describe('v0.5.3 설정: 엔진/기계식 거울', () => {
+  it('엔진 설정 기본값과 범위 보정', () => {
+    expect(DEFAULT_SETTINGS.engineSound).toBe(true);
+    expect(DEFAULT_SETTINGS.engineStartOff).toBe(false);
+    expect(sanitizeSettings({ engineVolume: 9 }).engineVolume).toBe(1);
+    expect(sanitizeSettings({ engineVolume: -1 }).engineVolume).toBe(0);
+    expect(sanitizeSettings({ engineVolume: NaN as unknown as number }).engineVolume).toBe(0.5);
+    expect(sanitizeSettings({ mechMirrorFps: 99 }).mechMirrorFps).toBe(30);
+  });
+  it('기계식 거울 FPS: 자동이면 high 30 / medium 24 / low 16, 수동이면 설정값(저사양 상한 20)', () => {
+    expect(mechMirrorTarget('high', 0)).toBe(30);
+    expect(mechMirrorTarget('medium', 0)).toBe(24);
+    expect(mechMirrorTarget('low', 0)).toBe(16);
+    expect(mechMirrorTarget('high', 20)).toBe(20);
+    expect(mechMirrorTarget('low', 30)).toBe(20);
+  });
+});

@@ -86,9 +86,12 @@ export class MechController {
     this.selectedSlot = '02A';
   }
 
+  /** Game 이 매 프레임 갱신: 시동이 걸려 있으면 true */
+  engineOn = false;
+
   input(spec: VehicleSpec, car: VehicleState): AlignInput {
     void spec;
-    return { x: car.x, z: car.z, heading: car.heading, v: car.v, gear: car.gear, handbrake: car.handbrake };
+    return { x: car.x, z: car.z, heading: car.heading, v: car.v, gear: car.gear, handbrake: car.handbrake, engineOn: this.engineOn };
   }
 
   /** 슬롯에 차량을 미리 보관해 둔 상태로 시작 (출고 미션/테스트). 차량 pose 는 슬롯 위가 아니라 호출 전이다 */

@@ -367,8 +367,8 @@ export function buildMech(opts: { mirrorSize: number; mirrorFps: number }): Mech
   const origBefore = mirror.onBeforeRender.bind(mirror);
   mirror.onBeforeRender = (renderer, scene, camera, geometry, material, g) => {
     const interval = opts.mirrorFps > 0 ? 1 / opts.mirrorFps : Infinity;
-    if (budget < interval) return;
-    budget = 0;
+    if (budget < interval - 1e-3) return; // 부동소수 오차로 한 프레임 건너뛰어 FPS 가 절반이 되는 것을 방지
+    budget = Math.min(budget - interval, interval); // 잔여 시간을 유지해 목표 FPS 에 정확히 맞춘다
     built.mirrorRenders++;
     origBefore(renderer, scene, camera, geometry, material, g);
   };

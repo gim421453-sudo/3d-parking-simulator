@@ -27,12 +27,19 @@ export interface Settings {
   thirdMirror: boolean;
   /** 기계식 제어반: 입고 슬롯을 빈 슬롯 중에서 자동 선택 (장치 작동 정책) */
   mechAutoSlot: boolean;
+  /** 엔진음 (합성 음, 실제 차량 음원이 아님) — 센서 경고음과 별도 */
+  engineSound: boolean;
+  engineVolume: number; // 0..1
+  /** 시작/새 차량을 시동 OFF 로 시작 (기본 꺼짐 = 시동 걸린 상태로 시작) */
+  engineStartOff: boolean;
   pdcView: 'surround' | 'sensor'; // 오른쪽 PDC 영역: 3D 서라운드뷰 / 센서 전용 2D (서라운드 미지원 차량은 항상 센서)
   assistAutoView: boolean; // 측면 장애물 접근 시 3D 측면/탑뷰로 자동 전환
   infoAutoShow: boolean; // 주차 보조가 필요하면 플로팅 디스플레이 자동 표시
   infoAutoHide: boolean; // 주차 보조가 끝나면 플로팅 디스플레이 자동 숨김 (끄면 내비게이션을 표시하며 유지)
   infoAutoHideSec: number; // 자동 숨김 지연(초)
   cabinFps: number; // 1인칭 실내 화면 갱신 FPS (부하 조절)
+  /** 기계식 주차장 전방 거울 갱신 FPS (0 = 화질 프리셋에 따라 자동: high 30 / medium 24 / low 16) */
+  mechMirrorFps: number;
   mirrorFps: number; // 사이드미러/룸미러 갱신 FPS (0 = 끔, 부하 조절)
   touchControls: 'auto' | 'on' | 'off';
   touchScale: number; // 0.8 ~ 1.4
@@ -70,12 +77,16 @@ export const DEFAULT_SETTINGS: Settings = {
   pdcPalette: 'standard',
   thirdMirror: false,
   mechAutoSlot: false,
+  engineSound: true,
+  engineVolume: 0.5,
+  engineStartOff: false,
   pdcView: 'surround',
   assistAutoView: true,
   infoAutoShow: true,
   infoAutoHide: true,
   infoAutoHideSec: 2.5,
   cabinFps: 15,
+  mechMirrorFps: 0,
   mirrorFps: 15,
   touchControls: 'auto',
   touchScale: 1,
@@ -105,8 +116,12 @@ export function sanitizeSettings(raw: Partial<Settings>): Settings {
   s.pdcView = s.pdcView === 'sensor' ? 'sensor' : 'surround';
   s.thirdMirror = s.thirdMirror === true;
   s.mechAutoSlot = s.mechAutoSlot === true;
+  s.engineSound = s.engineSound !== false;
+  s.engineStartOff = s.engineStartOff === true;
+  s.engineVolume = Math.min(1, Math.max(0, Number.isFinite(Number(s.engineVolume)) ? Number(s.engineVolume) : 0.5));
   s.infoAutoHideSec = Math.min(10, Math.max(0.5, Number(s.infoAutoHideSec) || 2.5));
   s.cabinFps = Math.min(30, Math.max(5, Number(s.cabinFps) || 15));
+  s.mechMirrorFps = Math.min(30, Math.max(0, Number.isFinite(Number(s.mechMirrorFps)) ? Math.round(Number(s.mechMirrorFps)) : 0));
   s.mirrorFps = Math.min(30, Math.max(0, Number.isFinite(Number(s.mirrorFps)) ? Number(s.mirrorFps) : 15));
   return s;
 }
@@ -128,3 +143,9 @@ export type Records = Record<string, MissionRecord>;
 
 export const loadRecords = (): Records => loadJson<Records>('records', {});
 export const saveRecords = (r: Records): boolean => saveJson('records', r);
+
+/** 기계식 거울 목표 FPS: 설정이 0 이면 화질 프리셋으로 자동 결정 (high 30 / medium 24 / low 16), 아니면 설정값(저사양은 20 상한) */
+export function mechMirrorTarget(quality: QualityPreset, setting: number): number {
+  if (setting > 0) return Math.min(setting, quality === 'low' ? 20 : 30);
+  return quality === 'high' ? 30 : quality === 'medium' ? 24 : 16;
+}

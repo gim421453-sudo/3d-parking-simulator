@@ -29,6 +29,7 @@ export interface HudData {
   cameraName: string;
   sensorOn: boolean;
   soundOn: boolean;
+  engineState: 'OFF' | 'ACC' | 'STARTING' | 'RUNNING' | 'STOPPING';
   mission: MissionHud | null;
   fpsText: string | null;
 }
@@ -133,6 +134,7 @@ export class Hud {
           ${ab('signalRight', '우 방향지시등 (E)', ICON.right)}
           ${ab('headlights', '조명 모드 순환 (L)', ICON.headlight, '<span class="t">AUTO</span>')}
           ${ab('handbrake', '주차 브레이크 (Space)', ICON.parkBrake)}
+          ${ab('engineToggle', '시동 켜기/끄기 — 브레이크를 밟고 P/N 에서 (O)', ICON.power, '<span class="t">OFF</span>')}
           ${ab('reset', '차량 초기화 (T)', ICON.reset)}
         </div>
       </div>
@@ -378,6 +380,13 @@ export class Hud {
     on('hazard', d.hazard);
     on('headlights', d.headlights);
     on('handbrake', d.handbrake);
+    on('engineToggle', d.engineState === 'RUNNING');
+    const eb = this.btns.get('engineToggle');
+    if (eb) {
+      eb.dataset.engine = d.engineState;
+      const et = eb.querySelector('.t');
+      if (et) et.textContent = d.engineState === 'RUNNING' ? 'ON' : d.engineState === 'STARTING' ? '···' : d.engineState === 'STOPPING' ? '···' : 'OFF';
+    }
     on('sensorToggle', d.sensorOn);
     on('soundToggle', d.soundOn);
     const ht = this.btns.get('headlights')?.querySelector('.t');
