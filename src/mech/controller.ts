@@ -56,6 +56,8 @@ export class MechController {
   private kickT = 99;
   /** 이번 프레임에 처리된 이벤트 (Game 이 소비) */
   events: MachineEvent[] = [];
+  /** 플레이어 차량이 보관 슬롯에 들어가 있는 관찰 상태(조작 불가) */
+  observing = false;
   /** 가이드 접촉 경고 */
   guideContact = false;
   private lastGuideContact = false;
@@ -80,6 +82,7 @@ export class MechController {
     this.guideContact = false;
     this.lastGuideContact = false;
     this.guideContacts = 0;
+    this.observing = false;
     this.selectedSlot = '02A';
   }
 
@@ -191,7 +194,8 @@ export class MechController {
       const away = Math.hypot(car.x - STATION.palletX, car.z) > 4.2;
       if (away) this.m.yaw = Math.max(0, this.m.yaw - dt * 0.9);
     }
-    this.guide = guidance(spec, this.input(spec, car), this.m);
+    // 관찰 상태(차량이 슬롯에 보관됨): 승강장의 다음 입고 안내는 차량 위치와 무관하다
+    this.guide = this.observing ? { state: this.m.phase === 'waiting' ? 'forward' : 'blocked', text: this.m.phase === 'waiting' ? '전진' : '진입 금지', steer: null, mode: 'fwd' } : guidance(spec, this.input(spec, car), this.m);
     // 플레이어 차량이 승강장/문 구역에 있을 때만 문 안전센서 입력으로 본다 (보관 중이거나 호출 중이면 차량은 장치 안)
     const inZone = this.bodyInDoorZone(spec, car);
     this.doorClear = !inZone || this.m.locked || this.m.phase === 'calling' || this.m.phase === 'pulling';
@@ -256,7 +260,7 @@ export class MechController {
 
   /** 운전자가 하차했거나 고정 중이면 주행 입력을 막는다 */
   blocksDriving(): boolean {
-    return this.m.occupant === 'out' || this.m.locked;
+    return this.m.occupant === 'out' || this.m.locked || this.observing;
   }
 
   /** 보관 중인 모든 차량의 월드 pose (시각화/테스트) */

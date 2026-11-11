@@ -35,7 +35,7 @@ export class MechPanel {
     this.el.classList.toggle('hidden', !v);
   }
 
-  update(m: MachineState, items: CheckItem[], guide?: Guidance): void {
+  update(m: MachineState, items: CheckItem[], guide?: Guidance, observing = false): void {
     const PH: Record<string, string> = { closing: '문 닫는 중', toBay: '리프트 이동 중', stored: '주차 완료 · 출고 대기', fromBay: '출고 이동 중', rotating: '턴테이블 회전 중', opening: '문 여는 중', exit: '출고 완료', estop: '비상 정지' };
     const failed = items.filter((c) => !c.ok);
     let phase = PH[m.phase] ?? '';
@@ -44,12 +44,16 @@ export class MechPanel {
       phase = g === 'stop' && failed.length === 0 ? '입고 준비 완료' : g === 'stop' ? '정위치' : g === 'align' ? '정렬 중' : g === 'back' ? '후진 필요' : g === 'blocked' ? '진입 제한' : '입고 준비';
     }
     // 대기 중에는 아직 충족하지 못한 첫 번째 조건 1개만 보여 준다 (패널을 짧게 유지)
-    const line = m.phase === 'waiting' ? (failed.length ? failed[0].label : '입고(J)를 누르세요') : m.message;
-    const key = `${phase}|${m.occupant}|${line}|${m.locked}`;
+    let line = m.phase === 'waiting' ? (failed.length ? failed[0].label : '입고(J)를 누르세요') : m.message;
+    if (observing) {
+      phase = m.phase === 'waiting' ? '보관 완료' : phase;
+      line = m.phase === 'waiting' ? '새 차량(I)으로 다음 입고/출고' : m.message;
+    }
+    const key = `${phase}|${m.occupant}|${line}|${m.locked}|${observing}`;
     if (key === this.last) return;
     this.last = key;
     this.phaseEl.textContent = phase;
-    this.btnExit.textContent = m.occupant === 'in' ? '하차' : '탑승';
+    this.btnExit.textContent = observing ? '새 차량' : m.occupant === 'in' ? '하차' : '탑승';
     this.msgEl.textContent = line;
     this.msgEl.dataset.ok = m.phase === 'waiting' && failed.length === 0 ? '1' : '0';
   }

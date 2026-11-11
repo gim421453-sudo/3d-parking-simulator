@@ -32,7 +32,8 @@ export type Action =
   | 'mechRetrieve'
   | 'mechEstop'
   | 'mechCancel'
-  | 'mechPanel';
+  | 'mechPanel'
+  | 'mechNewCar';
 
 const HELD: Record<string, HeldKey> = {
   KeyW: 'throttle',
@@ -68,6 +69,7 @@ export const KEY_ACTIONS: Record<string, Action> = {
   KeyX: 'mechEstop',
   KeyY: 'mechCancel',
   KeyZ: 'mechPanel',
+  KeyI: 'mechNewCar',
 };
 
 /** 키보드와 화면 버튼(터치)이 같은 상태/액션 경로를 쓴다. */

@@ -555,3 +555,69 @@ describe('MechController — 안착/보관 위치/시드', () => {
     expect(ALIGN_TOL.lateral).toBeLessThan(0.2);
   });
 });
+
+describe('v0.5.2 핫픽스 — 차량 ID/보관 유지/자동 생성 없음 (상태기계 + 컨트롤러)', () => {
+  const storeAt = (m: MachineState, mode: 'fwd' | 'rev', slot: string) => {
+    expect(parkOn(m, mode, slot)).toBe(true);
+    until(m, () => !!m.slots[slot]);
+    return m.events.find((e) => e.type === 'stored' && e.slot === slot)!;
+  };
+  it('입고 이벤트의 carId 는 슬롯의 차량 ID 와 같고, 출고(picked/retrieved) 때 같은 ID 가 나온다', () => {
+    const m = newMachine();
+    const ev = storeAt(m, 'fwd', '08A');
+    expect(ev.carId).toBe(m.slots['08A']!.carId);
+    until(m, () => m.phase === 'waiting');
+    m.occupant = 'in';
+    m.events = [];
+    expect(requestRetrieve(m, '08A')).toBe(true);
+    until(m, () => m.phase === 'exit');
+    const picked = m.events.find((e) => e.type === 'picked')!;
+    const retrieved = m.events.find((e) => e.type === 'retrieved')!;
+    expect(picked.carId).toBe(ev.carId);
+    expect(retrieved.carId).toBe(ev.carId);
+  });
+  it('보관 완료 후 슬롯/보관 pose 가 변하지 않는다 (캐리지 복귀 동안, 다음 입고 동안에도)', () => {
+    const m = newMachine();
+    storeAt(m, 'rev', '12B');
+    const p0 = JSON.stringify(storedPose('12B', m.slots['12B']!));
+    const id0 = m.slots['12B']!.carId;
+    until(m, () => m.phase === 'waiting');
+    expect(JSON.stringify(storedPose('12B', m.slots['12B']!))).toBe(p0);
+    storeAt(m, 'fwd', '08A');
+    until(m, () => m.phase === 'waiting');
+    expect(JSON.stringify(storedPose('12B', m.slots['12B']!))).toBe(p0);
+    expect(m.slots['12B']!.carId).toBe(id0);
+    expect(m.slots['08A']!.carId).not.toBe(id0);
+  });
+  it('보관된 차량의 pose(월드)는 슬롯 위치(높이/수평 이송 위치)와 일치한다', () => {
+    const m = newMachine();
+    storeAt(m, 'fwd', '08A');
+    const sd = SLOTS.find((s) => s.id === '08A')!;
+    until(m, () => m.phase === 'waiting');
+    const p8 = storedPose('08A', m.slots['08A']!);
+    expect(p8.y).toBe(sd.y);
+    expect(Math.abs(p8.z - sd.z)).toBeLessThan(1.5); // 슬롯 중심선 근처(차량 상대 위치만큼)
+    storeAt(m, 'rev', '12B');
+    expect(storedPose('12B', m.slots['12B']!).y).toBe(33);
+  });
+  it('보관 직후 승강장에는 차량이 없다(새 차량 자동 생성의 상태기계 전제): carOnPallet=false, locked=false, 슬롯만 점유', () => {
+    const m = newMachine();
+    storeAt(m, 'fwd', '05B');
+    expect(m.carOnPallet).toBe(false);
+    expect(m.locked).toBe(false);
+    expect(m.rel).toBeNull();
+    expect(Object.values(m.slots).filter(Boolean).length).toBe(1);
+  });
+  it('컨트롤러 관찰 상태: 주행 차단, 표시기는 대기 중일 때만 "전진", 보관 중 입력 무시', () => {
+    const c = new MechController();
+    expect(c.blocksDriving()).toBe(false);
+    c.observing = true;
+    expect(c.blocksDriving()).toBe(true);
+    const car = createVehicleState(sedan, 0, 0, STATION.heading);
+    c.step(1 / 60, sedan, car);
+    expect(c.guide.state).toBe('forward');
+    c.m.phase = 'returning';
+    c.step(1 / 60, sedan, car);
+    expect(c.guide.state).toBe('blocked');
+  });
+});

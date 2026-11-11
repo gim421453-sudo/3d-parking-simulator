@@ -10,7 +10,7 @@ import { HOLD_SECONDS, HEADING_TOLERANCE, MissionRunner } from '../mission/parki
 import { MechInRunner } from '../mission/mech';
 import { MechController } from '../mech/controller';
 import { buildMech, type MechBuilt } from '../mech/mechBuilder';
-import { STATION, storedPose } from '../mech/machine';
+import { STATION, floorLabel, slotDef, storedPose } from '../mech/machine';
 import { playClunk } from '../mech/sfx';
 import { MechPanel } from '../ui/mechPanel';
 import { MechControl } from '../ui/mechControl';
@@ -103,7 +103,14 @@ export class Game {
   /** 통합 맵: 현재 구역 id */
   zoneId: string | null = null;
   /** 보관 슬롯별 차량 모델(플레이어가 입고한 차 / 미션에서 미리 보관된 차) */
-  private storedModels = new Map<string, { model: CarModel; spec: VehicleSpec }>();
+  private storedModels = new Map<string, { model: CarModel; spec: VehicleSpec; carId: number }>();
+  /**
+   * v0.5.2 핫픽스: 플레이어 차량이 보관 슬롯에 들어간 관찰 상태. 이 동안 `this.car`/`this.model` 은 **보관된 그 차량**이며(모델 소유권은 storedModels),
+   * 조작할 수 없고 시작 위치로 되돌리거나 새 차량을 자동 생성하지 않는다. 새 차량은 명시적 조작(mechNewCar)으로만 시작한다.
+   */
+  playerStoredSlot: string | null = null;
+  /** 출고로 차량이 교체될 때 입구 밖에 남겨 두는 기존 플레이어 차량(삭제하지 않음): 모델 + 충돌체 */
+  private parkedCars: { model: CarModel; col: Collider }[] = [];
   private cullLevelY = NaN;
   lastClusterData: ClusterData | null = null;
   lastHitId = '';
@@ -395,12 +402,12 @@ export class Game {
     this.map = map;
     this.missionDef = map.missions.find((m) => m.id === this.settings.missionId) ?? null;
     this.targetSlot = this.missionDef ? (map.slots.find((s) => s.id === this.missionDef!.slotId) ?? null) : null;
-    this.mission = this.missionDef && this.targetSlot ? (this.missionDef.kind === 'mech-in' ? new MechInRunner(this.missionDef, this.targetSlot, () => !!this.mech.m.slots[this.missionDef!.mech?.slot ?? ''], () => this.mech.m.phase === 'waiting') : new MissionRunner(this.missionDef, this.targetSlot)) : null;
+    this.mission = this.missionDef && this.targetSlot ? (this.missionDef.kind === 'mech-in' ? new MechInRunner(this.missionDef, this.targetSlot, () => !!this.mech.m.slots[this.missionDef!.mech?.slot ?? ''] && this.mech.m.phase === 'waiting' && this.mech.m.palletLoc === 'station', () => this.mech.m.phase === 'waiting' && !this.playerStoredSlot) : new MissionRunner(this.missionDef, this.targetSlot)) : null;
     this.built!.setTarget(this.targetSlot);
 
     if (this.model) {
       this.scene.remove(this.model.root);
-      this.model.dispose();
+      if (!this.modelIsStored()) this.model.dispose(); // 보관 슬롯 모델은 clearStoredModels 가 해제
     }
     this.spec = getVehicle(this.settings.vehicleId);
     this.model = createCarModel(this.spec, { blobTexture: this.built!.textures.blob });
@@ -437,7 +444,18 @@ export class Game {
     }
     this.mech.reset();
     this.clearStoredModels();
-    for (const sd of this.missionDef?.mech?.seed ?? []) this.mech.seedStored(sd.slot, sd.specId, sd.mode, getVehicle(sd.specId)); // 출고 미션: 미리 보관된 차량
+    // 출고 미션: 첫 번째 시드는 **플레이어 자신의 차량**이 이미 그 슬롯에 보관된 상태로 시작한다(관찰 상태). 나머지 시드는 다른 보관 차량.
+    (this.missionDef?.mech?.seed ?? []).forEach((sd, i) => {
+      if (i === 0 && this.model) {
+        const sc = this.mech.seedStored(sd.slot, this.spec.id, sd.mode, this.spec);
+        const pose = storedPose(sd.slot, sc);
+        this.storedModels.set(sd.slot, { model: this.model, spec: this.spec, carId: sc.carId });
+        this.placeModel(this.model, pose);
+        this.playerStoredSlot = sd.slot;
+        this.mech.observing = true;
+        Object.assign(this.car, { x: pose.x, z: pose.z, y: pose.y, heading: pose.heading, v: 0, pitch: 0, slope: 0, gear: 'P' as const, handbrake: true });
+      } else this.mech.seedStored(sd.slot, sd.specId, sd.mode, getVehicle(sd.specId));
+    });
     if (this.missionDef?.mech?.slot) this.mech.selectedSlot = this.missionDef.mech.slot;
     this.mechPanel.setVisible(!!map.mech);
     this.mechCtl.setOpen(false);
@@ -608,11 +626,18 @@ export class Game {
       case 'mechPanel':
         if (this.map.mech) this.mechCtl.toggle();
         break;
+      case 'mechNewCar':
+        if (this.map.mech) this.startNewCar();
+        break;
       case 'mechExit':
       case 'mechStart':
       case 'mechRetrieve':
       case 'mechEstop': {
         if (!this.map.mech) break;
+        if (a === 'mechExit' && this.playerStoredSlot) {
+          this.startNewCar(); // 보관 후 '하차' 버튼은 '새 차량' 으로 동작
+          break;
+        }
         if (a === 'mechStart' && this.settings.mechAutoSlot) {
           const f = freeSlots(this.mech.m)[0];
           if (f) this.mech.selectedSlot = f.id; // 자동: 빈 슬롯 중 가장 낮은 층
@@ -802,6 +827,7 @@ export class Game {
     let steps = 0;
     while (this.acc >= STEP && steps < 12) {
       if (mech?.m.locked) mech.applyLocked(this.car);
+      else if (this.playerStoredSlot) this.holdStoredCar();
       else this.physicsStep(vin, STEP);
       this.acc -= STEP;
       steps++;
@@ -827,7 +853,7 @@ export class Game {
         }
       }
       this.mechBuilt?.update(mech.m, dt, this.car.x < STATION.palletX + 14 && this.car.x > STATION.doorX - 28, mech.guide);
-      this.mechPanel.update(mech.m, mech.items, mech.guide);
+      this.mechPanel.update(mech.m, mech.items, mech.guide, !!this.playerStoredSlot);
       this.mechCtl.update(mech.m, mech.selectedSlot, this.settings.mechAutoSlot);
     }
 
@@ -913,11 +939,30 @@ export class Game {
 
   // ------------------------------------------------------------ 기계식: 보관 차량 모델/교체
   private clearStoredModels(): void {
+    const seen = new Set<CarModel>();
     for (const [, v] of this.storedModels) {
+      if (seen.has(v.model)) continue;
+      seen.add(v.model);
       this.scene.remove(v.model.root);
       v.model.dispose();
     }
     this.storedModels.clear();
+    for (const p of this.parkedCars) {
+      this.scene.remove(p.model.root);
+      p.model.dispose();
+      const i = this.colliders.indexOf(p.col);
+      if (i >= 0) this.colliders.splice(i, 1);
+      this.colliderById.delete(p.col.id);
+    }
+    this.parkedCars = [];
+    this.playerStoredSlot = null;
+    this.mech.observing = false;
+  }
+
+  /** `this.model` 이 보관 슬롯 모델과 같은 객체인가(소유권이 storedModels 에 있음) */
+  private modelIsStored(): boolean {
+    for (const [, v] of this.storedModels) if (v.model === this.model) return true;
+    return false;
   }
 
   private placeModel(model: CarModel, pose: { x: number; y: number; z: number; heading: number }): void {
@@ -935,19 +980,27 @@ export class Game {
       if (spec.visual.kind === 'glb') void applyGlbVisual(model, spec);
       this.scene.add(model.root);
       this.placeModel(model, e.pose);
-      this.storedModels.set(e.slot, { model, spec });
+      this.storedModels.set(e.slot, { model, spec, carId: e.car.carId });
     }
   }
 
   /** 플레이어가 조종하는 차량을 바꾼다(출고된 다른 차량을 인수). 이전 모델은 폐기 */
-  private adoptVehicle(spec: VehicleSpec, model: CarModel | null): void {
-    if (this.model) {
-      this.scene.remove(this.model.root);
-      this.model.dispose();
+  /**
+   * 조작 차량 교체. 이전 모델의 처리를 명시한다: 'dispose'(폐기), 'keep'(씬에 그대로 둠 — 보관/주차 차량).
+   * `this.model` 을 null 로 두는 중간 상태를 만들지 않는다.
+   */
+  private adoptVehicle(spec: VehicleSpec, model: CarModel | null, old: 'dispose' | 'keep' = 'dispose'): void {
+    if (this.model && this.model !== model) {
+      if (old === 'dispose' && !this.modelIsStored()) {
+        this.scene.remove(this.model.root);
+        this.model.dispose();
+      }
+      // 'keep': 보관 슬롯/입구 밖에 서 있는 차량 — 씬에서 제거하지 않는다
     }
     this.spec = spec;
-    this.model = model ?? createCarModel(spec, { blobTexture: this.built!.textures.blob });
-    this.scene.add(this.model.root);
+    const next = model ?? createCarModel(spec, { blobTexture: this.built!.textures.blob });
+    this.model = next;
+    if (!next.root.parent) this.scene.add(next.root);
     if (!model && spec.visual.kind === 'glb') void applyGlbVisual(this.model, spec);
     this.sensorView.setSpec(spec);
     this.assistPanel.setSpec(spec);
@@ -962,28 +1015,93 @@ export class Game {
       if (e.type === 'rejected') continue;
       if (e.type === 'stored' && e.slot && this.model) {
         const sc = mech.m.slots[e.slot];
-        if (sc) {
-          this.storedModels.set(e.slot, { model: this.model, spec: this.spec });
-          this.placeModel(this.model, { ...storedPose(e.slot, sc) });
-          this.model = null as unknown as CarModel;
-          // 다음 입고를 위한 새 차량(같은 차종)을 입구 대기 위치에 공급한다
-          const sp = this.missionDef?.spawn ?? this.map.spawn;
-          const spec = this.spec;
-          this.car = createVehicleState(spec, sp.x, sp.z, sp.heading);
-          this.adoptVehicle(spec, null);
-        }
+        if (!sc) continue;
+        // 입고 완료: **그 차량이 그 슬롯에 그대로 남는다.** 모델 소유권은 storedModels 로 넘기고, 플레이어는 보관된 차량을 관찰하는 상태가 된다.
+        // 새 차량을 자동 생성하거나 시작 위치로 되돌리지 않는다.
+        const pose = storedPose(e.slot, sc);
+        this.storedModels.set(e.slot, { model: this.model, spec: this.spec, carId: e.carId ?? sc.carId });
+        this.placeModel(this.model, pose);
+        this.playerStoredSlot = e.slot;
+        mech.observing = true;
+        this.car.x = pose.x;
+        this.car.z = pose.z;
+        this.car.y = pose.y;
+        this.car.heading = pose.heading;
+        this.car.v = 0;
+        this.car.pitch = 0;
+        this.car.slope = 0;
+        this.car.gear = 'P';
+        this.car.handbrake = true;
+        this.hud.toast(`보관 완료 — ${floorLabel(slotDef(e.slot).floor)} ${slotDef(e.slot).side} 슬롯 (새 차량: I)`, 'good');
       } else if (e.type === 'picked' && e.slot) {
+        // 출고: 보관된 그 차량(모델/차종/ID)을 플레이어가 인수한다. 현재 조작 차량이 입구 밖에 있으면 삭제하지 않고 그 자리에 주차해 둔다.
         const entry = this.storedModels.get(e.slot);
         const sc = mech.m.carrying;
         const spec = entry?.spec ?? getVehicle(sc?.specId || this.spec.id);
+        if (this.playerStoredSlot) {
+          // 관찰 중이던 보관 차량은 storedModels 에 그대로 남는다 (다른 슬롯 차량을 호출하는 경우)
+          this.playerStoredSlot = null;
+          mech.observing = false;
+        } else if (this.model && !this.modelIsStored()) {
+          this.parkOutsideCar();
+        }
         this.storedModels.delete(e.slot);
-        this.adoptVehicle(spec, entry?.model ?? null);
+        this.adoptVehicle(spec, entry?.model ?? null, 'keep'); // 이전 모델은 보관/주차 차량으로 남는다
         this.car.gear = 'P';
         this.car.handbrake = true;
       } else if (e.type === 'retrieved') {
         this.hud.toast('출고 완료 — 탑승(G) 후 출차하세요', 'good');
       }
     }
+  }
+
+  /** 조작 중인 차량을 현재 위치에 세워 둔다(모델 유지 + 충돌체 추가). 출고로 차량을 교체할 때 기존 차량이 사라지지 않게 한다 */
+  private parkOutsideCar(): void {
+    const model = this.model;
+    if (!model) return;
+    const c = centerOf(this.car, this.spec);
+    const col: Collider = { kind: 'box', id: `parked-${this.parkedCars.length}-${Math.round(c.x)}_${Math.round(c.z)}`, tag: 'car', x: c.x, z: c.z, w: this.spec.width, d: this.spec.length, rot: this.car.heading, y0: this.car.y, h: this.spec.height };
+    this.colliders.push(col);
+    this.colliderById.set(col.id, col);
+    this.parkedCars.push({ model, col });
+    this.hud.toast('기존 차량은 입구 밖에 주차됩니다', 'warn');
+  }
+
+  /** 관찰 상태: 보관된 차량의 pose 를 슬롯 pose 로 고정(물리/입력 없음) */
+  private holdStoredCar(): void {
+    const slot = this.playerStoredSlot;
+    const sc = slot ? this.mech.m.slots[slot] : null;
+    if (!slot || !sc) return;
+    const p = storedPose(slot, sc);
+    this.car.x = p.x;
+    this.car.z = p.z;
+    this.car.y = p.y;
+    this.car.heading = p.heading;
+    this.car.v = 0;
+  }
+
+  /** 명시적 조작: 보관된 차량은 그대로 두고 새 차량을 입구 대기 위치에서 시작한다 */
+  startNewCar(): boolean {
+    const mech = this.mech;
+    if (!this.playerStoredSlot) {
+      this.hud.toast('이미 조작 중인 차량이 있습니다', 'warn');
+      return false;
+    }
+    if (mech.m.phase !== 'waiting') {
+      this.hud.toast('장치가 동작 중입니다 — 복귀 후 새 차량을 시작하세요', 'warn');
+      return false;
+    }
+    const spec = this.spec; // 같은 차종으로 시작 (보관된 차량의 모델은 storedModels 가 계속 소유)
+    const sp = this.missionDef?.spawn ?? this.map.spawn;
+    this.playerStoredSlot = null;
+    mech.observing = false;
+    this.car = createVehicleState(spec, sp.x, sp.z, sp.heading);
+    this.car.handbrake = false;
+    this.adoptVehicle(spec, null, 'keep'); // 보관된 모델은 슬롯에 그대로 둔다
+    mech.m.occupant = 'in';
+    this.rig.snap();
+    this.hud.toast('새 차량을 시작합니다', 'good');
+    return true;
   }
 
   private physicsStep(vin: VehicleInput, dt: number): void {
