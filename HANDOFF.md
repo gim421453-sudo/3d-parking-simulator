@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.5.3-dev (아래 v0.5.3 섹션) · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,14 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.5.3 진행 상황 (P0 재검증 · 시동/엔진음 · 고속 주행 · 기계식 시설 모듈)
+
+상세/검증표: `docs/V053.md`. 단위 784/784, 전체 E2E 482/482(종료 코드 0), `verify:pages` PASS, UI 겹침 ALL OK. **Pages 는 v0.5.2 핫픽스 이전(`63fde2e`)이 배포 상태 — v0.5.3 은 미배포(사용자 승인 후 1회 수동)**. APK/ADB 보류.
+- 한 일: 입고 후 새 차량 자동 생성 0 재검증(T 초기화 숨은 경로 차단), 볼라드 유도선 바로 바깥 이동, 시동 상태기계(KeyO/버튼/OFF 가속 차단/기계식 하차·입고 전 시동 OFF), 합성 엔진음, 차종별 최고속도 130~180km/h + 적응형 서브스텝, 거울 FPS 자동(30/24/16), 기계식 시설 모듈(시설 로컬 좌표 + 월드 변환, 층수 가변, 시설별 독립 상태기계), outdoor 2기 설치(+megapark 포함), 주차 점유/잔여 집계 + 기계식 추천 정책(잔여율 ≤20% 기계식 우선, 설정 가능).
+- 남은 일: **BMW M4/X6 GLB(로그인 필요 — 사용자가 직접 받아야 함, `docs/BMW_ASSET_REQUEST.md`)**, 엔진음 실제 청취 확인, 거울 30FPS 실기기 확인, 시설 입구 경로/megapark 시설 브라우저 주행 검증, 북쪽 6층 시설 실제 입고 E2E, 나선 램프 간헐 실패 게임 쪽 원인 조사, lot/modlot/underground/타워류에는 시설을 설치하지 못함(이유: `MapData.mechUnavailable`), 도시 확장 계획 `docs/CITY_DRIVING_PREP.md`(구현 없음).
+- 알려진 제한: 엔진음은 합성(실제 차량 음원 아님), RPM 은 시뮬레이션 근사, 다층/통합 맵은 경로 안내 미지원.
+- 재발 방지: 시설 추가는 `facilityKit(cfg)` + `MechFacilityConfig`(회전 90° 배수)로만, 장치 로직은 로컬 좌표, 보관 모델 키는 `<시설id>/<슬롯>`, `startRun` 에서 `lastHitId/newCarCount` 초기화, E2E 는 시동 OFF/ON 을 실제 입력 경로로.
 
 ## v0.5.2 P0 핫픽스 (입고 후 차량 순간이동)
 

@@ -19,6 +19,8 @@ npm test             # vitest 단위 테스트
 npm run export:data  # 엔진 독립 JSON 내보내기 (export/)
 npm run build        # 타입검사 + 빌드 → dist/
 node scripts/e2e-smoke.cjs   # 브라우저 통합 테스트 (Playwright 필요, dist 필요)
+node scripts/ui-overlap.cjs  # UI 겹침 (6 해상도 × 3 컨텍스트)
+node scripts/perf-v053.cjs   # 맵 전환 누수/거울 갱신율 측정
 npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 ```
 
@@ -51,6 +53,7 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 
 ## 변경 이력 (최근 순)
 
+- v0.5.3-dev: **P0 재검증 · 시동/엔진음 · 고속 주행 · 기계식 시설 모듈**(`docs/V053.md`). 규칙: 기계식 시설은 `MechFacilityConfig`(id/위치/회전 90° 배수/층수) + `facilityKit` 으로만 설치하고 장치 로직·모델은 **시설 로컬 좌표**에서 동작(월드는 `mech/facility.ts` 변환만), 시설마다 독립 `MechController`/모델/셔터 충돌체이며 보관 차량 모델 키는 `<시설id>/<슬롯>`, 새 맵에 시설을 넣기 전 `scripts/find-facility-sites.ts` 로 빈 자리/미션 동선 확인(못 넣으면 `mechUnavailable` 사유 기록, 12층을 억지로 넣지 말 것), 엔진은 `vehicle/engine.ts` 상태기계만 거칠 것(시동 OFF 가속 차단은 `VehicleInput.engineOn`, 기계식 하차·입고는 시동 OFF 필요, 출고/하차 후 자동 시동 금지), 엔진음은 합성이며 실제 차량 음원이라고 표기하지 말 것, 고속은 `substepCount`(이동량 ≤0.12m)로 관통 방지, 주차 점유/추천은 `parking/availability.ts`(순수 로직, 20% 임계 설정 `parkLowRatio`)만, 일반 화면에 거리(m) 숫자 금지 유지, 경로는 실제 도로 그래프가 있을 때만(지어내지 말 것), 클러스터 필수 조작 버튼은 7개(시동 포함)이며 `ui-overlap.cjs` 로 확인, BMW 파일은 인증 필요(`docs/BMW_ASSET_REQUEST.md`) — 우회 금지·BMW 가 아닌 모델을 BMW 로 표기 금지.
 - v0.5.2-hotfix: **입고 완료 시 새 차량 자동 생성 금지** — 입고된 차량은 슬롯에 그대로 남고(`playerStoredSlot` 관찰 상태, 모델 소유권은 `storedModels`), 새 차량은 명시적 `mechNewCar`(I)로만 시작, `this.model` 을 null 로 두는 중간 상태 금지(`adoptVehicle(spec, model, 'dispose'|'keep')`), 출고로 차량을 바꿀 때 기존 조작 차량은 삭제하지 말고 `parkOutsideCar`, 미션 성공은 캐리지 복귀 후.
 - v0.5.2-dev: **12층 기계식 타워·전진/후진 입고·통합 맵**(`docs/V052.md`). 규칙: 슬롯 22개/점유/차량 정보는 `MachineState.slots`(장치 상태와 분리), 입고 후 팔레트+차량은 슬롯에 남고 **빈 캐리지가 1F 로 복귀**(차량을 실은 팔레트가 동시에 복귀하는 모순 금지), 전진 입고=앞차축/후진 입고=뒷차축 기준 정렬(`alignment` 모드), 출고 회전은 전진 입고 차량만, 정지턱/가이드는 낮은 구조물이라 차량을 밀어내거나 0 으로 고정하지 말 것(`bumpDecel`/`guideDrag`), 승강 구조는 4모서리 기둥(팔레트 중앙 기둥 금지), 셔터 상단 LED(`statusBoard`)와 거울 옆 표시판(`guidance`)은 별개 장치, 통합 맵은 `compose.ts`(평행이동만 + ID 네임스페이스)로만 합성하고 기계식 구역은 `STATION` 절대 좌표 때문에 원점 고정, 새 키: Y 입고 취소 · Z 제어반, 전체 E2E 는 시작/종료/종료 코드를 남기는 래퍼로 실행하고 불안정 테스트는 약화하지 말고 원인을 조사할 것.
 - v0.5.1-dev: **기계식 완성·카메라/패널·UI 겹침·최종 검증**(`docs/V051.md`). 규칙: 입구 표시기(`machine.guidance`)는 차량 실제 위치로만 결정(타이머 금지), 정지 홈 안착은 높이/피치 3cm 이내 저속 접촉 모델(차량을 끌어당기지 말 것), 턴테이블 회전은 문 닫힘+하차+고정 상태에서만, 셔터는 동적 충돌체, 볼라드는 `bollard` 태그 실제 충돌체, 전방카메라는 `frontCamOf` 차체별 튜닝, 경고 패널은 `PANEL_H_MAX` 0.5m 이하 + 병합(센서 계산은 0.3m 칸 유지), 측면 시점은 그 쪽 측면 히트만(`sideFrameHits`), 기계식 패널은 `#top-right`(낮은 화면 ≤420px 축소), UI 변경 후 `scripts/ui-overlap.cjs`, 전체 E2E 는 시작/종료/종료 코드를 로그에 남기는 래퍼로 실행(중단은 INTERRUPTED 로 구분). 검증 항목을 약화해 통과시키지 말 것.
