@@ -1226,12 +1226,14 @@ async function waitServer(url, tries = 50) {
   check('주차타워: 맵 로드 + 임시 배치로 명시 + 현재 층(1F) 표시', tw0.id === 'tower' && tw0.prov === true && /임시/.test(tw0.name) && tw0.floor === '1F' && !tw0.floorHidden, JSON.stringify(tw0));
   await shot('130-tower-1f');
   await g(() => {
+    // 오토파일럿: 벽시계 타이머가 아니라 **게임 프레임(게임 시간)마다** 입력을 계산한다 — 소프트웨어 WebGL 의 프레임 간격 변화에 결과가 흔들리지 않게.
     window.__apStart = (path, speed) => {
       const G = window.__game;
       let idx = 0;
-      clearInterval(window.__apT);
+      window.__apStop();
       window.__apMax = { pitch: 0, y: 0 };
-      window.__apT = setInterval(() => {
+      if (!G.__origReadInput) G.__origReadInput = G.readInput.bind(G);
+      G.readInput = (dt) => {
         const c = G.car; const sp = G.spec; const off = sp.length / 2 - sp.rearOverhang;
         const cx = c.x + Math.sin(c.heading) * off; const cz = c.z + Math.cos(c.heading) * off;
         while (idx < path.length - 1 && Math.hypot(path[idx][0] - cx, path[idx][1] - cz) < 3) idx++;
@@ -1239,9 +1241,10 @@ async function waitServer(url, tries = 50) {
         let err = Math.atan2(tx - c.x, tz - c.z) - c.heading; err = Math.atan2(Math.sin(err), Math.cos(err));
         G.debugInput = { throttle: c.v < speed ? 1 : 0, brake: 0, steerInput: Math.max(-1, Math.min(1, (err * 1.6) / sp.maxSteer)) };
         window.__apMax.pitch = Math.max(window.__apMax.pitch, c.pitch); window.__apMax.y = Math.max(window.__apMax.y, c.y);
-      }, 16);
+        return G.__origReadInput(dt);
+      };
     };
-    window.__apStop = () => { clearInterval(window.__apT); window.__game.debugInput = null; };
+    window.__apStop = () => { const G = window.__game; if (G.__origReadInput) { G.readInput = G.__origReadInput; G.__origReadInput = null; } G.debugInput = null; };
   });
   const rampPath = []; for (let x = -33; x <= 8; x += 1) rampPath.push([x, 0]);
   await g(([path]) => { const c = window.__game.car; c.gear = 'D'; c.handbrake = false; window.__apStart(path, 2.2); }, [rampPath]);
