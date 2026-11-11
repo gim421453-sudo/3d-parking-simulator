@@ -2416,6 +2416,15 @@ async function waitServer(url, tries = 50) {
       await Y(() => { window.__game.debugInput = null; });
       return ok;
     };
+    const engineOn = async () => {
+      if (await Y(() => window.__game.engine.state === 'RUNNING')) return true;
+      await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+      await yuntil(() => window.__game.brake > 0.4, undefined, 10000);
+      await pg.keyboard.press('KeyO');
+      const ok = await yuntil(() => window.__game.engine.state === 'RUNNING', undefined, 20000);
+      await Y(() => { window.__game.debugInput = null; });
+      return ok;
+    };
 
     // ---- P0-A: 실차형 GLB(컨셉 쿠페) 실제 주행 모델 ----
     await loadMap('lot', 'free', 'concept-coupe');
@@ -2560,7 +2569,7 @@ async function waitServer(url, tries = 50) {
     await yuntil(() => window.__game.mech.m.phase === 'exit', undefined, 200000);
     const ex = await M();
     check('v0.5.2 출고 완료: 보관 차량 인수(교체), 지상/문 열림/문(서쪽)을 향함, 슬롯 비워짐', ex.cy === 0 && ex.y === 0 && ex.door === 1 && Math.sin(ex.h) < -0.99 && !ex.occ.includes('08A:fwd') && ex.spec === 'sedan', JSON.stringify(ex));
-    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300);
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); check('v0.5.3 출고 후 탑승해도 시동은 자동으로 걸리지 않는다(OFF), 직접 시동해야 출차 가능', (await Y(() => window.__game.engine.state)) === 'OFF' && (await engineOn()));
     await Y(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'D'; G.debugInput = { throttle: 0.6, brake: 0, steerInput: 0 }; });
     await yuntil(() => window.__game.car.x < -21.0, undefined, 150000);
     await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
@@ -2586,7 +2595,7 @@ async function waitServer(url, tries = 50) {
     check('v0.5.2 핫픽스: 상승 중 카메라가 차량을 추적(거리 < 40m)하고 모델/차량/캐리지 높이가 일치', hl.camCarDist < 40 && Math.abs(hl.carY - hl.cy) < 1e-6 && Math.abs(hl.modelY - hl.cy) < 0.05, JSON.stringify(hl));
     await pg.screenshot({ path: path.join(OUT, '136-v052hf-lifting.png') });
     await yuntil(() => !!window.__game.mech.m.slots['08A'] && window.__game.mech.m.phase === 'waiting' && window.__game.mech.m.carriage.y === 0, undefined, 250000);
-    const hs = await Y(() => { const G = window.__game; const m = G.mech.m; const e = G.storedModels.get('08A'); const c = G.rig.active.position; const sp = window.__spawn; window.__m08 = e && e.model; window.__id08 = m.slots['08A'] && m.slots['08A'].carId; return { slot: G.playerStoredSlot, same: !!e && e.model === G.model, idOk: !!e && e.carId === m.slots['08A'].carId, carY: G.car.y, modelY: G.model.root.position.y, fromSpawn: Math.hypot(G.car.x - sp.x, G.car.z - sp.z), camCarDist: Math.hypot(c.x - G.car.x, c.y - G.car.y, c.z - G.car.z), nStored: G.storedModels.size, parked: G.parkedCars.length, mission: G.mission && G.mission.status, cy: m.carriage.y, cz: m.carriage.z, pl: m.palletLoc, spec: e && e.spec.id, hasMesh: G.model.root.children.length > 0 }; });
+    const hs = await Y(() => { const G = window.__game; const m = G.mech.m; const e = G.storedModels.get('mech-tower/08A'); const c = G.rig.active.position; const sp = window.__spawn; window.__m08 = e && e.model; window.__id08 = m.slots['08A'] && m.slots['08A'].carId; return { slot: G.playerStoredSlot, same: !!e && e.model === G.model, idOk: !!e && e.carId === m.slots['08A'].carId, carY: G.car.y, modelY: G.model.root.position.y, fromSpawn: Math.hypot(G.car.x - sp.x, G.car.z - sp.z), camCarDist: Math.hypot(c.x - G.car.x, c.y - G.car.y, c.z - G.car.z), nStored: G.storedModels.size, parked: G.parkedCars.length, mission: G.mission && G.mission.status, cy: m.carriage.y, cz: m.carriage.z, pl: m.palletLoc, spec: e && e.spec.id, hasMesh: G.model.root.children.length > 0 }; });
     check('v0.5.2 핫픽스: 입고 완료 후 그 차량이 8F A 에 그대로 남는다(시작 위치로 이동/재생성 없음), 모델·ID 유지, 차량 높이 21m', hs.slot === '08A' && hs.same && hs.idOk && Math.abs(hs.carY - 21) < 1e-6 && Math.abs(hs.modelY - 21) < 0.05 && hs.fromSpawn > 25 && hs.nStored === 1 && hs.parked === 0 && hs.hasMesh, JSON.stringify(hs));
     check('v0.5.2 핫픽스: 빈 캐리지만 1층 복귀(캐리지 y=0, z=0), 승강장에 새 빈 팔레트, 미션은 계속(결과 화면/초기화 없음)', hs.cy === 0 && hs.cz === 0 && hs.pl === 'station' && hs.mission === 'running');
     check('v0.5.2 핫픽스: 보관 후 카메라가 보관 차량(8F)을 계속 추적한다(시작 위치로 이동하지 않음)', hs.camCarDist < 40, JSON.stringify({ d: hs.camCarDist }));
@@ -2597,9 +2606,9 @@ async function waitServer(url, tries = 50) {
     // v0.5.3 P0 재검증: 숨은 새 차량/위치 복귀 경로 없음 (T 초기화, G 하차 버튼, 10초 방치)
     await pg.keyboard.press('KeyT'); await sleep(400);
     await engineOff(); await pg.keyboard.press('KeyG'); await sleep(400);
-    const idle0 = await Y(() => { const G = window.__game; return { t: G.mech.m.clock, slot: G.playerStoredSlot, y: G.car.y, my: G.model.root.position.y, n: G.newCarCount, same: G.storedModels.get('08A').model === G.model }; });
+    const idle0 = await Y(() => { const G = window.__game; return { t: G.mech.m.clock, slot: G.playerStoredSlot, y: G.car.y, my: G.model.root.position.y, n: G.newCarCount, same: G.storedModels.get('mech-tower/08A').model === G.model }; });
     await yuntil(([t]) => window.__game.mech.m.clock > t + 10, [idle0.t], 120000);
-    const idle1 = await Y(() => { const G = window.__game; const c = G.rig.active.position; return { slot: G.playerStoredSlot, y: G.car.y, my: G.model.root.position.y, n: G.newCarCount, same: G.storedModels.get('08A').model === G.model, camD: Math.hypot(c.x - G.car.x, c.y - G.car.y, c.z - G.car.z), carId: G.mech.m.slots['08A'].carId, entryId: G.storedModels.get('08A').carId }; });
+    const idle1 = await Y(() => { const G = window.__game; const c = G.rig.active.position; return { slot: G.playerStoredSlot, y: G.car.y, my: G.model.root.position.y, n: G.newCarCount, same: G.storedModels.get('mech-tower/08A').model === G.model, camD: Math.hypot(c.x - G.car.x, c.y - G.car.y, c.z - G.car.z), carId: G.mech.m.slots['08A'].carId, entryId: G.storedModels.get('mech-tower/08A').carId }; });
     check('v0.5.3 P0: 입고 후 T(초기화)/G(하차) 입력·10초 방치에도 새 차량 자동 생성 0회, 보관 차량은 8F 에 그대로, 카메라 대상=보관 차량, 차량 ID 일치', idle0.slot === '08A' && idle1.slot === '08A' && idle1.n === 0 && Math.abs(idle1.y - 21) < 1e-6 && Math.abs(idle1.my - 21) < 0.05 && idle1.same && idle1.camD < 40 && idle1.carId === idle1.entryId, JSON.stringify({ idle0, idle1 }));
     await pg.screenshot({ path: path.join(OUT, '137-v052hf-stored-8f.png') });
     // 자유 시점: 보관된 차량(8F)을 추적, 사용자가 시점을 바꿀 수 있다
@@ -2611,7 +2620,7 @@ async function waitServer(url, tries = 50) {
     // 명시적 '새 차량' 조작 전에는 새 플레이어 차량이 없다 → I 키로 새 차량 시작, 보관 차량은 그대로
     check('v0.5.2 핫픽스: 새 차량을 누르기 전에는 새 플레이어 차량이 없다(조작 차단, 관찰 상태)', await Y(() => window.__game.playerStoredSlot === '08A' && window.__game.mech.blocksDriving()));
     await pg.keyboard.press('KeyI'); await sleep(800);
-    const nw = await Y(() => { const G = window.__game; const e = G.storedModels.get('08A'); const sp = window.__spawn; return { slot: G.playerStoredSlot, newAtSpawn: Math.hypot(G.car.x - sp.x, G.car.z - sp.z) < 3, carY: G.car.y, storedSame: !!e && e.model === window.__m08, storedY: e && e.model.root.position.y, idSame: G.mech.m.slots['08A'].carId === window.__id08, newModel: G.model !== window.__m08, nStored: G.storedModels.size }; });
+    const nw = await Y(() => { const G = window.__game; const e = G.storedModels.get('mech-tower/08A'); const sp = window.__spawn; return { slot: G.playerStoredSlot, newAtSpawn: Math.hypot(G.car.x - sp.x, G.car.z - sp.z) < 3, carY: G.car.y, storedSame: !!e && e.model === window.__m08, storedY: e && e.model.root.position.y, idSame: G.mech.m.slots['08A'].carId === window.__id08, newModel: G.model !== window.__m08, nStored: G.storedModels.size }; });
     check('v0.5.2 핫픽스: 명시적 새 차량(I) → 새 차량만 시작 위치에 생기고 8F 보관 차량(모델/ID/위치)은 그대로', nw.slot === null && nw.newAtSpawn && nw.carY === 0 && nw.storedSame && Math.abs(nw.storedY - 21) < 0.05 && nw.idSame && nw.newModel && nw.nStored === 1, JSON.stringify(nw));
     // 두 번째 차량: 후진 입고 12F B → 8F/12F 에 서로 다른 차량 보관
     await Y(() => { const G = window.__game; G.mech.selectedSlot = '12B'; G.car.x = -17; G.car.z = 0; G.car.heading = -Math.PI / 2; G.car.v = 0; });
@@ -2619,7 +2628,7 @@ async function waitServer(url, tries = 50) {
     await creepIn('R', 0.4, -8.5, -0.76);
     await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => !!window.__game.mech.m.slots['12B'] && window.__game.mech.m.phase === 'waiting' && window.__game.mech.m.carriage.y === 0, undefined, 300000);
-    const two = await Y(() => { const G = window.__game; const m = G.mech.m; const a = G.storedModels.get('08A'); const b = G.storedModels.get('12B'); return { n: G.storedModels.size, distinct: !!a && !!b && a.model !== b.model, ids: [m.slots['08A'].carId, m.slots['12B'].carId], idsOk: a.carId === m.slots['08A'].carId && b.carId === m.slots['12B'].carId, y8: a.model.root.position.y, y12: b.model.root.position.y, m8: a.model === window.__m08, mode12: m.slots['12B'].mode }; });
+    const two = await Y(() => { const G = window.__game; const m = G.mech.m; const a = G.storedModels.get('mech-tower/08A'); const b = G.storedModels.get('mech-tower/12B'); return { n: G.storedModels.size, distinct: !!a && !!b && a.model !== b.model, ids: [m.slots['08A'].carId, m.slots['12B'].carId], idsOk: a.carId === m.slots['08A'].carId && b.carId === m.slots['12B'].carId, y8: a.model.root.position.y, y12: b.model.root.position.y, m8: a.model === window.__m08, mode12: m.slots['12B'].mode }; });
     check('v0.5.2 핫픽스: 8F/12F 에 서로 다른 두 차량이 각각 보관(모델/ID 구분, 기존 8F 차량 불변)', two.n === 2 && two.distinct && two.ids[0] !== two.ids[1] && two.idsOk && Math.abs(two.y8 - 21) < 0.05 && Math.abs(two.y12 - 33) < 0.05 && two.m8 && two.mode12 === 'rev', JSON.stringify(two));
     await pg.screenshot({ path: path.join(OUT, '138-v052hf-two-stored.png') });
     // 선택한 차량만 출고: 8F A 호출 → 12F B 는 그대로, 플레이어는 8F 차량을 정확히 인수, 기존 관찰 차량은 사라지지 않음
@@ -2627,7 +2636,7 @@ async function waitServer(url, tries = 50) {
     await Y(() => { const G = window.__game; G.mech.selectedSlot = '08A'; });
     await pg.keyboard.press('KeyK');
     await yuntil(() => window.__game.mech.m.phase === 'exit', undefined, 300000);
-    const out8 = await Y(() => { const G = window.__game; const m = G.mech.m; const b = G.storedModels.get('12B'); return { own: G.model === window.__m08, carried: m.carrying && m.carrying.carId === window.__id08, slot12: !!m.slots['12B'], n: G.storedModels.size, y12: b && b.model.root.position.y, slot08: !!m.slots['08A'], parked: G.parkedCars.length, rotated: m.yaw, y: G.car.y }; });
+    const out8 = await Y(() => { const G = window.__game; const m = G.mech.m; const b = G.storedModels.get('mech-tower/12B'); return { own: G.model === window.__m08, carried: m.carrying && m.carrying.carId === window.__id08, slot12: !!m.slots['12B'], n: G.storedModels.size, y12: b && b.model.root.position.y, slot08: !!m.slots['08A'], parked: G.parkedCars.length, rotated: m.yaw, y: G.car.y }; });
     check('v0.5.2 핫픽스: 선택한 8F 차량만 출고(같은 모델·ID 인수), 12F 차량은 그대로, 기존 조작 차량은 삭제되지 않고 입구 밖에 주차', out8.own && out8.carried && out8.slot12 && !out8.slot08 && out8.n === 1 && Math.abs(out8.y12 - 33) < 0.05 && out8.parked === 1 && out8.y === 0, JSON.stringify(out8));
     await pg.screenshot({ path: path.join(OUT, '139-v052hf-retrieved.png') });
 
@@ -2636,7 +2645,7 @@ async function waitServer(url, tries = 50) {
     await creepIn('D', 0.5, -9.5, -3.5);
     await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => window.__game.state === 'result', undefined, 300000);
-    const mg = await Y(() => { const G = window.__game; const e = G.storedModels.get('12A'); return { map: G.map.id, slot: G.playerStoredSlot, same: !!e && e.model === G.model, y: G.car.y, my: G.model.root.position.y, cy: G.mech.m.carriage.y, mission: G.mission.status, spawnDist: Math.hypot(G.car.x - (-30), G.car.z) }; });
+    const mg = await Y(() => { const G = window.__game; const e = G.storedModels.get('mech-tower/12A'); return { map: G.map.id, slot: G.playerStoredSlot, same: !!e && e.model === G.model, y: G.car.y, my: G.model.root.position.y, cy: G.mech.m.carriage.y, mission: G.mission.status, spawnDist: Math.hypot(G.car.x - (-30), G.car.z) }; });
     check('v0.5.2 핫픽스: 통합 맵(megapark) 기계식 구역에서도 12F A 입고 후 차량이 슬롯에 남고(높이 33m) 캐리지 1층 복귀·미션 성공', mg.map === 'megapark' && mg.slot === '12A' && mg.same && Math.abs(mg.y - 33) < 1e-6 && Math.abs(mg.my - 33) < 0.05 && mg.cy === 0 && mg.mission === 'success' && mg.spawnDist > 20, JSON.stringify(mg));
 
     // ---- 슬롯 점유/제어반/거부 ----
@@ -2691,6 +2700,60 @@ async function waitServer(url, tries = 50) {
     const mr2 = await Y(() => ({ n: window.__game.mechBuilt.mirrorRenders }));
     check('v0.5.0 기계식 전방 확인 거울: 실제 Three.js 반사 렌더가 간헐(제한 FPS)로 갱신된다', mr2.n > mr.n && mr2.n - mr.n < 40, JSON.stringify({ mr, mr2 }));
     await pg.screenshot({ path: path.join(OUT, '133-v050-mech-entry.png') });
+
+    // ---- v0.5.3 Gate C: 야외 맵의 회전된 기계식 시설 2기 — 독립 운용(입고/현황/추천) ----
+    await loadMap('outdoor', 'free', 'sedan');
+    await sleep(1200);
+    {
+      const info = await Y(() => { const G = window.__game; return { n: G.facilities.length, ids: G.facilities.map((f) => f.cfg.id), floors: G.facilities.map((f) => f.cfg.floors), slots: G.facilities.map((f) => Object.keys(f.ctl.m.slots).length), yaw: G.facilities.map((f) => +f.frame.yaw.toFixed(3)), doors: G.facilities.map((f) => f.built.group.position.x + ',' + f.built.group.position.z), groupYaw: G.facilities.map((f) => +f.built.group.rotation.y.toFixed(3)) }; });
+      check('v0.5.3 야외 맵: 독립 기계식 시설 2기(12층 22슬롯 / 6층 10슬롯), 모델이 시설 위치/회전에 놓임', info.n === 2 && info.slots[0] === 22 && info.slots[1] === 10 && info.floors[0] === 12 && info.floors[1] === 6 && info.groupYaw.every((y, i) => Math.abs(y - info.yaw[i]) < 1e-3) && Math.abs(info.yaw[0] - 1.571) < 0.01, JSON.stringify(info));
+      const pk = await Y(() => { const G = window.__game; const el = document.querySelector('#mission-panel .mc-park'); return { text: el ? el.textContent : '', area: G.parkArea ? { reg: G.parkArea.regularTotal, free: G.parkArea.regularFree, mech: G.parkArea.mech.map((m) => m.free + '/' + m.total) } : null, rec: G.parkRec ? G.parkRec.kind : null }; });
+      check('v0.5.3 주차 현황 표시: 일반 칸 잔여/기계식 잔여(22+10=32)가 실제 데이터로 표시되고 거리 숫자는 없다', pk.area && pk.area.reg > 0 && pk.area.mech.join() === '22/22,10/10' && /일반 \d+\/\d+ · 기계식 32\/32/.test(pk.text) && !/\d\s*m\b/.test(pk.text), JSON.stringify(pk));
+      // 동쪽(12층) 시설 로컬 정위치 앞쪽으로 배치 후 전진 입고
+      const setLocal = (idx, lx, lz, lh) => Y(([idx, lx, lz, lh]) => { const G = window.__game; const f = G.facilities[idx].frame; const c = Math.cos(f.yaw), s = Math.sin(f.yaw); const car = G.car; car.x = f.x + lx * c + lz * s; car.z = f.z - lx * s + lz * c; car.heading = lh + f.yaw; car.v = 0; car.steer = 0; car.gear = 'P'; car.handbrake = false; car.pitch = 0; car.y = 0; G.rig.snap(); }, [idx, lx, lz, lh]);
+      await setLocal(0, -17, 0, Math.PI / 2);
+      await sleep(600);
+      const act0 = await Y(() => window.__game.activeFacility.cfg.id);
+      check('v0.5.3 가까운 시설이 현재 시설로 선택된다(동쪽 시설 앞)', act0 === 'out-mech-east', act0);
+      const creepLocal = async (gear, thr, slowLx, brakeLx) => {
+        await Y(([gear, th]) => { const G = window.__game; G.car.handbrake = false; G.car.gear = gear; G.debugInput = { throttle: th, brake: 0, steerInput: 0 }; }, [gear, thr]);
+        await yuntil((t) => { const G = window.__game; return G.mech.localCar(G.car).x > t; }, slowLx, 150000);
+        await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+        await yuntil(() => Math.abs(window.__game.car.v) < 0.45, undefined, 60000);
+        await Y(() => { const G = window.__game; window.__creep = true; const tick = () => { if (!window.__creep || !G.debugInput) return; G.debugInput = { throttle: Math.abs(G.car.v) < 0.35 ? 0.14 : 0, brake: 0, steerInput: 0 }; requestAnimationFrame(tick); }; G.debugInput = { throttle: 0.14, brake: 0, steerInput: 0 }; tick(); });
+        await yuntil((t) => { const G = window.__game; return G.mech.localCar(G.car).x > t; }, brakeLx, 150000);
+        await Y(() => { window.__creep = false; window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+        await yuntil(() => Math.abs(window.__game.car.v) < 0.03, undefined, 60000);
+        await Y(() => { const G = window.__game; G.debugInput = null; G.car.gear = 'P'; G.car.handbrake = true; });
+        await sleep(500);
+      };
+      await creepLocal('D', 0.5, -9.5, -3.5);
+      const al = await Y(() => { const G = window.__game; const l = G.mech.localCar(G.car); return { lx: +l.x.toFixed(2), lz: +l.z.toFixed(2), hd: +((l.heading % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)).toFixed(3), items: G.mech.items.map((i) => i.key + ':' + i.ok).join(',') }; });
+      check('v0.5.3 회전된 시설에서도 벽/볼라드/가이드와 충돌 없이 진입해 로컬 정위치에 정차한다', Math.abs(al.lz) < 0.12 && al.lx > -3.7 && al.lx < -3.3 && Math.abs(al.hd - 1.571) < 0.06, JSON.stringify(al));
+      await engineOff();
+      await pg.keyboard.press('KeyG');
+      await sleep(400);
+      await Y(() => { window.__game.mech.selectedSlot = '03B'; });
+      await pg.keyboard.press('KeyJ');
+      const stored = await yuntil(() => { const G = window.__game; return !!G.facilities[0].ctl.m.slots['03B'] && G.facilities[0].ctl.m.phase === 'waiting' && !!G.playerStoredSlot; }, undefined, 150000);
+      const ind = await Y(() => { const G = window.__game; const sc = G.facilities[0].ctl.m.slots['03B']; const pose = G.facilities[0].ctl.storedPoseW('03B', sc); return { occ0: Object.values(G.facilities[0].ctl.m.slots).filter(Boolean).length, occ1: Object.values(G.facilities[1].ctl.m.slots).filter(Boolean).length, clk1: G.facilities[1].ctl.m.clock, phase1: G.facilities[1].ctl.m.phase, newCars: G.newCarCount, y: G.car.y, dx: Math.abs(G.model.root.position.x - pose.x), dz: Math.abs(G.model.root.position.z - pose.z), my: G.model.root.position.y }; });
+      check('v0.5.3 회전된 시설 입고: 그 시설 3F B 슬롯에 보관(차량 모델이 월드 슬롯 위치에 남음), 다른 시설은 영향 없음(독립 상태기계), 새 차량 자동 생성 0', stored && ind.occ0 === 1 && ind.occ1 === 0 && ind.phase1 === 'waiting' && ind.clk1 > 1 && ind.newCars === 0 && ind.dx < 0.05 && ind.dz < 0.05 && Math.abs(ind.my - 6) < 0.05, JSON.stringify(ind));
+      await sleep(800);
+      const pk2 = await Y(() => { const G = window.__game; return { mech: G.parkArea.mech.map((m) => m.free + '/' + m.total), txt: document.querySelector('#mission-panel .mc-park')?.textContent || '' }; });
+      check('v0.5.3 입고 후 기계식 잔여가 실시간 갱신(21/22, 10/10)', pk2.mech.join() === '21/22,10/10' && /기계식 31\/32/.test(pk2.txt), JSON.stringify(pk2));
+      // 두 번째(북쪽 6층) 시설: 가까이 가면 현재 시설이 바뀌고 슬롯은 10개(7F 이상 없음)
+      await Y(() => { window.__game.mech.selectedSlot = '02A'; });
+      await setLocal(1, -17, 0, Math.PI / 2);
+      await sleep(600);
+      // 입고된 차량 관찰 상태에서는 보관 시설이 유지된다 → 새 차량으로 전환 후 두 번째 시설 선택 확인
+      await pg.keyboard.press('KeyI');
+      await sleep(400);
+      await setLocal(1, -17, 0, Math.PI / 2);
+      await sleep(900);
+      const act1 = await Y(() => ({ id: window.__game.activeFacility.cfg.id, floors: window.__game.mech.m.floors, grid: document.querySelectorAll('#mech-ctl .mctl-row').length }));
+      check('v0.5.3 북쪽 시설 앞에서는 현재 시설이 6층 시설로 바뀐다(제어반 슬롯 행 5개), 동쪽 시설의 보관 차량은 유지', act1.id === 'out-mech-north' && act1.floors === 6 && (await Y(() => !!window.__game.facilities[0].ctl.m.slots['03B'])), JSON.stringify(act1));
+      await pg.screenshot({ path: path.join(OUT, '141-v053-outdoor-facilities.png') });
+    }
 
     // ---- v0.5.3 Gate B: 기계식 거울 FPS(게임 시간 기준) 측정 ----
     {
