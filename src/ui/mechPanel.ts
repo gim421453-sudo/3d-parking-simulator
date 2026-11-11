@@ -8,6 +8,7 @@ export class MechPanel {
   private phaseEl: HTMLElement;
   private msgEl: HTMLElement;
   private btnExit: HTMLButtonElement;
+  private btnNew: HTMLButtonElement;
   private last = '';
 
   constructor(parent: HTMLElement, onAction: (a: Action) => void) {
@@ -19,6 +20,7 @@ export class MechPanel {
       <div class="mc-sub" data-r="msg"></div>
       <div class="mech-btns">
         <button data-a="mechExit" title="하차/탑승 (G)">하차</button>
+        <button data-a="mechNewCar" class="newcar hidden" title="새 차량 시작 (I)">새 차</button>
         <button data-a="mechStart" title="입고 시작 (J)">입고</button>
         <button data-a="mechRetrieve" title="출고 요청 (K)">출고</button>
         <button data-a="mechPanel" title="제어반 (Z)" aria-label="제어반">제어</button>
@@ -28,6 +30,7 @@ export class MechPanel {
     this.phaseEl = this.el.querySelector('[data-r="phase"]')!;
     this.msgEl = this.el.querySelector('[data-r="msg"]')!;
     this.btnExit = this.el.querySelector('[data-a="mechExit"]')!;
+    this.btnNew = this.el.querySelector('[data-a="mechNewCar"]')!;
     this.el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => onTap(b, () => onAction(b.dataset.a as Action)));
   }
 
@@ -53,7 +56,9 @@ export class MechPanel {
     if (key === this.last) return;
     this.last = key;
     this.phaseEl.textContent = phase;
-    this.btnExit.textContent = observing ? '새 차' : m.occupant === 'in' ? '하차' : '탑승';
+    this.btnExit.classList.toggle('hidden', observing);
+    this.btnNew.classList.toggle('hidden', !observing);
+    this.btnExit.textContent = m.occupant === 'in' ? '하차' : '탑승';
     this.msgEl.textContent = line;
     this.msgEl.dataset.ok = m.phase === 'waiting' && failed.length === 0 ? '1' : '0';
   }

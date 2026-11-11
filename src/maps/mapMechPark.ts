@@ -18,11 +18,15 @@ const doorHalf = MECH_LIMITS.doorWidth / 2;
 export const ROOM_HW = 3.3; // 승강장 안쪽 반폭
 export const BOLLARD_R = 0.1;
 export const BOLLARD_H = 0.95;
+/** 좌우 차량 유도선(z=±LANE_Z, 폭 0.1m)의 바로 바깥쪽: 볼라드 안쪽 면 = 유도선 바깥 가장자리 (v0.5.3). 이전: (−9,±1.9),(−11,±2.5) */
+export const LANE_Z = 1.15;
+export const LANE_W = 0.1;
+export const BOLLARD_Z = LANE_Z + LANE_W / 2 + BOLLARD_R; // = 1.30
 export const BOLLARDS = [
-  { id: 'bol-1n', x: -9.0, z: 1.9 },
-  { id: 'bol-1s', x: -9.0, z: -1.9 },
-  { id: 'bol-2n', x: -11.0, z: 2.5 },
-  { id: 'bol-2s', x: -11.0, z: -2.5 },
+  { id: 'bol-1n', x: -9.5, z: BOLLARD_Z },
+  { id: 'bol-1s', x: -9.5, z: -BOLLARD_Z },
+  { id: 'bol-2n', x: -13.0, z: BOLLARD_Z },
+  { id: 'bol-2s', x: -13.0, z: -BOLLARD_Z },
 ];
 
 export const PALLET_SLOT: MapSlot = { id: 'pallet', x: px, z: 0, w: MECH_LIMITS.palletWidth, l: MECH_LIMITS.palletLength, dir: Math.PI / 2, style: 'box' };
@@ -81,8 +85,8 @@ export const MAP_MECHPARK: MapData = {
   paint: [
     { x: -9.0, z: 0, w: 0.3, d: 2.6, color: WHITE }, // 정지선
     { x: -18, z: 0, w: 24, d: 0.12, color: YELLOW }, // 진입 중앙선 (팔레트 중심선과 같은 z=0)
-    { x: -11.6, z: 1.15, w: 8.8, d: 0.1, color: WHITE }, // 좌/우 차량 유도선 (차폭 + 여유)
-    { x: -11.6, z: -1.15, w: 8.8, d: 0.1, color: WHITE },
+    { x: -11.6, z: LANE_Z, w: 8.8, d: LANE_W, color: WHITE }, // 좌/우 차량 유도선 (차폭 + 여유) — 볼라드가 바로 바깥쪽에 선다
+    { x: -11.6, z: -LANE_Z, w: 8.8, d: LANE_W, color: WHITE },
     { x: -14.0, z: 0, w: 1.8, d: 0.22, color: WHITE }, // 전진 화살표 (축 + 머리)
     { x: -13.35, z: 0.28, w: 0.9, d: 0.2, rot: 0.75, color: WHITE },
     { x: -13.35, z: -0.28, w: 0.9, d: 0.2, rot: -0.75, color: WHITE },

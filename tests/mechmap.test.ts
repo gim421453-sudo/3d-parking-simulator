@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { findVehicleCollision } from '../src/core/geometry';
-import { MAP_MECHPARK, BOLLARDS, BOLLARD_H, ROOM_HW } from '../src/maps/mapMechPark';
+import { MAP_MECHPARK, BOLLARDS, BOLLARD_H, BOLLARD_R, LANE_W, LANE_Z, ROOM_HW } from '../src/maps/mapMechPark';
 import { mapColliders } from '../src/maps';
 import { MECH_LIMITS } from '../src/mech/limits';
 import { STATION, alignment } from '../src/mech/machine';
 import { DEFAULT_SENSOR_CONFIG, readSensors } from '../src/sensors/sensorSystem';
 import { centerOf, createVehicleState, obbOf } from '../src/vehicle/physics';
-import { VEHICLES, getVehicle } from '../src/vehicle/spec';
+import { SELECTABLE_VEHICLES, VEHICLES, getVehicle } from '../src/vehicle/spec';
 
 const colliders = mapColliders(MAP_MECHPARK);
 const sedan = VEHICLES[1];
@@ -41,8 +41,20 @@ describe('기계식 맵 — 볼라드/입구/승강장 (v0.5.1)', () => {
     const car = place(sedan, b.x - 1.0, b.z - 0.5);
     expect(findVehicleCollision(obbOf(car, sedan), colliders)).not.toBeNull();
   });
-  it('진입로: 입구에서 팔레트 정지 위치까지 차폭 허용 차량은 직선 진입 시 충돌 0 (좌우 ±0.1m 오차 포함)', () => {
-    for (const v of VEHICLES.filter((q) => q.width <= MECH_LIMITS.maxWidth)) {
+  it('볼라드는 좌우 정렬선 바로 바깥쪽에 선다: 볼라드 안쪽 면 = 정렬선 바깥 가장자리(간격 0), 좌우 대칭', () => {
+    const laneOuter = LANE_Z + LANE_W / 2;
+    for (const b of BOLLARDS) {
+      expect(Math.abs(b.z) - BOLLARD_R).toBeCloseTo(laneOuter, 9);
+    }
+    const n = BOLLARDS.filter((b) => b.z > 0).map((b) => b.x).sort();
+    const s2 = BOLLARDS.filter((b) => b.z < 0).map((b) => b.x).sort();
+    expect(n).toEqual(s2);
+  });
+  it('진입로: 볼라드 사이를 포함해 입구에서 정지 위치까지 폭 2.0m 이하 모든 차량이 직선 진입 시 충돌 0 (좌우 ±0.1m 오차 포함)', () => {
+    const fits = SELECTABLE_VEHICLES.filter((q) => q.width <= 2.05);
+    expect(fits.length).toBeGreaterThanOrEqual(5);
+    expect(fits.some((q) => q.id === 'suv-x6')).toBe(true); // SUV/X6 포함
+    for (const v of fits) {
       for (const dz of [0, 0.1, -0.1]) {
         for (let x = -34; x <= STATION.stopperX - v.wheelbase; x += 0.25) {
           const car = place(v, x, dz);
@@ -50,6 +62,12 @@ describe('기계식 맵 — 볼라드/입구/승강장 (v0.5.1)', () => {
         }
       }
     }
+  });
+  it('볼라드 간격(안쪽 면 사이 2.4m)보다 넓은 차량(2.45m)은 통과할 수 없다 — 충돌체를 끄지 않고 실제 폭으로 판정', () => {
+    const wide = { ...getVehicle('concept-coupe'), width: 2.45 };
+    let hit = false;
+    for (let x = -20; x <= -6 && !hit; x += 0.25) hit = !!findVehicleCollision(obbOf(place(wide, x, 0), wide), colliders);
+    expect(hit).toBe(true);
   });
   it('팔레트 가이드는 낮은 구조물(0.12m < 지상고 0.2m): 높이 구간을 검사하면 차체를 막지 않고, 타이어 침범은 정렬 불합격', () => {
     const car = place(sedan, STATION.stopperX - sedan.wheelbase - 1.0, 0.3);

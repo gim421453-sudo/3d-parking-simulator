@@ -109,6 +109,8 @@ export class Game {
    * 조작할 수 없고 시작 위치로 되돌리거나 새 차량을 자동 생성하지 않는다. 새 차량은 명시적 조작(mechNewCar)으로만 시작한다.
    */
   playerStoredSlot: string | null = null;
+  /** 명시적 '새 차량' 조작으로 시작한 횟수(자동 생성은 없어야 하므로 사용자 조작 없이는 0) */
+  newCarCount = 0;
   /** 출고로 차량이 교체될 때 입구 밖에 남겨 두는 기존 플레이어 차량(삭제하지 않음): 모델 + 충돌체 */
   private parkedCars: { model: CarModel; col: Collider }[] = [];
   private cullLevelY = NaN;
@@ -536,6 +538,11 @@ export class Game {
   }
 
   resetCar(): void {
+    if (this.playerStoredSlot) {
+      // 보관된 차량의 모델이 시작 위치로 옮겨지는 것을 막는다(관찰 상태에서는 초기화 불가). 새 차량은 '새 차' 버튼/I 로만.
+      this.hud.toast('보관 중인 차량은 초기화할 수 없습니다 — 새 차(I)로 새 차량을 시작하세요', 'warn');
+      return;
+    }
     const sp = this.missionDef?.spawn ?? this.map.spawn;
     this.car = createVehicleState(this.spec, sp.x, sp.z, sp.heading);
     if (this.map.terrain) {
@@ -635,7 +642,7 @@ export class Game {
       case 'mechEstop': {
         if (!this.map.mech) break;
         if (a === 'mechExit' && this.playerStoredSlot) {
-          this.startNewCar(); // 보관 후 '하차' 버튼은 '새 차량' 으로 동작
+          this.hud.toast('차량이 보관되어 있습니다 — 새 차량은 \'새 차\' 버튼(I)으로 시작하세요', 'warn'); // 하차/탑승과 새 차량 생성은 별개 기능
           break;
         }
         if (a === 'mechStart' && this.settings.mechAutoSlot) {
@@ -1100,6 +1107,7 @@ export class Game {
     this.adoptVehicle(spec, null, 'keep'); // 보관된 모델은 슬롯에 그대로 둔다
     mech.m.occupant = 'in';
     this.rig.snap();
+    this.newCarCount++;
     this.hud.toast('새 차량을 시작합니다', 'good');
     return true;
   }
