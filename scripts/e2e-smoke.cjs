@@ -219,6 +219,8 @@ async function waitServer(url, tries = 50) {
   // 수동 카메라 선택 우선순위
   for (let i = 0; i < 8 && (await g(() => window.__game.assist.cameraMode !== 'rear')); i++) { await page.click('#parking-assist [data-pa="camera"]'); await sleep(150); }
   await until(() => window.__game.assist.cameraMode === 'rear' && window.__game.assistOut.camera === 'rear', undefined, 20000);
+  // 원인(간헐 실패): 게임 상태(assistOut)는 바뀌었지만 패널 DOM 문구는 카메라 갱신 주기(소프트웨어 WebGL 에서 느림)로 한 박자 늦게 바뀐다 → DOM 도 게임 상태로 기다린다(검증 자체는 그대로).
+  await until(() => /후방/.test(document.querySelector('#parking-assist .v-camera')?.textContent || ''), undefined, 20000);
   const aM = await assistInfo();
   check('수동 카메라 선택(후방)이 기어 자동보다 우선', aM.camera === 'rear' && /후방/.test(await g(() => document.querySelector('#parking-assist .v-camera').textContent)), aM.camera);
   await g(() => { const c = window.__game.car; c.gear = 'N'; c.v = 0; });
