@@ -3,6 +3,7 @@ import { centerOf } from '../vehicle/physics';
 import type { VehicleState } from '../vehicle/physics';
 import type { VehicleSpec } from '../vehicle/spec';
 import type { Action } from '../game/input';
+import { IDENTITY_FRAME, headingToLocal, headingToWorld, toLocalXZ, toWorldXZ, type Frame } from './facility';
 import {
   STATION,
   SLOTS,
@@ -15,7 +16,7 @@ import {
   entryHeading,
   freeSlots,
   guidance,
-  isSlotId,
+  hasSlot,
   lockedPose,
   newMachine,
   pocketDepthAt,
@@ -38,7 +39,30 @@ const MECH_HALF = 1.1; // 정지 홈은 팔레트 중심 ±1.1m 안(좌우 홈 �
 
 /** 게임 루프와 순수 장치 로직(machine.ts)을 잇는 얇은 계층 (THREE 의존 없음 → 단위 테스트 가능) */
 export class MechController {
-  m: MachineState = newMachine();
+  /** 시설 변환(월드 ↔ 시설 로컬). 기본은 항등 */
+  frame: Frame = IDENTITY_FRAME;
+  readonly floors: number;
+  m: MachineState;
+
+  constructor(floors = 12, frame: Frame = IDENTITY_FRAME) {
+    this.floors = floors;
+    this.frame = frame;
+    this.m = newMachine(floors);
+  }
+
+  /** 월드 차량 상태를 시설 로컬 pose 로 (읽기 전용 복사본) */
+  localCar<T extends { x: number; z: number; heading: number }>(car: T): T {
+    const p = toLocalXZ(this.frame, car.x, car.z);
+    return { ...car, x: p.x, z: p.z, heading: headingToLocal(this.frame, car.heading) };
+  }
+  /** 시설 로컬 pose → 월드 pose */
+  poseW(p: { x: number; z: number; y: number; heading: number }): { x: number; z: number; y: number; heading: number } {
+    const w = toWorldXZ(this.frame, p.x, p.z);
+    return { x: w.x, z: w.z, y: p.y, heading: headingToWorld(this.frame, p.heading) };
+  }
+  storedPoseW(slot: string, car: StoredCar): { x: number; z: number; y: number; heading: number } {
+    return this.poseW(storedPose(slot, car));
+  }
   items: CheckItem[] = [];
   /** 이번 프레임의 문 구역 점유 */
   doorClear = true;
@@ -69,7 +93,7 @@ export class MechController {
   }
 
   reset(): void {
-    this.m = newMachine();
+    this.m = newMachine(this.floors);
     this.items = [];
     this.bumpHits = 0;
     this.dip = 0;
@@ -91,7 +115,8 @@ export class MechController {
 
   input(spec: VehicleSpec, car: VehicleState): AlignInput {
     void spec;
-    return { x: car.x, z: car.z, heading: car.heading, v: car.v, gear: car.gear, handbrake: car.handbrake, engineOn: this.engineOn };
+    const l = this.localCar(car);
+    return { x: l.x, z: l.z, heading: l.heading, v: car.v, gear: car.gear, handbrake: car.handbrake, engineOn: this.engineOn };
   }
 
   /** 슬롯에 차량을 미리 보관해 둔 상태로 시작 (출고 미션/테스트). 차량 pose 는 슬롯 위가 아니라 호출 전이다 */
@@ -107,8 +132,9 @@ export class MechController {
   /** 승강/이송/호출 중 차량을 팔레트에 고정 (상대 위치 불변) */
   applyLocked(car: VehicleState): boolean {
     if (!this.m.locked) return false;
-    const p = lockedPose(this.m);
-    if (!p) return false;
+    const lp = lockedPose(this.m);
+    if (!lp) return false;
+    const p = this.poseW(lp);
     car.x = p.x;
     car.z = p.z;
     car.y = p.y;
@@ -177,7 +203,7 @@ export class MechController {
 
   /** 문 구역(문 평면 ±0.5m)에 차체가 걸쳐 있는가 — 안전센서 입력 */
   private bodyInDoorZone(spec: VehicleSpec, car: VehicleState): boolean {
-    const c = centerOf(car, spec);
+    const c = centerOf(this.localCar(car), spec);
     const hl = spec.length / 2;
     const hw = spec.width / 2;
     const xs = [
@@ -185,7 +211,7 @@ export class MechController {
       [-hw, hl],
       [-hw, -hl],
       [hw, -hl],
-    ].map(([lx, lz]) => localToWorld(c.x, c.z, car.heading, lx, lz).x);
+    ].map(([lx, lz]) => localToWorld(c.x, c.z, headingToLocal(this.frame, car.heading), lx, lz).x);
     const lo = Math.min(...xs);
     const hi = Math.max(...xs);
     return hi >= STATION.doorX - 0.5 && lo <= STATION.doorX + 0.5;
@@ -194,7 +220,8 @@ export class MechController {
   step(dt: number, spec: VehicleSpec, car: VehicleState): void {
     // 출고 후 차량이 팔레트를 벗어나면 턴테이블을 원위치(0°)로 되돌린다
     if (this.m.phase === 'waiting' && this.m.yaw > 0 && !this.m.locked) {
-      const away = Math.hypot(car.x - STATION.palletX, car.z) > 4.2;
+      const lc = this.localCar(car);
+      const away = Math.hypot(lc.x - STATION.palletX, lc.z) > 4.2;
       if (away) this.m.yaw = Math.max(0, this.m.yaw - dt * 0.9);
     }
     // 관찰 상태(차량이 슬롯에 보관됨): 승강장의 다음 입고 안내는 차량 위치와 무관하다
@@ -237,7 +264,7 @@ export class MechController {
         return { msg: r.reason, kind: r.ok ? 'good' : 'warn' };
       }
       case 'mechStart': {
-        if (!isSlotId(this.selectedSlot) || m.slots[this.selectedSlot]) {
+        if (!hasSlot(m, this.selectedSlot) || m.slots[this.selectedSlot]) {
           const f = freeSlots(m)[0];
           if (!f) return { msg: '입고 불가: 빈 슬롯이 없습니다', kind: 'bad' };
           if (m.slots[this.selectedSlot]) {
@@ -268,6 +295,6 @@ export class MechController {
 
   /** 보관 중인 모든 차량의 월드 pose (시각화/테스트) */
   storedList(): { slot: string; car: StoredCar; pose: ReturnType<typeof storedPose> }[] {
-    return SLOTS.filter((s) => this.m.slots[s.id]).map((s) => ({ slot: s.id, car: this.m.slots[s.id]!, pose: storedPose(s.id, this.m.slots[s.id]!) }));
+    return SLOTS.filter((s) => this.m.slots[s.id]).map((s) => ({ slot: s.id, car: this.m.slots[s.id]!, pose: this.storedPoseW(s.id, this.m.slots[s.id]!) }));
   }
 }

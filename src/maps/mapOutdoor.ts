@@ -1,3 +1,5 @@
+import { makeFacility } from '../mech/facility';
+import { facilityKit } from './mechKit';
 import { cone, drum, lamp, parkedCar, perimeter, slotPaint, slotRow, tree, wallBox } from './helpers';
 import type { MapData, MapSlot, ObstacleDef, PaintRect } from './types';
 
@@ -42,9 +44,18 @@ for (const [i, p] of ([[-46, 30], [-46, 12], [-46, -18], [46, -4], [46, 20], [8,
   obstacles.push(tree(`otree-${i}`, p[0], p[1]));
 }
 
+// 기계식 주차 시설 2기(독립 상태기계): 동쪽 12층 + 북쪽 6층. 자리는 scripts/find-facility-sites.ts 로 찾은 빈 곳(미션 동선·건물·나무와 겹치지 않음)이다.
+export const OUTDOOR_FACILITIES = [
+  makeFacility({ id: 'out-mech-east', name: '야외 동쪽 기계식 타워 (12층)', x: 41, z: -26, rotationY: Math.PI / 2, floors: 12 }),
+  makeFacility({ id: 'out-mech-north', name: '야외 북쪽 기계식 타워 (6층)', x: 5, z: 16, rotationY: Math.PI / 2, floors: 6 }),
+];
+const facilityKits = OUTDOOR_FACILITIES.map((f) => facilityKit(f, { idPrefix: `${f.id}:`, pad: true }));
+for (const k of facilityKits) obstacles.push(...k.obstacles);
+
 const slots = [...rowN.slots, ...rowS.slots, par];
 
 const paint: PaintRect[] = slots.flatMap((s) => slotPaint(s));
+for (const k of facilityKits) paint.push(...k.paint);
 // 도로 중앙선 (노란 점선) + 도로 가장자리선
 for (let i = 0; i < 25; i++) paint.push({ x: -48 + i * 4, z: -32, w: 2.4, d: 0.15, color: 0xf2c200 });
 paint.push({ x: 0, z: -26.2, w: 100, d: 0.12, color: 0xf4f4f4 });
@@ -56,6 +67,8 @@ export const MAP_OUTDOOR: MapData = {
   desc: '도로, 건물, 가로등이 있는 야외 맵. 주차 미션과 자유주행 구역.',
   bounds,
   env: { indoor: false, sky: 0x8fc4ee, ambient: 0.6 },
+  mech: true,
+  mechFacilities: OUTDOOR_FACILITIES,
   spawn: { x: 6, z: -10, heading: -Math.PI / 2 },
   surfaces: [
     { x: 0, z: 0, w: 100, d: 80, kind: 'grass' },
@@ -64,6 +77,7 @@ export const MAP_OUTDOOR: MapData = {
     { x: 29, z: 6, w: 38, d: 24, kind: 'asphalt' }, // 자유주행 광장
     { x: 0, z: -32, w: 100, d: 12, kind: 'asphalt' }, // 도로
     { x: 0, z: -21.8, w: 100, d: 2.6, kind: 'sidewalk' },
+    ...facilityKits.flatMap((k) => k.surfaces),
   ],
   paint,
   obstacles,

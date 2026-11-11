@@ -210,6 +210,8 @@ export interface MachineState {
   doorBlocked: boolean;
   /** 승강장 위 차량의 팔레트 기준 상대 pose */
   rel: { x: number; z: number; heading: number } | null;
+  /** 이 시설의 층수(2F~floors 가 보관층). 슬롯 키는 이 층수까지만 존재한다 */
+  floors: number;
   /** 슬롯별 보관 차량 (null = 비어 있음) */
   slots: Record<string, StoredCar | null>;
   /** 호출/출고 대상 차량의 입고 정보 */
@@ -223,9 +225,11 @@ export interface MachineState {
   clock: number;
 }
 
-export function newMachine(): MachineState {
+/** floors: 시설 층수(2~12). 기본 12층 타워 */
+export function newMachine(floors: number = TOP_FLOOR): MachineState {
+  const fl = Math.min(TOP_FLOOR, Math.max(2, Math.round(floors)));
   const slots: Record<string, StoredCar | null> = {};
-  for (const s of SLOTS) slots[s.id] = null;
+  for (const s of SLOTS) if (s.floor <= fl) slots[s.id] = null;
   return {
     phase: 'waiting',
     resume: null,
@@ -243,6 +247,7 @@ export function newMachine(): MachineState {
     cycles: 0,
     doorBlocked: false,
     rel: null,
+    floors: fl,
     slots,
     carrying: null,
     nextCarId: 1,
@@ -252,8 +257,11 @@ export function newMachine(): MachineState {
   };
 }
 
-export const freeSlots = (m: MachineState): SlotDef[] => SLOTS.filter((s) => !m.slots[s.id]);
-export const occupiedSlots = (m: MachineState): SlotDef[] => SLOTS.filter((s) => !!m.slots[s.id]);
+/** 이 시설에 존재하는 슬롯 */
+export const slotsOf = (m: MachineState): SlotDef[] => SLOTS.filter((s) => s.id in m.slots);
+export const hasSlot = (m: MachineState, id: string): boolean => isSlotId(id) && id in m.slots;
+export const freeSlots = (m: MachineState): SlotDef[] => slotsOf(m).filter((s) => !m.slots[s.id]);
+export const occupiedSlots = (m: MachineState): SlotDef[] => slotsOf(m).filter((s) => !!m.slots[s.id]);
 
 /** 입고 시작 조건 체크리스트 (HUD/테스트 공용) */
 export function checklist(spec: VehicleSpec, s: AlignInput, m: MachineState, slot?: string): CheckItem[] {
@@ -273,7 +281,7 @@ export function checklist(spec: VehicleSpec, s: AlignInput, m: MachineState, slo
     { key: 'occupant', label: '운전자 하차', ok: m.occupant === 'out' },
     { key: 'door', label: '출입문 안전센서 정상', ok: !m.doorBlocked },
   ];
-  if (slot !== undefined) items.push({ key: 'slot', label: `${slot} 슬롯 사용 가능`, ok: isSlotId(slot) && !m.slots[slot] });
+  if (slot !== undefined) items.push({ key: 'slot', label: `${slot} 슬롯 사용 가능`, ok: hasSlot(m, slot) && !m.slots[slot] });
   return items;
 }
 
@@ -305,7 +313,7 @@ const reject = (m: MachineState, reason: string): false => {
 
 /** 입고 시작. 조건이 안 맞으면 거부하고 이유를 message 에 남긴다. slot 은 사용 가능한 보관 슬롯이어야 한다 */
 export function startStore(spec: VehicleSpec, s: AlignInput, m: MachineState, slot: string): boolean {
-  if (!isSlotId(slot)) return reject(m, `입고 불가: 알 수 없는 슬롯 ${slot}`);
+  if (!hasSlot(m, slot)) return reject(m, `입고 불가: 이 시설에 없는 슬롯 ${slot}`);
   if (m.phase !== 'waiting' || m.palletLoc !== 'station') return reject(m, '입고 불가: 장치가 사용 중입니다');
   if (m.slots[slot]) return reject(m, `입고 불가: ${slot} 슬롯이 이미 사용 중입니다 — 다른 슬롯을 선택하세요`);
   const lim = checkVehicleLimits(spec);
@@ -327,7 +335,7 @@ export function startStore(spec: VehicleSpec, s: AlignInput, m: MachineState, sl
 
 /** 출고 요청: 해당 슬롯에 보관된 차량을 호출한다. 승강장이 비어 있고 대기 상태여야 한다 */
 export function requestRetrieve(m: MachineState, slot: string): boolean {
-  if (!isSlotId(slot)) return reject(m, `출고 불가: 알 수 없는 슬롯 ${slot}`);
+  if (!hasSlot(m, slot)) return reject(m, `출고 불가: 이 시설에 없는 슬롯 ${slot}`);
   if (m.phase !== 'waiting') return reject(m, '출고 불가: 장치가 동작 중입니다');
   const car = m.slots[slot];
   if (!car) return reject(m, `출고 불가: ${slot} 슬롯에 보관된 차량이 없습니다`);

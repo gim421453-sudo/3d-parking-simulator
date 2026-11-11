@@ -55,6 +55,7 @@ ramps.forEach((r) => addRampWalls(k, r));
 
 export const MAP_CARPARK3: MapData = {
   id: 'carpark3',
+  mechUnavailable: '지상층 전체를 데크/경사로가 덮어 시설을 놓을 지상 공간이 없다',
   name: '3층 순환형 주차장 (임시 배치)',
   desc: '바깥 순환 도로를 돌아 경사로 2개로 3층까지 오르는 주차장. 중앙의 이중 주차 블록, 기둥, 좁은 직각 회전 구간. ※ 외부 모델 없이 직접 제작한 절차적 지형이며 배치는 사용자 확정 전의 임시안입니다.',
   bounds,

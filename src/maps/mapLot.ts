@@ -37,6 +37,7 @@ const slots = [...north.slots, ...south.slots, parallelSlot];
 
 export const MAP_LOT: MapData = {
   id: 'lot',
+  mechUnavailable: '72×56m 소형 연습장: 시설(진입로 포함 22×16m)을 놓으면 모든 미션 동선(스폰→목표칸)과 겹친다',
   name: '기본 주차 연습장',
   desc: '넓은 평지. 직각·후진·평행주차를 연습하는 기본 맵.',
   bounds,

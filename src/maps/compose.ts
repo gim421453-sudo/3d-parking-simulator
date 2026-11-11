@@ -1,3 +1,4 @@
+import type { MechFacilityConfig } from '../mech/facility';
 import type { ParkingSlot } from '../mission/parking';
 import type { DeckSurface, Terrain, TerrainSurface } from './terrain';
 import type { MapData, MapMission, MapSlot, ObstacleDef, PaintRect, SurfaceRect } from './types';
@@ -85,6 +86,7 @@ export function composeMap(o: ComposeOptions): MapData & { zones: ZoneInfo[] } {
   const levels: Terrain['levels'] = [{ id: 'ground', name: '지상', y: 0 }];
   const zones: ZoneInfo[] = [];
   let mech = false;
+  const facilities: MechFacilityConfig[] = [];
   for (const z of o.zones) {
     const m = z.map;
     const { ns, dx, dz } = z;
@@ -113,6 +115,8 @@ export function composeMap(o: ComposeOptions): MapData & { zones: ZoneInfo[] } {
       });
     }
     if (m.mech) mech = true;
+    // 기계식 시설: 평행이동 + ID 네임스페이스 (시설 변환은 로컬 좌표 기반이라 이동만으로 충분)
+    for (const f of m.mechFacilities ?? []) facilities.push({ ...f, id: sx(ns, f.id), x: f.x + dx, z: f.z + dz });
     zones.push({
       id: m.id,
       label: z.label,
@@ -131,6 +135,7 @@ export function composeMap(o: ComposeOptions): MapData & { zones: ZoneInfo[] } {
     levelPaint,
     provisional: true,
     mech,
+    mechFacilities: facilities,
     surfaces,
     paint,
     obstacles,

@@ -30,6 +30,7 @@ const lightsX = [-18, -6, 6, 18];
 
 export const MAP_UNDERGROUND: MapData = {
   id: 'underground',
+  mechUnavailable: '실내 지하주차장(천장 2.9m): 승강 타워를 넣을 수 없다',
   name: '지하 주차장',
   desc: '기둥과 좁은 구획(폭 2.3m), 어두운 조명. 정밀한 조작이 필요합니다.',
   bounds,

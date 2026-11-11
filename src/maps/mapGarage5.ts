@@ -78,6 +78,7 @@ const mk = (id: string, name: string, kind: 'perpendicular-front' | 'perpendicul
 
 export const MAP_GARAGE5: MapData = {
   id: 'garage5',
+  mechUnavailable: '지상층 전체를 데크/경사로가 덮어 시설을 놓을 지상 공간이 없다',
   name: '5층 지그재그 주차타워 (임시 배치)',
   desc: '22m 직선 경사로 4개가 동·서로 번갈아 5층까지 이어지는 다층 주차타워. 층별 기둥·좁은 U턴·양쪽 주차 줄. ※ 외부 모델 없이 직접 제작한 절차적 지형이며 층수·치수는 사용자 확정 전의 임시 배치입니다.',
   bounds,

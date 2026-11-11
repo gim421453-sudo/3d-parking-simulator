@@ -64,6 +64,7 @@ k.obstacles.push(wallBox('sp-back', 1.5, -27.2, 24, 0.6, 1.3, 'wall', 0x9c9c98))
 
 export const MAP_SPIRAL: MapData = {
   id: 'spiral',
+  mechUnavailable: '나선 경사로가 지상 공간을 차지해 진입로 포함 풋프린트가 들어가지 않는다',
   name: '나선형 경사로 테스트 (임시 배치)',
   desc: '폭 5m·333° 한 바퀴(평균 경사 8.2%)의 나선 램프를 올라 상층 데크에 주차하는 경사로 연습 맵. 안/바깥 난간과 가운데 기둥, 급한 회전으로 차량 피치와 시야를 확인합니다. ※ 직접 제작한 절차적 지형(외부 SKP/GLB 미사용)이며 배치는 임시안입니다.',
   bounds,

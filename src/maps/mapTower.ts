@@ -131,6 +131,7 @@ void parkedCar;
 
 export const MAP_TOWER: MapData = {
   id: 'tower',
+  mechUnavailable: '지상층 전체를 데크/경사로가 덮어 시설을 놓을 지상 공간이 없다',
   name: '다층 주차타워 (검증용 임시 배치)',
   desc: '3층 구조: 직선 경사로로 2층, 나선형 램프로 3층(옥상)까지 올라가 주차합니다. ※ 층수·치수·배치는 사용자 확정 전의 임시 고정 레이아웃입니다.',
   bounds,

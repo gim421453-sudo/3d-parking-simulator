@@ -86,6 +86,7 @@ async function waitServer(url, tries = 50) {
   const openGate = (gear) => g((gear) => new Promise((res) => { const t = () => { const G = window.__game; if (G.viewGateGear === gear) { G.viewGate = true; G.debugViewCtx = { v: 1, steer: 'closest', pathCut: 1.0 }; res(); } else requestAnimationFrame(t); }; t(); }), gear);
   const placeHold = async (cx, cz, h, gear) => { await place(cx, cz, h, gear); await g(() => { window.__game.car.handbrake = true; }); await openGate(gear); };
 
+
   // ---------- 1. 시작 화면 ----------
   await page.goto(URL);
   await page.waitForSelector('#m-start', { timeout: 15000 });
@@ -2405,6 +2406,16 @@ async function waitServer(url, tries = 50) {
       await sleep(1000);
     };
     const mst = () => Y(() => { const G = window.__game; return { x: G.car.x, z: G.car.z, y: G.car.y, v: G.car.v, phase: G.mech.m.phase, door: G.mech.m.door, pY: G.mech.m.palletY, pZ: G.mech.m.palletZ, hits: G.mech.stopperHits, mission: G.mission && G.mission.status, state: G.state, msg: G.mech.m.message }; });
+    // v0.5.3: 기계식 하차/입고 전에는 시동을 꺼야 한다 — 실제 입력 경로(브레이크 + KeyO)로 끈다. 이미 OFF 면 아무것도 하지 않는다.
+    const engineOff = async () => {
+      if (await Y(() => window.__game.engine.state === 'OFF')) return true;
+      await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+      await yuntil(() => window.__game.brake > 0.4, undefined, 10000);
+      await pg.keyboard.press('KeyO');
+      const ok = await yuntil(() => window.__game.engine.state === 'OFF', undefined, 15000);
+      await Y(() => { window.__game.debugInput = null; });
+      return ok;
+    };
 
     // ---- P0-A: 실차형 GLB(컨셉 쿠페) 실제 주행 모델 ----
     await loadMap('lot', 'free', 'concept-coupe');
@@ -2502,7 +2513,7 @@ async function waitServer(url, tries = 50) {
     check('v0.5.2 전진 입고: 낮은 정지턱을 넘으며 안착 이벤트 발생, 안내판 "정지", 정위치', f1.seat >= 1 && f1.guide === 'stop', JSON.stringify(f1));
     await pg.keyboard.press('KeyJ'); await sleep(300);
     check('v0.5.2 하차하지 않으면 입고 거부', (await M()).phase === 'waiting');
-    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => window.__game.mech.m.door < 0.5, undefined, 60000);
     check('v0.5.2 셔터: 닫히는 동안 실제 충돌체 + 상단 LED 입고 중', await Y(() => window.__game.colliders.some((c) => c.id === 'mech-door') && /storing/.test(window.__game.mechBuilt.statusState)));
     await yuntil(() => window.__game.state === 'result', undefined, 200000);
@@ -2512,7 +2523,7 @@ async function waitServer(url, tries = 50) {
     // ---- 12층 입고 (최상층까지 실제 승강) ----
     await loadMap('mechpark', 'mech-in-12f', 'sedan');
     await creepIn('D', 0.5, -9.5, -3.5);
-    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => window.__game.mech.m.carriage.y > 32.9, undefined, 200000);
     const t12 = await M();
     check('v0.5.2 12층: 캐리지/차량이 실제 높이 33m(12F)까지 상승하고 차량-캐리지 높이가 같다', t12.cy > 32.9 && Math.abs(t12.y - t12.cy) < 1e-6 && t12.pl === 'carriage', JSON.stringify(t12));
@@ -2535,7 +2546,7 @@ async function waitServer(url, tries = 50) {
     await creepIn('R', 0.4, -8.5, -0.76);
     const rv1 = await M();
     check('v0.5.2 후진 입고: 뒷바퀴가 정지 홈에 안착(이벤트), 안내판 "정지"', rv1.seat >= 1 && rv1.guide === 'stop', JSON.stringify(rv1));
-    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => window.__game.state === 'result', undefined, 250000);
     const rv2 = await M();
     check('v0.5.2 후진 입고 미션 성공: 8F A 에 후진 입고(rev) 보관', rv2.mission === 'success' && rv2.occ.includes('08A:rev'), JSON.stringify(rv2));
@@ -2549,7 +2560,7 @@ async function waitServer(url, tries = 50) {
     await yuntil(() => window.__game.mech.m.phase === 'exit', undefined, 200000);
     const ex = await M();
     check('v0.5.2 출고 완료: 보관 차량 인수(교체), 지상/문 열림/문(서쪽)을 향함, 슬롯 비워짐', ex.cy === 0 && ex.y === 0 && ex.door === 1 && Math.sin(ex.h) < -0.99 && !ex.occ.includes('08A:fwd') && ex.spec === 'sedan', JSON.stringify(ex));
-    await pg.keyboard.press('KeyG'); await sleep(300);
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300);
     await Y(() => { const G = window.__game; G.car.handbrake = false; G.car.gear = 'D'; G.debugInput = { throttle: 0.6, brake: 0, steerInput: 0 }; });
     await yuntil(() => window.__game.car.x < -21.0, undefined, 150000);
     await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
@@ -2569,7 +2580,7 @@ async function waitServer(url, tries = 50) {
     await loadMap('mechpark', 'mech-in-1', 'sedan');
     await Y(() => { window.__game.mech.selectedSlot = '08A'; window.__spawn = { x: window.__game.car.x, z: window.__game.car.z }; });
     await creepIn('D', 0.5, -9.5, -3.5);
-    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => window.__game.mech.m.carriage.y > 8, undefined, 200000);
     const hl = await Y(() => { const G = window.__game; const c = G.rig.active.position; return { camCarDist: Math.hypot(c.x - G.car.x, c.y - G.car.y, c.z - G.car.z), carY: G.car.y, cy: G.mech.m.carriage.y, modelY: G.model.root.position.y }; });
     check('v0.5.2 핫픽스: 상승 중 카메라가 차량을 추적(거리 < 40m)하고 모델/차량/캐리지 높이가 일치', hl.camCarDist < 40 && Math.abs(hl.carY - hl.cy) < 1e-6 && Math.abs(hl.modelY - hl.cy) < 0.05, JSON.stringify(hl));
@@ -2585,7 +2596,7 @@ async function waitServer(url, tries = 50) {
     check('v0.5.2 핫픽스: 보관 완료 후 차량/모델이 움직이지 않는다(게임 시간 3초 경과)', Math.abs(still2.x - still1.x) + Math.abs(still2.y - still1.y) + Math.abs(still2.z - still1.z) < 1e-9 && Math.abs(still2.my - 21) < 0.05, JSON.stringify({ still1, still2 }));
     // v0.5.3 P0 재검증: 숨은 새 차량/위치 복귀 경로 없음 (T 초기화, G 하차 버튼, 10초 방치)
     await pg.keyboard.press('KeyT'); await sleep(400);
-    await pg.keyboard.press('KeyG'); await sleep(400);
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(400);
     const idle0 = await Y(() => { const G = window.__game; return { t: G.mech.m.clock, slot: G.playerStoredSlot, y: G.car.y, my: G.model.root.position.y, n: G.newCarCount, same: G.storedModels.get('08A').model === G.model }; });
     await yuntil(([t]) => window.__game.mech.m.clock > t + 10, [idle0.t], 120000);
     const idle1 = await Y(() => { const G = window.__game; const c = G.rig.active.position; return { slot: G.playerStoredSlot, y: G.car.y, my: G.model.root.position.y, n: G.newCarCount, same: G.storedModels.get('08A').model === G.model, camD: Math.hypot(c.x - G.car.x, c.y - G.car.y, c.z - G.car.z), carId: G.mech.m.slots['08A'].carId, entryId: G.storedModels.get('08A').carId }; });
@@ -2606,7 +2617,7 @@ async function waitServer(url, tries = 50) {
     await Y(() => { const G = window.__game; G.mech.selectedSlot = '12B'; G.car.x = -17; G.car.z = 0; G.car.heading = -Math.PI / 2; G.car.v = 0; });
     await sleep(500);
     await creepIn('R', 0.4, -8.5, -0.76);
-    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => !!window.__game.mech.m.slots['12B'] && window.__game.mech.m.phase === 'waiting' && window.__game.mech.m.carriage.y === 0, undefined, 300000);
     const two = await Y(() => { const G = window.__game; const m = G.mech.m; const a = G.storedModels.get('08A'); const b = G.storedModels.get('12B'); return { n: G.storedModels.size, distinct: !!a && !!b && a.model !== b.model, ids: [m.slots['08A'].carId, m.slots['12B'].carId], idsOk: a.carId === m.slots['08A'].carId && b.carId === m.slots['12B'].carId, y8: a.model.root.position.y, y12: b.model.root.position.y, m8: a.model === window.__m08, mode12: m.slots['12B'].mode }; });
     check('v0.5.2 핫픽스: 8F/12F 에 서로 다른 두 차량이 각각 보관(모델/ID 구분, 기존 8F 차량 불변)', two.n === 2 && two.distinct && two.ids[0] !== two.ids[1] && two.idsOk && Math.abs(two.y8 - 21) < 0.05 && Math.abs(two.y12 - 33) < 0.05 && two.m8 && two.mode12 === 'rev', JSON.stringify(two));
@@ -2623,7 +2634,7 @@ async function waitServer(url, tries = 50) {
     // ---- 통합 맵 megapark 의 기계식 구역에서도 동일: 12F 입고 후 차량 유지 ----
     await loadMap('megapark', 'mech-in-12f', 'sedan');
     await creepIn('D', 0.5, -9.5, -3.5);
-    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => window.__game.state === 'result', undefined, 300000);
     const mg = await Y(() => { const G = window.__game; const e = G.storedModels.get('12A'); return { map: G.map.id, slot: G.playerStoredSlot, same: !!e && e.model === G.model, y: G.car.y, my: G.model.root.position.y, cy: G.mech.m.carriage.y, mission: G.mission.status, spawnDist: Math.hypot(G.car.x - (-30), G.car.z) }; });
     check('v0.5.2 핫픽스: 통합 맵(megapark) 기계식 구역에서도 12F A 입고 후 차량이 슬롯에 남고(높이 33m) 캐리지 1층 복귀·미션 성공', mg.map === 'megapark' && mg.slot === '12A' && mg.same && Math.abs(mg.y - 33) < 1e-6 && Math.abs(mg.my - 33) < 0.05 && mg.cy === 0 && mg.mission === 'success' && mg.spawnDist > 20, JSON.stringify(mg));
@@ -2631,7 +2642,7 @@ async function waitServer(url, tries = 50) {
     // ---- 슬롯 점유/제어반/거부 ----
     await loadMap('mechpark', 'mech-out-1', 'sedan'); // 8F A 가 점유된 상태
     await Y(() => { const G = window.__game; G.car.x = -3.4; G.car.z = 0; G.car.heading = Math.PI / 2; G.car.gear = 'P'; G.car.handbrake = true; G.car.v = 0; G.mech.selectedSlot = '08A'; });
-    await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ'); await sleep(500);
+    await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ'); await sleep(500);
     const occ = await M();
     check('v0.5.2 이미 점유된 슬롯(8F A)에 입고하면 거부되고 이유가 표시된다(중복 점유 방지)', occ.phase === 'waiting' && /이미 사용 중/.test(occ.msg), occ.msg);
     await pg.keyboard.press('KeyZ'); await sleep(500);
@@ -2680,6 +2691,104 @@ async function waitServer(url, tries = 50) {
     const mr2 = await Y(() => ({ n: window.__game.mechBuilt.mirrorRenders }));
     check('v0.5.0 기계식 전방 확인 거울: 실제 Three.js 반사 렌더가 간헐(제한 FPS)로 갱신된다', mr2.n > mr.n && mr2.n - mr.n < 40, JSON.stringify({ mr, mr2 }));
     await pg.screenshot({ path: path.join(OUT, '133-v050-mech-entry.png') });
+
+    // ---- v0.5.3 Gate B: 기계식 거울 FPS(게임 시간 기준) 측정 ----
+    {
+      const mm = await Y(() => ({ n: window.__game.mechBuilt.mirrorRenders, t: window.__game.mech.m.clock, q: window.__game.settings.quality, vis: window.__game.mechBuilt.mirror.visible }));
+      await yuntil(([t]) => window.__game.mech.m.clock > t + 4, [mm.t], 90000);
+      const mm2 = await Y(() => ({ n: window.__game.mechBuilt.mirrorRenders, t: window.__game.mech.m.clock }));
+      const fps = (mm2.n - mm.n) / (mm2.t - mm.t);
+      const tgt = await Y(() => ({ high: 30, medium: 24, low: 16 }[window.__game.settings.quality]));
+      check('v0.5.3 기계식 거울 갱신: 게임 시간 기준 목표 FPS(화질 자동 30/24/16)의 ±35% 이내, 거울이 보일 때만 렌더', mm.vis && fps > tgt * 0.65 && fps <= tgt * 1.35, JSON.stringify({ quality: mm.q, measuredMirrorFps: +fps.toFixed(1), target: tgt }));
+    }
+
+    // ---- v0.5.3 Gate B: 시동/정지 상태기계 + 입고 전 시동 OFF 조건 ----
+    await loadMap('mechpark', 'mech-in-1', 'sedan');
+    await sleep(800);
+    {
+      const e0 = await Y(() => ({ s: window.__game.engine.state, rpm: window.__game.engine.rpm }));
+      check('v0.5.3 시동: 기본은 시동 ON(RUNNING) + 공회전 RPM', e0.s === 'RUNNING' && e0.rpm > 500 && e0.rpm < 1100, JSON.stringify(e0));
+      await Y(() => { const G = window.__game; G.car.gear = 'P'; G.car.v = 0; G.car.handbrake = true; });
+      await pg.keyboard.press('KeyG');
+      await sleep(400);
+      const occIn = await Y(() => window.__game.mech.m.occupant);
+      check('v0.5.3 시동이 걸린 채로는 하차(G)할 수 없다', occIn === 'in', occIn);
+      const ok = await engineOff();
+      check('v0.5.3 브레이크 + KeyO 로 시동 OFF (STOPPING → OFF, RPM 0)', ok && (await Y(() => window.__game.engine.rpm)) === 0);
+      await pg.keyboard.press('KeyG');
+      await sleep(400);
+      check('v0.5.3 시동 OFF 후에는 하차할 수 있다', (await Y(() => window.__game.mech.m.occupant)) === 'out');
+      await pg.keyboard.press('KeyG');
+      await sleep(300);
+      check('v0.5.3 다시 탑승해도 시동은 자동으로 걸리지 않는다', (await Y(() => ({ o: window.__game.mech.m.occupant, s: window.__game.engine.state }))).s === 'OFF');
+    }
+
+    // ---- v0.5.3 Gate B: 시동 OFF 가속 차단 / 시동 조건 / RPM / 엔진음 / 버튼 ----
+    await loadMap('lot', 'free', 'sedan');
+    await sleep(600);
+    {
+      await Y(() => { const G = window.__game; G.car.gear = 'P'; G.car.v = 0; G.car.handbrake = false; G.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+      await yuntil(() => window.__game.brake > 0.4, undefined, 10000);
+      await pg.keyboard.press('KeyO');
+      const off = await yuntil(() => window.__game.engine.state === 'OFF', undefined, 15000);
+      const btn0 = await Y(() => { const b = document.querySelector('#actionbar [data-a="engineToggle"]'); return { exists: !!b, on: b?.classList.contains('on'), eng: b?.dataset.engine }; });
+      check('v0.5.3 시동 버튼이 클러스터에 있고 OFF 상태를 표시한다', off && btn0.exists && !btn0.on && btn0.eng === 'OFF', JSON.stringify(btn0));
+      // OFF 에서 D 가속: 움직이지 않아야 한다
+      await Y(() => { const G = window.__game; G.car.gear = 'D'; G.car.handbrake = false; G.debugInput = { throttle: 1, brake: 0, steerInput: 0 }; });
+      await sleep(2500);
+      const v0 = await Y(() => ({ v: window.__game.car.v, x: window.__game.car.x }));
+      check('v0.5.3 시동 OFF 에서는 가속/크리프가 차단된다', Math.abs(v0.v) < 0.05, JSON.stringify(v0));
+      // 주행 중(또는 D)에는 시동 불가
+      await Y(() => { const G = window.__game; G.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+      await yuntil(() => window.__game.brake > 0.4, undefined, 10000);
+      await pg.keyboard.press('KeyO');
+      await sleep(300);
+      check('v0.5.3 D 단에서는 시동이 걸리지 않는다(P/N 필요)', (await Y(() => window.__game.engine.state)) === 'OFF');
+      await Y(() => { const G = window.__game; G.car.gear = 'P'; G.debugInput = { throttle: 0, brake: 0, steerInput: 0 }; });
+      await yuntil(() => window.__game.brake < 0.1, undefined, 10000);
+      await pg.keyboard.press('KeyO');
+      await sleep(300);
+      check('v0.5.3 브레이크를 밟지 않으면 시동이 걸리지 않는다', (await Y(() => window.__game.engine.state)) === 'OFF');
+      // 정상 시동: STARTING → RUNNING, 시동음 1회, 공회전
+      const s0 = await Y(() => window.__game.engineSound.stats.startSounds);
+      await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+      await yuntil(() => window.__game.brake > 0.4, undefined, 10000);
+      await pg.keyboard.press('KeyO');
+      const starting = await yuntil(() => window.__game.engine.state === 'STARTING', undefined, 5000);
+      const running = await yuntil(() => window.__game.engine.state === 'RUNNING', undefined, 20000);
+      const e1 = await Y(() => ({ rpm: window.__game.engine.rpm, st: window.__game.engineSound.stats, btn: document.querySelector('#actionbar [data-a="engineToggle"]').classList.contains('on') }));
+      check('v0.5.3 시동 시퀀스: STARTING → RUNNING, 시동음 트리거 1회, 엔진음 갱신, 버튼 ON', (starting || running) && running && e1.st.startSounds === s0 + 1 && e1.st.updates > 10 && e1.btn, JSON.stringify(e1));
+      // 가속 입력에 RPM 반응(P 에서 공회전 가속) + 엔진음 파라미터 반응
+      await Y(() => { window.__game.debugInput = { throttle: 1, brake: 0, steerInput: 0 }; });
+      await sleep(1500);
+      const e2 = await Y(() => ({ rpm: window.__game.engine.rpm, f: window.__game.engineSound.stats.lastFreq, m: window.__game.engineSound.stats.lastMaster }));
+      check('v0.5.3 스로틀에 따라 RPM 과 엔진음 주파수/크기가 올라간다', e2.rpm > e1.rpm * 2 && e2.f > 0 && e2.m > 0, JSON.stringify({ idle: e1.rpm, rev: e2.rpm, ...e2 }));
+      // 시동 ON 상태에서 차량이 다시 달린다
+      await Y(() => { const G = window.__game; G.car.gear = 'D'; G.car.handbrake = false; G.debugInput = { throttle: 1, brake: 0, steerInput: 0 }; });
+      const moved = await yuntil(() => window.__game.car.v > 2, undefined, 20000);
+      check('v0.5.3 시동 ON 에서는 정상 가속한다', moved);
+      await Y(() => { window.__game.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+      await yuntil(() => Math.abs(window.__game.car.v) < 0.05, undefined, 30000);
+      check('v0.5.3 주행 중에는 시동을 끌 수 없다(정차 후에만)', (await Y(() => { const G = window.__game; G.car.v = 3; G.car.gear = 'D'; return null; })) === null && (await (async () => { await pg.keyboard.press('KeyO'); await sleep(200); return Y(() => window.__game.engine.state); })()) === 'RUNNING');
+      await Y(() => { const G = window.__game; G.car.v = 0; G.car.gear = 'P'; G.debugInput = null; });
+    }
+
+    // ---- v0.5.3 Gate B: 고속 주행(137km/h) 충돌 관통 없음 + 100km/h 제동 ----
+    await loadMap('lot', 'free', 'sedan');
+    await sleep(600);
+    {
+      // 열린 차선(z=0)으로 -x → +x 달려 동쪽 벽(e-wall x=27.6)에 부딪힌다
+      await Y(() => { const G = window.__game; const c = G.car; c.x = -30; c.z = 0; c.heading = Math.PI / 2; c.v = 38; c.gear = 'D'; c.handbrake = false; c.steer = 0; G.debugInput = { throttle: 1, brake: 0, steerInput: 0 }; });
+      const hit = await yuntil(() => window.__game.car.x > -29.9 && Math.abs(window.__game.car.v) < 0.5, undefined, 60000);
+      const r = await Y(() => { const G = window.__game; return { x: G.car.x, v: G.car.v, front: G.car.x + G.spec.length - G.spec.rearOverhang, kmh: 0 }; });
+      check('v0.5.3 137km/h 정면 충돌: 벽을 관통하지 않고 정지한다(앞범퍼 < 벽 안쪽면 27.3m)', hit && r.front <= 27.31 && r.x > -36, JSON.stringify(r));
+      await Y(() => { const G = window.__game; const c = G.car; c.x = -30; c.z = 0; c.heading = Math.PI / 2; c.v = 27.7; c.gear = 'D'; c.handbrake = false; c.steer = 0; G.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
+      const stopped = await yuntil(() => window.__game.car.x > -29.9 && Math.abs(window.__game.car.v) < 0.05, undefined, 60000);
+      const b = await Y(() => ({ x: window.__game.car.x, v: window.__game.car.v }));
+      check('v0.5.3 100km/h 급제동: 벽 앞에서 정지(제동거리 < 56m), 후진하지 않음', stopped && b.x < 26 && b.v >= -0.01, JSON.stringify(b));
+      await Y(() => { window.__game.debugInput = null; });
+      await pg.screenshot({ path: path.join(OUT, '140-v053-highspeed.png') });
+    }
     await ctx50.close();
   }
 

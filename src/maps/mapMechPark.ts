@@ -1,8 +1,9 @@
-import { MECH_LIMITS } from '../mech/limits';
 import type { MissionDef } from '../mission/parking';
 import { STATION } from '../mech/machine';
-import { parkedCar, perimeter, wallBox, WHITE, YELLOW } from './helpers';
-import type { MapData, MapSlot, ObstacleDef } from './types';
+import { makeFacility } from '../mech/facility';
+import { BOLLARDS, BOLLARD_H, BOLLARD_R, BOLLARD_Z, EXIT_SLOT, GUIDE_H, LANE_W, LANE_Z, PALLET_SLOT, ROOM_HW, facilityKit } from './mechKit';
+import { parkedCar, perimeter, wallBox, WHITE } from './helpers';
+import type { MapData, ObstacleDef } from './types';
 
 /**
  * 승강기식(팔레트형) 기계식 주차장 (v0.5.0). 한국 일반 기계식 주차장의 구성 요소를 간략 재현한 가상 장치:
@@ -11,50 +12,20 @@ import type { MapData, MapSlot, ObstacleDef } from './types';
  */
 const bounds = { minX: -36, maxX: 9, minZ: -14, maxZ: 14 };
 const px = STATION.palletX;
-const guideIn = MECH_LIMITS.palletWidth / 2; // 가이드 안쪽 면 ±1.075
-const GT = 0.3; // 가이드 두께(얇은 벽 금지 규칙)
-export const GUIDE_H = 0.12;
-const doorHalf = MECH_LIMITS.doorWidth / 2;
-export const ROOM_HW = 3.3; // 승강장 안쪽 반폭
-export const BOLLARD_R = 0.1;
-export const BOLLARD_H = 0.95;
-/** 좌우 차량 유도선(z=±LANE_Z, 폭 0.1m)의 바로 바깥쪽: 볼라드 안쪽 면 = 유도선 바깥 가장자리 (v0.5.3). 이전: (−9,±1.9),(−11,±2.5) */
-export const LANE_Z = 1.15;
-export const LANE_W = 0.1;
-export const BOLLARD_Z = LANE_Z + LANE_W / 2 + BOLLARD_R; // = 1.30
-export const BOLLARDS = [
-  { id: 'bol-1n', x: -9.5, z: BOLLARD_Z },
-  { id: 'bol-1s', x: -9.5, z: -BOLLARD_Z },
-  { id: 'bol-2n', x: -13.0, z: BOLLARD_Z },
-  { id: 'bol-2s', x: -13.0, z: -BOLLARD_Z },
-];
-
-export const PALLET_SLOT: MapSlot = { id: 'pallet', x: px, z: 0, w: MECH_LIMITS.palletWidth, l: MECH_LIMITS.palletLength, dir: Math.PI / 2, style: 'box' };
-export const EXIT_SLOT: MapSlot = { id: 'exit-zone', x: -25, z: 0, w: 3.2, l: 6.2, dir: -Math.PI / 2, style: 'box' };
+// 시설 데이터(벽/기계실/가이드/볼라드/도색)는 mechKit 이 만든다. 이 맵은 시설을 원점에 항등 변환으로 설치한다.
+export { BOLLARDS, BOLLARD_R, BOLLARD_H, BOLLARD_Z, EXIT_SLOT, GUIDE_H, LANE_W, LANE_Z, PALLET_SLOT, ROOM_HW };
+export const MECHPARK_FACILITY = makeFacility({ id: 'mech-tower', name: '12층 기계식 주차타워', x: 0, z: 0, rotationY: 0, floors: 12 });
+const kit = facilityKit(MECHPARK_FACILITY);
+void px;
 
 const obstacles: ObstacleDef[] = [
   ...perimeter(bounds, 0.6, 1.4, 0x8f8f8a),
-  // 승강장 측벽(안쪽 ±1.5) + 문틀 기둥(개구부 2.4m) + 안쪽 벽
-  // 승강장은 턴테이블(길이 5.6m 팔레트가 180° 회전)이 돌 수 있도록 안쪽 폭 6.6m (±3.3)
-  wallBox('ms-wall-n', -2.9, ROOM_HW + GT / 2, 8.2, GT, 2.4, 'wall', 0xb9bcc0),
-  wallBox('ms-wall-s', -2.9, -(ROOM_HW + GT / 2), 8.2, GT, 2.4, 'wall', 0xb9bcc0),
-  // 출입문 정면 벽: 개구부 2.4m (±1.2) 양옆
-  wallBox('ms-front-n', STATION.doorX, (doorHalf + ROOM_HW + GT) / 2, 0.4, ROOM_HW + GT - doorHalf, 2.4, 'wall', 0x6d7176),
-  wallBox('ms-front-s', STATION.doorX, -(doorHalf + ROOM_HW + GT) / 2, 0.4, ROOM_HW + GT - doorHalf, 2.4, 'wall', 0x6d7176),
-  wallBox('ms-back', 1.65, 0, 0.9, 2 * (ROOM_HW + GT), 2.4, 'wall', 0xb9bcc0),
-  // 기계실(저장 베이 하부) — 지상에서는 막혀 있다
-  { id: 'ms-room-n', tag: 'building', shape: 'box', x: -2.9, z: ROOM_HW + GT + 1.8, w: 8.2, d: 3.6, h: 2.6, color: 0xc9ccd0 },
-  { id: 'ms-room-s', tag: 'building', shape: 'box', x: -2.9, z: -(ROOM_HW + GT + 1.8), w: 8.2, d: 3.6, h: 2.6, color: 0xc9ccd0 },
-  // 팔레트 사이드 가이드: 낮은 레일(h 0.12 < 지상고 0.2m) — 차체는 위로 지나가고 타이어가 타고 넘으면 mech.guideDrag 가 저항/경고. 센서 높이(0.55m) 아래라 PDC 미감지가 정상
-  { id: 'pal-guide-n', tag: 'guide', shape: 'box', x: px, z: guideIn + GT / 2, w: MECH_LIMITS.palletLength, d: GT, h: GUIDE_H, color: YELLOW },
-  { id: 'pal-guide-s', tag: 'guide', shape: 'box', x: px, z: -(guideIn + GT / 2), w: MECH_LIMITS.palletLength, d: GT, h: GUIDE_H, color: YELLOW },
+  ...kit.obstacles,
   // 대기 공간
   parkedCar('wait-car-a', -22, 9.5, Math.PI / 2, 0),
   parkedCar('wait-car-b', -22, -9.5, Math.PI / 2, 2),
   wallBox('wait-planter-n', -29, 12.2, 14, 0.8, 0.8, 'planter', 0x6b7a5a),
   wallBox('wait-planter-s', -29, -12.2, 14, 0.8, 0.8, 'planter', 0x6b7a5a),
-  // 입구 금속 볼라드(강철 원통 기둥, 실제 충돌체 + PDC 감지): 진입로 좌우
-  ...BOLLARDS.map((b) => ({ id: b.id, tag: 'bollard' as const, shape: 'cyl' as const, x: b.x, z: b.z, r: BOLLARD_R, h: BOLLARD_H })),
 ];
 
 const mk = (id: string, name: string, kind: 'mech-in' | 'mech-out', slotId: string, desc: string, par: number, spawn: NonNullable<MapData['spawn']>, mech: MissionDef['mech']) => ({
@@ -77,21 +48,15 @@ export const MAP_MECHPARK: MapData = {
   env: { indoor: false, sky: 0x9ab4cc, ambient: 0.6 },
   spawn: { x: -30, z: 0, heading: Math.PI / 2 },
   mech: true,
+  mechFacilities: [MECHPARK_FACILITY],
   provisional: true,
   surfaces: [
     { x: -14.5, z: 0, w: 43, d: 28, kind: 'asphalt' },
     { x: 1, z: 0, w: 16, d: 28, kind: 'concrete' },
   ],
   paint: [
-    { x: -9.0, z: 0, w: 0.3, d: 2.6, color: WHITE }, // 정지선
-    { x: -18, z: 0, w: 24, d: 0.12, color: YELLOW }, // 진입 중앙선 (팔레트 중심선과 같은 z=0)
-    { x: -11.6, z: LANE_Z, w: 8.8, d: LANE_W, color: WHITE }, // 좌/우 차량 유도선 (차폭 + 여유) — 볼라드가 바로 바깥쪽에 선다
-    { x: -11.6, z: -LANE_Z, w: 8.8, d: LANE_W, color: WHITE },
-    { x: -14.0, z: 0, w: 1.8, d: 0.22, color: WHITE }, // 전진 화살표 (축 + 머리)
-    { x: -13.35, z: 0.28, w: 0.9, d: 0.2, rot: 0.75, color: WHITE },
-    { x: -13.35, z: -0.28, w: 0.9, d: 0.2, rot: -0.75, color: WHITE },
-    { x: -6.3, z: 0, w: 0.5, d: 2.4, color: YELLOW }, // 출입문 앞 노란 선
-    { x: -25, z: 2.55, w: 6.2, d: 0.1, color: WHITE },
+    ...kit.paint,
+    { x: -25, z: 2.55, w: 6.2, d: 0.1, color: WHITE }, // 출구 구역
     { x: -25, z: -2.55, w: 6.2, d: 0.1, color: WHITE },
     { x: -28.1, z: 0, w: 0.1, d: 5.2, color: WHITE },
     { x: -21.9, z: 0, w: 0.1, d: 5.2, color: WHITE },

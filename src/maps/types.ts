@@ -1,3 +1,4 @@
+import type { MechFacilityConfig } from '../mech/facility';
 import type { Collider } from '../core/geometry';
 import type { MissionDef, ParkingSlot } from '../mission/parking';
 import type { Terrain } from './terrain';
@@ -77,6 +78,10 @@ export interface MapData {
   levelPaint?: (PaintRect & { y: number })[];
   /** 승강기식 기계식 주차장 장치가 있는 맵 (src/mech) */
   mech?: boolean;
+  /** 기계식 주차 시설 목록(재사용 모듈). 시설마다 독립 ID/위치/회전/층수 — mech 플래그는 목록이 비어 있지 않을 때 true */
+  mechFacilities?: MechFacilityConfig[];
+  /** 기계식 시설을 설치하지 못한 이유(문서/추천 정책 표시용) */
+  mechUnavailable?: string;
   /** 최종 확정된 맵이 아니라 검증용 임시 레이아웃인가 */
   provisional?: boolean;
   surfaces: SurfaceRect[];
