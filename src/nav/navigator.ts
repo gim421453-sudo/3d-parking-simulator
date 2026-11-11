@@ -88,7 +88,7 @@ export class Navigator {
   setMap(map: MapData): void {
     this.map = map;
     // 다층 맵(주차타워)은 층 이동 경로 계산을 아직 지원하지 않는다 (2D 도로 그래프가 층을 구분하지 못함)
-    this.graph = map.terrain || map.mech ? null : buildBestRoadGraph(map);
+    this.graph = map.terrain || map.id === 'mechpark' ? null : buildBestRoadGraph(map);
     this.dest = null;
     this.route = null;
     this.status = 'idle';

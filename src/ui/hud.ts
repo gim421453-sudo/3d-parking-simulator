@@ -30,6 +30,8 @@ export interface HudData {
   sensorOn: boolean;
   soundOn: boolean;
   engineState: 'OFF' | 'ACC' | 'STARTING' | 'RUNNING' | 'STOPPING';
+  /** 주차 현황/추천 (일반 칸 잔여, 기계식 잔여, 추천 문구). 거리 숫자는 넣지 않는다 */
+  parking: { summary: string; headline: string; kind: string } | null;
   mission: MissionHud | null;
   fpsText: string | null;
 }
@@ -400,24 +402,25 @@ export class Hud {
     } else {
       this.fpsEl.classList.add('hidden');
     }
-    this.renderMission(d.mission);
+    this.renderMission(d.mission, d.parking);
   }
 
-  private renderMission(m: MissionHud | null): void {
+  private renderMission(m: MissionHud | null, parking: HudData['parking'] = null): void {
+    const pk = parking ? `<div class="mc-park" data-kind="${parking.kind}" role="status"><b>${parking.summary}</b><span>${parking.headline}</span></div>` : '';
     if (!m) {
-      const key = 'free';
+      const key = 'free|' + (parking ? parking.summary + parking.headline : '');
       if (this.lastMissionKey !== key) {
-        this.missionEl.innerHTML = `<div class="mc-head"><span class="mc-name">자유주행</span></div><div class="mc-sub">미션 없이 자유롭게 연습합니다</div>`;
+        this.missionEl.innerHTML = `<div class="mc-head"><span class="mc-name">자유주행</span></div><div class="mc-sub">미션 없이 자유롭게 연습합니다</div>${pk}`;
         this.lastMissionKey = key;
       }
       return;
     }
-    const key = m.name + m.timeText + m.checks.map((c) => c.value + c.ok).join('|') + Math.round(m.holdPct);
+    const key = m.name + m.timeText + m.checks.map((c) => c.value + c.ok).join('|') + Math.round(m.holdPct) + (parking ? parking.summary + parking.headline : '');
     if (key === this.lastMissionKey) return;
     this.lastMissionKey = key;
     this.missionEl.innerHTML =
       `<div class="mc-head"><span class="mc-name">${m.name}</span><span class="mc-time">${m.timeText}</span></div><ul class="mc-list">` +
       m.checks.map((c) => `<li><i class="dot ${c.ok === null ? 'na' : c.ok ? 'ok' : 'bad'}"></i><span class="k">${c.label}</span><span class="v">${c.value}</span></li>`).join('') +
-      `</ul><div class="bar"><i style="width:${m.holdPct.toFixed(0)}%"></i></div>`;
+      `</ul><div class="bar"><i style="width:${m.holdPct.toFixed(0)}%"></i></div>${pk}`;
   }
 }

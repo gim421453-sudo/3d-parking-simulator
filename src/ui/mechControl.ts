@@ -45,8 +45,20 @@ export class MechControl {
     this.stat = this.el.querySelector('[data-r="stat"]')!;
     this.selEl = this.el.querySelector('[data-r="sel"]')!;
     this.autoBtn = this.el.querySelector('[data-c="auto"]')!;
-    // 슬롯 버튼: 12F → 2F, 각 층 A/B
-    for (let f = TOP_FLOOR; f >= 2; f--) {
+    this.buildGrid(TOP_FLOOR);
+    this.el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => onTap(b, () => this.h.action(b.dataset.a as Action)));
+    onTap(this.el.querySelector('[data-c="close"]') as HTMLElement, () => this.setOpen(false));
+    onTap(this.autoBtn, () => this.h.auto(this.autoBtn.dataset.on !== '1'));
+  }
+
+  private gridFloors = 0;
+  /** 시설 층수에 맞춰 슬롯 버튼을 다시 만든다 (층수가 같으면 아무것도 하지 않음) */
+  buildGrid(floors: number): void {
+    if (floors === this.gridFloors) return;
+    this.gridFloors = floors;
+    this.grid.innerHTML = '';
+    this.btns.clear();
+    for (let f = floors; f >= 2; f--) {
       const row = document.createElement('div');
       row.className = 'mctl-row';
       row.innerHTML = `<span class="mctl-fl">${floorLabel(f)}</span>`;
@@ -61,9 +73,7 @@ export class MechControl {
       }
       this.grid.appendChild(row);
     }
-    this.el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => onTap(b, () => this.h.action(b.dataset.a as Action)));
-    onTap(this.el.querySelector('[data-c="close"]') as HTMLElement, () => this.setOpen(false));
-    onTap(this.autoBtn, () => this.h.auto(this.autoBtn.dataset.on !== '1'));
+    this.last = '';
   }
 
   get isOpen(): boolean {
@@ -78,11 +88,12 @@ export class MechControl {
     this.setOpen(!this.open);
   }
 
-  update(m: MachineState, selected: string, auto: boolean): void {
+  update(m: MachineState, selected: string, auto: boolean, name = ''): void {
     if (!this.open) return;
-    const occ = SLOTS.map((s) => (m.slots[s.id] ? '1' : '0')).join('');
+    this.buildGrid(m.floors);
+    const occ = SLOTS.filter((s) => s.id in m.slots).map((s) => (m.slots[s.id] ? '1' : '0')).join('');
     const sb = statusBoard(m);
-    const key = `${occ}|${selected}|${auto}|${sb.text}|${m.door.toFixed(1)}|${m.carriage.y.toFixed(0)}|${m.message}`;
+    const key = `${name}|${occ}|${selected}|${auto}|${sb.text}|${m.door.toFixed(1)}|${m.carriage.y.toFixed(0)}|${m.message}`;
     if (key === this.last) return;
     this.last = key;
     for (const [id, b] of this.btns) {
@@ -95,7 +106,7 @@ export class MechControl {
     const nowFloor = Math.round(m.carriage.y / 3) + 1;
     this.stat.dataset.kind = sb.kind;
     this.stat.textContent = sb.text;
-    this.selEl.innerHTML = `선택 <b>${selected}</b> (${m.slots[selected] ? '점유' : '사용 가능'}) · 승강기 ${floorLabel(nowFloor)} · 셔터 ${m.door > 0.95 ? '열림' : m.door < 0.05 ? '닫힘' : '동작 중'}<br>${m.message || ''}`;
+    this.selEl.innerHTML = `${name ? `<b>${name}</b><br>` : ''}선택 <b>${selected}</b> (${m.slots[selected] ? '점유' : '사용 가능'}) · 승강기 ${floorLabel(nowFloor)} · 셔터 ${m.door > 0.95 ? '열림' : m.door < 0.05 ? '닫힘' : '동작 중'}<br>${m.message || ''}`;
     this.autoBtn.dataset.on = auto ? '1' : '0';
     this.autoBtn.textContent = `슬롯 선택: ${auto ? '자동(빈 슬롯)' : '수동'}`;
   }

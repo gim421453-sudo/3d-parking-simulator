@@ -142,6 +142,8 @@ export type MissionStatus = 'running' | 'success' | 'failed';
 /** 기계식 미션 옵션: 대상 보관 슬롯, 입고 방향, 미리 보관된 차량(출고 미션) */
 export interface MechMissionOpts {
   slot: string;
+  /** 시설 id (생략하면 맵의 첫 번째 시설) */
+  facility?: string;
   mode?: 'fwd' | 'rev';
   seed?: { slot: string; specId: string; mode: 'fwd' | 'rev' }[];
 }

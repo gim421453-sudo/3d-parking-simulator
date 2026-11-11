@@ -72,7 +72,8 @@ function makeBoard(w: number, h: number): { canvas: HTMLCanvasElement; g: Canvas
   return { canvas, g, tex };
 }
 
-export function buildMech(opts: { mirrorSize: number; mirrorFps: number }): MechBuilt {
+export function buildMech(opts: { mirrorSize: number; mirrorFps: number; floors?: number }): MechBuilt {
+  const TOP = Math.min(TOP_FLOOR, Math.max(2, Math.round(opts.floors ?? TOP_FLOOR)));
   const group = new THREE.Group();
   group.name = 'mech';
   const steel = new THREE.MeshStandardMaterial({ color: 0x8b9096, roughness: 0.55, metalness: 0.5 });
@@ -157,7 +158,7 @@ export function buildMech(opts: { mirrorSize: number; mirrorFps: number }): Mech
   pallet.add(ribs);
 
   // --- 승강 구조: 4개 모서리 기둥 + 수직 가이드 레일 + 층별 슬롯 레일/보 (팔레트 정중앙을 지나는 기둥 없음) ---
-  const TOWER_H = floorY(TOP_FLOOR) + 4.2;
+  const TOWER_H = floorY(TOP) + 4.2;
   const colX = [STATION.palletX - L / 2 - 0.75, STATION.palletX + L / 2 + 0.75]; // 팔레트 길이 양끝 바깥
   const colZ = 2.15; // 캐리지 모서리(승강로) — 슬롯(z=±3.6)로 이송하는 팔레트는 기둥 사이(x 방향 끝)를 지나지 않고 옆으로 빠진다
   const columns: THREE.Object3D[] = [];
@@ -174,7 +175,7 @@ export function buildMech(opts: { mirrorSize: number; mirrorFps: number }): Mech
   // 바깥 랙 기둥(슬롯 바깥쪽 모서리, 4개) — 슬롯 팔레트 길이 양끝 바깥
   for (const x of colX) for (const z of [-5.9, 5.9]) add(group, box, steelDark, x, TOWER_H / 2, z, 0.32, TOWER_H, 0.32);
   // 층별 구조: 슬롯 레일(팔레트 아래 2개 × 슬롯 2개) + 길이 방향 보(기둥 연결) — InstancedMesh
-  const floors = TOP_FLOOR - 1;
+  const floors = TOP - 1;
   const railInst = new THREE.InstancedMesh(box, steel, floors * 2 * 2);
   const beamInst = new THREE.InstancedMesh(box, steelDark, floors * 4);
   let ri = 0;
@@ -186,7 +187,7 @@ export function buildMech(opts: { mirrorSize: number; mirrorFps: number }): Mech
     m4.updateMatrix();
     im.setMatrixAt(i, m4.matrix);
   };
-  for (let f = 2; f <= TOP_FLOOR; f++) {
+  for (let f = 2; f <= TOP; f++) {
     const y = floorY(f);
     for (const side of [1, -1]) {
       const zc = side * SLOT_Z;
@@ -214,7 +215,7 @@ export function buildMech(opts: { mirrorSize: number; mirrorFps: number }): Mech
 
   // --- 슬롯별 보관 팔레트(점유 시에만 보임): 22개 ---
   const slotPallets = new Map<string, THREE.Group>();
-  for (const sd of SLOTS) {
+  for (const sd of SLOTS.filter((s) => s.floor <= TOP)) {
     const sp = makePallet(false);
     sp.position.set(STATION.palletX, sd.y, sd.z);
     sp.visible = false;

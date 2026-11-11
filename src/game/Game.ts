@@ -10,7 +10,9 @@ import { HOLD_SECONDS, HEADING_TOLERANCE, MissionRunner } from '../mission/parki
 import { MechInRunner } from '../mission/mech';
 import { MechController } from '../mech/controller';
 import { buildMech, type MechBuilt } from '../mech/mechBuilder';
-import { STATION, floorLabel, slotDef, storedPose } from '../mech/machine';
+import { STATION, floorLabel, slotDef } from '../mech/machine';
+import { computeAreas, recommend, statusText, summaryLine, type AreaAvail, type Recommendation } from '../parking/availability';
+import { entranceOf, frameOf, toLocalXZ, transformCollider, type Frame, type MechFacilityConfig } from '../mech/facility';
 import { playClunk } from '../mech/sfx';
 import { MechPanel } from '../ui/mechPanel';
 import { MechControl } from '../ui/mechControl';
@@ -76,6 +78,16 @@ type GameState = 'menu' | 'playing' | 'paused' | 'result';
 
 const fmtTime = (s: number): string => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
+/** 맵에 설치된 기계식 시설의 런타임 (독립 상태기계/모델/셔터 충돌체) */
+export interface FacilityRt {
+  cfg: MechFacilityConfig;
+  frame: Frame;
+  ctl: MechController;
+  built: MechBuilt;
+  doorCol: Collider;
+  doorOn: boolean;
+}
+
 export class Game {
   readonly canvas: HTMLCanvasElement;
   readonly renderer: THREE.WebGLRenderer;
@@ -98,22 +110,42 @@ export class Game {
   private cabinHits: CabinHit[] = [];
   private tower: TowerVisual | null = null;
   /** v0.5.0 승강기식 기계식 주차장 (map.mech) */
-  readonly mech = new MechController();
-  mechBuilt: MechBuilt | null = null;
+  /** v0.5.3: 맵에 설치된 기계식 시설들 — 시설마다 독립 상태기계/모델/셔터 충돌체. `mech`/`mechBuilt` 는 현재(가장 가까운 또는 사용 중인) 시설을 가리킨다 */
+  facilities: FacilityRt[] = [];
+  private activeFac: FacilityRt | null = null;
+  /** 주차 현황(구역별 점유/잔여) + 추천 (0.5초마다 갱신) */
+  parkAreas: AreaAvail[] = [];
+  parkArea: AreaAvail | null = null;
+  parkRec: Recommendation | null = null;
+  private parkAcc = 99;
+  private readonly noMech = new MechController();
+  get mech(): MechController {
+    return this.activeFac?.ctl ?? this.noMech;
+  }
+  get mechBuilt(): MechBuilt | null {
+    return this.activeFac?.built ?? null;
+  }
+  get activeFacility(): FacilityRt | null {
+    return this.activeFac;
+  }
   private mechPanel!: MechPanel;
   private mechCtl!: MechControl;
-  private mechDoorCol: Collider = { kind: 'box', id: 'mech-door', tag: 'wall', x: STATION.doorX, z: 0, w: 0.3, d: 2.4, rot: 0, y0: 0, h: 1.9 };
-  private mechDoorOn = false;
   private zoneAcc = 0;
   /** 통합 맵: 현재 구역 id */
   zoneId: string | null = null;
   /** 보관 슬롯별 차량 모델(플레이어가 입고한 차 / 미션에서 미리 보관된 차) */
   private storedModels = new Map<string, { model: CarModel; spec: VehicleSpec; carId: number }>();
+  /** 시설 간 슬롯 id 충돌을 막는 저장 키 */
+  private skey(slot: string, fac: FacilityRt | null = this.activeFac): string {
+    return `${fac?.cfg.id ?? ''}/${slot}`;
+  }
   /**
    * v0.5.2 핫픽스: 플레이어 차량이 보관 슬롯에 들어간 관찰 상태. 이 동안 `this.car`/`this.model` 은 **보관된 그 차량**이며(모델 소유권은 storedModels),
    * 조작할 수 없고 시작 위치로 되돌리거나 새 차량을 자동 생성하지 않는다. 새 차량은 명시적 조작(mechNewCar)으로만 시작한다.
    */
   playerStoredSlot: string | null = null;
+  /** playerStoredSlot 이 속한 시설 */
+  playerStoredFac: FacilityRt | null = null;
   /** 명시적 '새 차량' 조작으로 시작한 횟수(자동 생성은 없어야 하므로 사용자 조작 없이는 0) */
   newCarCount = 0;
   /** 출고로 차량이 교체될 때 입구 밖에 남겨 두는 기존 플레이어 차량(삭제하지 않음): 모델 + 충돌체 */
@@ -366,11 +398,12 @@ export class Game {
       this.tower.dispose();
       this.tower = null;
     }
-    if (this.mechBuilt) {
-      this.scene.remove(this.mechBuilt.group);
-      this.mechBuilt.dispose();
-      this.mechBuilt = null;
+    for (const f of this.facilities) {
+      this.scene.remove(f.built.group);
+      f.built.dispose();
     }
+    this.facilities = [];
+    this.activeFac = null;
     const tier = this.settings.quality;
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
     this.cullLevelY = NaN;
@@ -387,13 +420,21 @@ export class Game {
     }
     if (map.mech) {
       const lowTier = this.settings.quality === 'low';
-      this.mechBuilt = buildMech({ mirrorSize: lowTier ? 224 : 384, mirrorFps: mechMirrorTarget(this.settings.quality, this.settings.mechMirrorFps) });
-      this.scene.add(this.mechBuilt.group);
+      for (const cfg of map.mechFacilities ?? []) {
+        // 시설마다 독립 모델(로컬 좌표로 만든 뒤 위치/회전만 적용). 거울은 가까운 시설만 렌더한다(update 의 near).
+        const built = buildMech({ mirrorSize: lowTier ? 224 : 384, mirrorFps: mechMirrorTarget(this.settings.quality, this.settings.mechMirrorFps), floors: cfg.floors });
+        built.group.position.set(cfg.x, 0, cfg.z);
+        built.group.rotation.y = cfg.rotationY;
+        this.scene.add(built.group);
+        const fr = frameOf(cfg);
+        const doorCol = transformCollider<Collider>({ kind: 'box', id: `${cfg.id}:door`, tag: 'wall', x: STATION.doorX, z: 0, w: 0.3, d: 2.4, rot: 0, y0: 0, h: 1.9 }, fr);
+        this.facilities.push({ cfg, frame: fr, ctl: new MechController(cfg.floors, fr), built, doorCol, doorOn: false });
+      }
+      this.activeFac = this.facilities[0] ?? null;
     }
     this.scene.background = new THREE.Color(map.env.sky);
     this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : new THREE.Fog(map.env.sky, 100, 320);
     this.colliders = map.mech ? [...mapColliders(map)] : mapColliders(map); // 기계식 맵은 셔터 충돌체를 동적으로 넣고 빼므로 복사본을 쓴다
-    this.mechDoorOn = false;
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
     // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이
@@ -456,16 +497,19 @@ export class Game {
       this.car.slope = Math.sin(this.car.pitch);
     }
     this.engine = newEngine(profileOf(this.spec), !this.settings.engineStartOff);
-    this.mech.reset();
+    for (const f of this.facilities) f.ctl.reset();
+    this.parkAcc = 99;
+    this.activeFac = this.facilities.find((f) => f.cfg.id === this.missionDef?.mech?.facility) ?? this.facilities[0] ?? null;
     this.clearStoredModels();
     // 출고 미션: 첫 번째 시드는 **플레이어 자신의 차량**이 이미 그 슬롯에 보관된 상태로 시작한다(관찰 상태). 나머지 시드는 다른 보관 차량.
     (this.missionDef?.mech?.seed ?? []).forEach((sd, i) => {
       if (i === 0 && this.model) {
         const sc = this.mech.seedStored(sd.slot, this.spec.id, sd.mode, this.spec);
-        const pose = storedPose(sd.slot, sc);
-        this.storedModels.set(sd.slot, { model: this.model, spec: this.spec, carId: sc.carId });
+        const pose = this.mech.storedPoseW(sd.slot, sc);
+        this.storedModels.set(this.skey(sd.slot), { model: this.model, spec: this.spec, carId: sc.carId });
         this.placeModel(this.model, pose);
         this.playerStoredSlot = sd.slot;
+        this.playerStoredFac = this.activeFac;
         this.mech.observing = true;
         Object.assign(this.car, { x: pose.x, z: pose.z, y: pose.y, heading: pose.heading, v: 0, pitch: 0, slope: 0, gear: 'P' as const, handbrake: true });
       } else this.mech.seedStored(sd.slot, sd.specId, sd.mode, getVehicle(sd.specId));
@@ -606,7 +650,33 @@ export class Game {
     const cars = this.map.obstacles.filter((o) => o.tag === 'car');
     const free = this.map.slots.filter((sl) => !cars.some((c) => Math.hypot(c.x - sl.x, c.z - sl.z) < Math.min(sl.w, sl.l) * 0.5));
     const t = this.targetSlot;
-    return t ? [t, ...free.filter((f) => f.id !== t.id)] : free;
+    const base = t ? [t, ...free.filter((f) => f.id !== t.id)] : free;
+    // 기계식 시설 입구도 목적지로 선택할 수 있다(사용자가 고른 시설은 순위와 무관하게 안내). 추천 시설이 먼저 온다.
+    const rec = this.parkRec?.facility?.id;
+    const facs = [...this.facilities].sort((a, b) => (a.cfg.id === rec ? -1 : 0) - (b.cfg.id === rec ? -1 : 0));
+    const dest: MapSlot[] = facs.map((f) => {
+      const e = entranceOf(f.cfg);
+      return { id: f.cfg.name, x: e.x, z: e.z, w: 3, l: 6, dir: f.cfg.rotationY + Math.PI / 2, style: 'box' } as MapSlot;
+    });
+    return [...base, ...dest];
+  }
+
+  /** 구역별 주차 현황/추천 갱신 */
+  private updateParking(dt: number): void {
+    this.parkAcc += dt;
+    if (this.parkAcc < 0.5) return;
+    this.parkAcc = 0;
+    const extra: { x: number; z: number }[] = [];
+    if (!this.playerStoredSlot && Math.abs(this.car.v) < 0.3) {
+      const c = centerOf(this.car, this.spec);
+      extra.push({ x: c.x, z: c.z });
+    }
+    for (const p of this.parkedCars) extra.push({ x: p.col.x, z: p.col.z });
+    this.parkAreas = computeAreas(this.map, this.facilities.map((f) => ({ cfg: f.cfg, m: f.ctl.m })), extra);
+    const zones = (this.map as unknown as { zones?: { id: string; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } }[] }).zones;
+    const zid = zones?.find((z) => this.car.x >= z.bounds.minX && this.car.x <= z.bounds.maxX && this.car.z >= z.bounds.minZ && this.car.z <= z.bounds.maxZ)?.id;
+    this.parkArea = this.parkAreas.find((a) => a.id === zid) ?? this.parkAreas[0] ?? null;
+    this.parkRec = this.parkArea ? recommend(this.parkArea, this.parkAreas, { x: this.car.x, z: this.car.z }, this.settings.parkLowRatio) : null;
   }
 
   private pollGamepad(): void {
@@ -850,7 +920,23 @@ export class Game {
     return { throttle: this.throttle, brake: this.brake, steerInput: this.steerIn };
   }
 
+  /** 현재 시설 선택: 사용 중(보관 관찰/동작 중/고정)이면 유지, 아니면 가장 가까운 시설로(히스테리시스 3m) */
+  private selectActiveFacility(): void {
+    if (!this.facilities.length) return;
+    if (this.playerStoredSlot && this.playerStoredFac) {
+      this.activeFac = this.playerStoredFac;
+      return;
+    }
+    const cur = this.activeFac;
+    if (cur && (cur.ctl.m.locked || cur.ctl.m.phase !== 'waiting')) return;
+    const dist = (f: FacilityRt): number => Math.hypot(this.car.x - f.cfg.x, this.car.z - f.cfg.z);
+    let best = this.facilities[0];
+    for (const f of this.facilities) if (dist(f) < dist(best)) best = f;
+    if (!cur || (best !== cur && dist(best) + 3 < dist(cur))) this.activeFac = best;
+  }
+
   private simulate(dt: number): void {
+    if (this.map.mech) this.selectActiveFacility();
     let vin = this.readInput(dt);
     stepEngine(this.engine, dt, { throttle: this.throttle, speed: Math.abs(this.car.v), gear: this.car.gear });
     vin.engineOn = powerOn(this.engine);
@@ -877,23 +963,36 @@ export class Game {
       this.handleMechEvents();
       this.syncStoredVisuals();
       if (!mech.m.locked && mech.settle(dt, this.spec, this.car)) playClunk(mech.lastSeatImpact, this.settings.sensorSound ? this.settings.sensorVolume : 0); // 앞바퀴 정지 홈 안착
-      // 출입문(셔터) 충돌체: 문이 닫혀 가는 동안에는 차량이 통과할 수 없다
-      const wantDoor = mech.doorBlocking();
-      if (wantDoor !== this.mechDoorOn) {
-        this.mechDoorOn = wantDoor;
-        if (wantDoor) {
-          this.colliders.push(this.mechDoorCol);
-          this.colliderById.set(this.mechDoorCol.id, this.mechDoorCol);
-        } else {
-          const i = this.colliders.indexOf(this.mechDoorCol);
-          if (i >= 0) this.colliders.splice(i, 1);
-          this.colliderById.delete(this.mechDoorCol.id);
-        }
+      // 다른 시설은 플레이어와 무관하게 독립적으로 진행한다(자기 슬롯/셔터/승강기 상태만 변경)
+      for (const f of this.facilities) {
+        if (f.ctl === mech) continue;
+        f.ctl.stepIdle(dt);
+        f.ctl.events.length = 0;
       }
-      this.mechBuilt?.update(mech.m, dt, this.car.x < STATION.palletX + 14 && this.car.x > STATION.doorX - 28, mech.guide);
+      // 출입문(셔터) 충돌체: 문이 닫혀 가는 동안에는 차량이 통과할 수 없다 (시설마다)
+      for (const f of this.facilities) {
+        const wantDoor = f.ctl.doorBlocking();
+        if (wantDoor !== f.doorOn) {
+          f.doorOn = wantDoor;
+          if (wantDoor) {
+            this.colliders.push(f.doorCol);
+            this.colliderById.set(f.doorCol.id, f.doorCol);
+          } else {
+            const i = this.colliders.indexOf(f.doorCol);
+            if (i >= 0) this.colliders.splice(i, 1);
+            this.colliderById.delete(f.doorCol.id);
+          }
+        }
+        // 거울(Reflector)은 플레이어가 그 시설 앞 구역에 있을 때만 켠다 — 먼 시설은 렌더하지 않는다
+        const l = toLocalXZ(f.frame, this.car.x, this.car.z);
+        const near = l.x < STATION.palletX + 14 && l.x > STATION.doorX - 28 && Math.abs(l.z) < 20;
+        f.built.update(f.ctl.m, dt, near && f.ctl === mech, f.ctl.guide);
+      }
       this.mechPanel.update(mech.m, mech.items, mech.guide, !!this.playerStoredSlot);
-      this.mechCtl.update(mech.m, mech.selectedSlot, this.settings.mechAutoSlot);
+      this.mechCtl.update(mech.m, mech.selectedSlot, this.settings.mechAutoSlot, this.activeFac?.cfg.name ?? '');
     }
+
+    this.updateParking(dt);
 
     // 깜빡이
     this.blinkT += dt;
@@ -997,7 +1096,8 @@ export class Game {
     }
     this.parkedCars = [];
     this.playerStoredSlot = null;
-    this.mech.observing = false;
+    this.playerStoredFac = null;
+    for (const f of this.facilities) f.ctl.observing = false;
   }
 
   /** `this.model` 이 보관 슬롯 모델과 같은 객체인가(소유권이 storedModels 에 있음) */
@@ -1014,14 +1114,15 @@ export class Game {
 
   /** 미션에서 미리 보관된 차량(seed)의 모델을 만들어 슬롯에 놓는다 */
   private syncStoredVisuals(): void {
-    for (const e of this.mech.storedList()) {
-      if (this.storedModels.has(e.slot) || !e.car.specId) continue;
+    for (const f of this.facilities) for (const e of f.ctl.storedList()) {
+      const key = this.skey(e.slot, f);
+      if (this.storedModels.has(key) || !e.car.specId) continue;
       const spec = getVehicle(e.car.specId);
       const model = createCarModel(spec, { lite: true, blobTexture: this.built?.textures.blob });
       if (spec.visual.kind === 'glb') void applyGlbVisual(model, spec);
       this.scene.add(model.root);
       this.placeModel(model, e.pose);
-      this.storedModels.set(e.slot, { model, spec, carId: e.car.carId });
+      this.storedModels.set(key, { model, spec, carId: e.car.carId });
     }
   }
 
@@ -1060,10 +1161,11 @@ export class Game {
         if (!sc) continue;
         // 입고 완료: **그 차량이 그 슬롯에 그대로 남는다.** 모델 소유권은 storedModels 로 넘기고, 플레이어는 보관된 차량을 관찰하는 상태가 된다.
         // 새 차량을 자동 생성하거나 시작 위치로 되돌리지 않는다.
-        const pose = storedPose(e.slot, sc);
-        this.storedModels.set(e.slot, { model: this.model, spec: this.spec, carId: e.carId ?? sc.carId });
+        const pose = mech.storedPoseW(e.slot, sc);
+        this.storedModels.set(this.skey(e.slot), { model: this.model, spec: this.spec, carId: e.carId ?? sc.carId });
         this.placeModel(this.model, pose);
         this.playerStoredSlot = e.slot;
+        this.playerStoredFac = this.activeFac;
         mech.observing = true;
         this.car.x = pose.x;
         this.car.z = pose.z;
@@ -1077,17 +1179,18 @@ export class Game {
         this.hud.toast(`보관 완료 — ${floorLabel(slotDef(e.slot).floor)} ${slotDef(e.slot).side} 슬롯 (새 차량: I)`, 'good');
       } else if (e.type === 'picked' && e.slot) {
         // 출고: 보관된 그 차량(모델/차종/ID)을 플레이어가 인수한다. 현재 조작 차량이 입구 밖에 있으면 삭제하지 않고 그 자리에 주차해 둔다.
-        const entry = this.storedModels.get(e.slot);
+        const entry = this.storedModels.get(this.skey(e.slot));
         const sc = mech.m.carrying;
         const spec = entry?.spec ?? getVehicle(sc?.specId || this.spec.id);
         if (this.playerStoredSlot) {
           // 관찰 중이던 보관 차량은 storedModels 에 그대로 남는다 (다른 슬롯 차량을 호출하는 경우)
           this.playerStoredSlot = null;
+          this.playerStoredFac = null;
           mech.observing = false;
         } else if (this.model && !this.modelIsStored()) {
           this.parkOutsideCar();
         }
-        this.storedModels.delete(e.slot);
+        this.storedModels.delete(this.skey(e.slot));
         this.adoptVehicle(spec, entry?.model ?? null, 'keep', false); // 이전 모델은 보관/주차 차량으로 남는다. 출고된 차량은 시동 OFF (자동 시동 금지)
         this.car.gear = 'P';
         this.car.handbrake = true;
@@ -1114,7 +1217,7 @@ export class Game {
     const slot = this.playerStoredSlot;
     const sc = slot ? this.mech.m.slots[slot] : null;
     if (!slot || !sc) return;
-    const p = storedPose(slot, sc);
+    const p = this.mech.storedPoseW(slot, sc);
     this.car.x = p.x;
     this.car.z = p.z;
     this.car.y = p.y;
@@ -1136,6 +1239,7 @@ export class Game {
     const spec = this.spec; // 같은 차종으로 시작 (보관된 차량의 모델은 storedModels 가 계속 소유)
     const sp = this.missionDef?.spawn ?? this.map.spawn;
     this.playerStoredSlot = null;
+    this.playerStoredFac = null;
     mech.observing = false;
     this.car = createVehicleState(spec, sp.x, sp.z, sp.heading);
     this.car.handbrake = false;
@@ -1842,6 +1946,7 @@ export class Game {
       sensorOn: this.settings.sensorEnabled,
       soundOn: this.settings.sensorSound,
       engineState: this.engine.state,
+      parking: this.parkArea && this.parkRec && (this.parkArea.regularTotal > 0 || this.parkArea.mech.length > 0) ? { summary: summaryLine(this.parkArea), headline: this.parkRec.facility && this.parkRec.kind !== 'both' ? `${this.parkRec.headline} · ${this.parkRec.facility.name} (${this.parkRec.facility.free}칸 · ${statusText(this.parkRec.facility.status)})` : this.parkRec.headline, kind: this.parkRec.kind } : null,
       mission: mh,
       fpsText: this.settings.showFps ? `FPS ${this.fpsInstant.toFixed(0)} · 평균 ${this.avgFps().toFixed(0)}` : null,
     };
@@ -1857,9 +1962,13 @@ export class Game {
           this.zoneId = zn?.id ?? null;
           if (zn) this.hud.toast(`구역: ${zn.label}`);
         }
-        const mz = zones.find((z) => z.id === 'mechpark');
-        if (mz) this.mechPanel.setVisible(this.car.x >= mz.bounds.minX - 12 && this.car.x <= mz.bounds.maxX + 4 && this.car.z >= mz.bounds.minZ - 12 && this.car.z <= mz.bounds.maxZ + 12);
+        // 기계식 패널: 어느 시설이든 입구 앞 구역(로컬 x -28..+14, |z|<20)에 있을 때만
+        this.mechPanel.setVisible(this.facilities.some((f) => { const l = toLocalXZ(f.frame, this.car.x, this.car.z); return l.x > STATION.doorX - 28 && l.x < STATION.palletX + 14 && Math.abs(l.z) < 20; }));
       }
+    }
+    else if (this.map.mech) {
+      // 단일 맵: 전용 맵(mechpark)은 항상, 그 밖의 맵(outdoor 등)은 시설 입구 앞 구역에서만 기계식 패널을 보인다
+      this.mechPanel.setVisible(this.map.id === 'mechpark' || this.facilities.some((f) => { const l = toLocalXZ(f.frame, this.car.x, this.car.z); return l.x > STATION.doorX - 28 && l.x < STATION.palletX + 14 && Math.abs(l.z) < 20; }));
     }
     if (this.map.terrain) {
       const lv = levelAt(this.map.terrain, this.car.y);

@@ -2515,7 +2515,7 @@ async function waitServer(url, tries = 50) {
     check('v0.5.2 하차하지 않으면 입고 거부', (await M()).phase === 'waiting');
     await engineOff(); await pg.keyboard.press('KeyG'); await sleep(300); await pg.keyboard.press('KeyJ');
     await yuntil(() => window.__game.mech.m.door < 0.5, undefined, 60000);
-    check('v0.5.2 셔터: 닫히는 동안 실제 충돌체 + 상단 LED 입고 중', await Y(() => window.__game.colliders.some((c) => c.id === 'mech-door') && /storing/.test(window.__game.mechBuilt.statusState)));
+    check('v0.5.2 셔터: 닫히는 동안 실제 충돌체 + 상단 LED 입고 중', await Y(() => window.__game.colliders.some((c) => c.id.endsWith(':door')) && /storing/.test(window.__game.mechBuilt.statusState)));
     await yuntil(() => window.__game.state === 'result', undefined, 200000);
     const f2 = await M();
     check('v0.5.2 전진 입고 미션 성공: 2F A 슬롯에 보관', f2.mission === 'success' && f2.occ.includes('02A:fwd') && f2.stored.includes('02A'), JSON.stringify(f2));

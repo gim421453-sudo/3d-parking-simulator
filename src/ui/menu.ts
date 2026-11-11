@@ -257,6 +257,7 @@ export class Menu {
                ${chk('engineSound', '엔진음 켜기', '합성 엔진음(실제 차량 음원 아님). 경고음과 별도', s.engineSound)}
                ${rng('engineVolume', '엔진음 볼륨', '', 0, 1, 0.05, s.engineVolume)}
                ${chk('engineStartOff', '시동 OFF 로 시작', '켜면 시작/새 차량이 시동 꺼진 상태(브레이크+O 로 시동)', s.engineStartOff)}
+               ${rng('parkLowRatio', '기계식 우선 추천 기준(일반 칸 잔여율)', '일반 주차칸 잔여율이 이 값 이하이면 기계식 주차장을 우선 추천', 0.05, 0.6, 0.05, s.parkLowRatio)}
                ${rng('sensorRange', '최대 감지 거리', '이 거리 안에서 경고 시작', 1, 4, 0.1, s.sensorRange)}
                ${rng('sensorCritical', '연속 경고 거리', '이 거리 이하에서 연속음', 0.1, 0.8, 0.05, s.sensorCritical)}
                ${chk('sensorDebug', '센서 디버그 모드', '개발자용: 감지 광선·센서 방향·충돌 대상·거리(m) 표시. 일반 화면에는 거리 숫자를 표시하지 않음', s.sensorDebug)}`,
@@ -424,6 +425,7 @@ const FMT: Record<string, (v: number) => string> = {
   assistCameraFps: (v) => `${v} FPS`,
   cabinFps: (v) => `${v} FPS`,
   mechMirrorFps: (v) => (v === 0 ? '자동' : `${v} FPS`),
+  parkLowRatio: (v) => `${Math.round(v * 100)}%`,
   engineVolume: (v) => `${Math.round(v * 100)}%`,
   mirrorFps: (v) => (v === 0 ? '끔' : `${v} FPS`),
   infoAutoHideSec: (v) => `${v}초`,

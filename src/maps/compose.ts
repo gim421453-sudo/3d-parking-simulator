@@ -111,6 +111,7 @@ export function composeMap(o: ComposeOptions): MapData & { zones: ZoneInfo[] } {
         id: sx(ns, ms.id),
         name: `[${z.label}] ${ms.name}`,
         slotId: sx(ns, ms.slotId),
+        ...(ms.mech?.facility ? { mech: { ...ms.mech, facility: sx(ns, ms.mech.facility) } } : {}),
         spawn: { ...sp, x: sp.x + dx, z: sp.z + dz },
       });
     }

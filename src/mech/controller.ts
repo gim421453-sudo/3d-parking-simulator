@@ -217,6 +217,17 @@ export class MechController {
     return hi >= STATION.doorX - 0.5 && lo <= STATION.doorX + 0.5;
   }
 
+  /** 플레이어와 무관하게 장치만 진행(다른 시설): 문 구역은 비어 있고 차량 pose 는 건드리지 않는다 */
+  stepIdle(dt: number): void {
+    this.m.doorBlocked = false;
+    this.doorClear = true;
+    stepMachine(this.m, dt, true);
+    if (this.m.events.length) {
+      this.events.push(...this.m.events);
+      this.m.events = [];
+    }
+  }
+
   step(dt: number, spec: VehicleSpec, car: VehicleState): void {
     // 출고 후 차량이 팔레트를 벗어나면 턴테이블을 원위치(0°)로 되돌린다
     if (this.m.phase === 'waiting' && this.m.yaw > 0 && !this.m.locked) {

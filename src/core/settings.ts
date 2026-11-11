@@ -32,6 +32,8 @@ export interface Settings {
   engineVolume: number; // 0..1
   /** 시작/새 차량을 시동 OFF 로 시작 (기본 꺼짐 = 시동 걸린 상태로 시작) */
   engineStartOff: boolean;
+  /** 일반 주차칸 잔여율이 이 값 이하이면 기계식 주차장을 우선 추천 (기본 0.2 = 20%) */
+  parkLowRatio: number;
   pdcView: 'surround' | 'sensor'; // 오른쪽 PDC 영역: 3D 서라운드뷰 / 센서 전용 2D (서라운드 미지원 차량은 항상 센서)
   assistAutoView: boolean; // 측면 장애물 접근 시 3D 측면/탑뷰로 자동 전환
   infoAutoShow: boolean; // 주차 보조가 필요하면 플로팅 디스플레이 자동 표시
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: Settings = {
   engineSound: true,
   engineVolume: 0.5,
   engineStartOff: false,
+  parkLowRatio: 0.2,
   pdcView: 'surround',
   assistAutoView: true,
   infoAutoShow: true,
@@ -118,6 +121,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Settings {
   s.mechAutoSlot = s.mechAutoSlot === true;
   s.engineSound = s.engineSound !== false;
   s.engineStartOff = s.engineStartOff === true;
+  s.parkLowRatio = Math.min(0.6, Math.max(0.05, Number.isFinite(Number(s.parkLowRatio)) ? Number(s.parkLowRatio) : 0.2));
   s.engineVolume = Math.min(1, Math.max(0, Number.isFinite(Number(s.engineVolume)) ? Number(s.engineVolume) : 0.5));
   s.infoAutoHideSec = Math.min(10, Math.max(0.5, Number(s.infoAutoHideSec) || 2.5));
   s.cabinFps = Math.min(30, Math.max(5, Number(s.cabinFps) || 15));
