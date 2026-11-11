@@ -1267,7 +1267,7 @@ async function waitServer(url, tries = 50) {
   const sp = { cx: 24, cz: 5.2, rm: 5.2, th0: -Math.PI / 2, th1: Math.PI };
   for (let th = sp.th0 + 0.05; th <= sp.th1; th += 0.06) spPath.push([sp.cx + sp.rm * Math.cos(th), sp.cz + sp.rm * Math.sin(th)]);
   spPath.push([sp.cx - sp.rm, sp.cz - 1.2]); spPath.push([sp.cx - sp.rm + 0.2, sp.cz - 3.2]);
-  await g(([path]) => { const c = window.__game.car; c.gear = 'D'; c.handbrake = false; window.__apStart(path, 2.0); }, [spPath]);
+  await g(([path]) => { const c = window.__game.car; c.gear = 'D'; c.handbrake = false; window.__apStart(path, 1.5); }, [spPath]); // 나선(반경 5.2m)은 SUV 최대 조향각 여유가 작다(2.0m/s 에서 필요 0.51rad ≈ 한계 0.57rad) → 1.5m/s 로 여유를 확보. 충돌 0/3F 도달 기준은 그대로.
   const midSpiral = await until(() => window.__game.car.y > 4.6 && window.__game.car.y < 5.4, undefined, 160000);
   await shot('133-tower-spiral');
   const spSt = await g(() => ({ y: window.__game.car.y, pitch: window.__game.car.pitch, view: window.__game.viewOut.view, floor: document.getElementById('floor-ind').textContent }));
