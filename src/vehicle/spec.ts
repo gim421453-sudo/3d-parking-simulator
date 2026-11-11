@@ -141,6 +141,7 @@ function make(p: {
   wheelRadius: number;
   maxSteer?: number;
   maxSpeedFwd?: number;
+  accel?: number;
 }): VehicleSpec {
   const eyeY = p.height - 0.28;
   return {
@@ -153,9 +154,10 @@ function make(p: {
     wheelbase: p.wheelbase,
     rearOverhang: p.rearOverhang,
     maxSteer: p.maxSteer ?? 0.62,
-    maxSpeedFwd: p.maxSpeedFwd ?? 40 / 3.6,
-    maxSpeedRev: 15 / 3.6,
-    accel: 2.6,
+    // v0.5.3: 도시 주행 확장을 위한 차종별 최고속도(소형 130 / 세단 150 / SUV 140 km/h), 후진은 20km/h 로 별도 제한. 주차장 속도 제한은 맵/도로 데이터의 몫이다
+    maxSpeedFwd: p.maxSpeedFwd ?? (p.body === 'hatch' ? 130 : p.body === 'suv' ? 140 : 150) / 3.6,
+    maxSpeedRev: 20 / 3.6,
+    accel: p.accel ?? 2.6,
     transmission: 'auto',
     category: p.body === 'suv' ? 'suv' : p.body === 'hatch' ? 'compact' : 'sedan',
     wheelRadius: p.wheelRadius,
@@ -238,6 +240,8 @@ export const VEHICLE_EXTRAS: VehicleSpec[] = [
 export const CONCEPT_COUPE: VehicleSpec = {
   ...make({
     id: 'concept-coupe',
+    maxSpeedFwd: 180 / 3.6,
+    accel: 4.0,
     name: '컨셉 스포츠 쿠페 (실차형 GLB · CC BY)',
     desc: '외부 실차형 GLB 모델(Khronos Car Concept, CC-BY 4.0). 앞바퀴 조향/4바퀴 회전/램프 연동. BMW 원본 아님.',
     length: 4.357,
@@ -273,6 +277,8 @@ export const PROFILE_VEHICLES: VehicleSpec[] = [
   {
     ...make({
       id: 'coupe-m4',
+      maxSpeedFwd: 180 / 3.6,
+      accel: 4.2,
       name: '스포츠 쿠페 (M4 계열)',
       desc: '낮고 긴 2도어 쿠페 (임시 형상). 후방카메라 전용 PDC.',
       length: 4.794,

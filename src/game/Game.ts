@@ -55,7 +55,7 @@ import { MirrorOverlay, MirrorSystem } from './mirrors';
 import { exportVehicleGlb } from './devGlb';
 import { proximityLevel, type ProximityLevel } from '../sensors/sensorSystem';
 import { applyGlbVisual, createCarModel, type CarModel } from '../vehicle/carModel';
-import {
+import { substepCount,
   centerOf,
   createVehicleState,
   obbOf,
@@ -835,7 +835,11 @@ export class Game {
     while (this.acc >= STEP && steps < 12) {
       if (mech?.m.locked) mech.applyLocked(this.car);
       else if (this.playerStoredSlot) this.holdStoredCar();
-      else this.physicsStep(vin, STEP);
+      else {
+        // 고속: 한 스텝 이동량이 0.12m 를 넘지 않도록 서브스텝으로 나눠 충돌을 검사한다 (얇은 벽/기둥 관통 방지)
+        const n = substepCount(this.car.v, STEP);
+        for (let k = 0; k < n; k++) this.physicsStep(vin, STEP / n);
+      }
       this.acc -= STEP;
       steps++;
     }

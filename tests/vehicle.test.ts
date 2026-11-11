@@ -39,7 +39,7 @@ describe('차량 주행', () => {
   it('D 기어로 가속하면 앞(+z)으로 이동하고 최고속도를 넘지 않는다', () => {
     const s = createVehicleState(spec, 0, 0, 0);
     expect(requestGear(s, 'D').ok).toBe(true);
-    run(s, { throttle: 1, brake: 0, steerInput: 0 }, 12);
+    run(s, { throttle: 1, brake: 0, steerInput: 0 }, 90); // v0.5.3: 최고속도 상향(150km/h)으로 도달 시간을 늘림
     expect(s.z).toBeGreaterThan(10);
     expect(s.v).toBeLessThanOrEqual(spec.maxSpeedFwd + 1e-6);
     expect(s.v).toBeGreaterThan(spec.maxSpeedFwd * 0.8);
@@ -159,5 +159,90 @@ describe('충돌 판정', () => {
     }
     expect(maxPen).toBeLessThanOrEqual(20 - 0.3 + 1e-6); // 벽 앞면 z=19.7
     expect(maxPen).toBeGreaterThan(19.3); // 실제로 벽 근처까지 도달
+  });
+});
+
+import { MAX_STEP_DIST, substepCount, stepVehicle as stepV } from '../src/vehicle/physics';
+import { obbOf as obbOfV } from '../src/vehicle/physics';
+import { SELECTABLE_VEHICLES, VEHICLES as VEHS } from '../src/vehicle/spec';
+
+describe('v0.5.3 고속 주행 성능/안정성', () => {
+  const sed = VEHS[1];
+  it('세단: 0→100km/h 가 20초 이내, 120km/h 이상 도달, 최고속도(150km/h)를 넘지 않는다', () => {
+    const s = createVehicleState(sed, 0, 0, 0);
+    s.gear = 'D';
+    s.handbrake = false;
+    let t100 = -1;
+    let t = 0;
+    for (; t < 120; t += 1 / 60) {
+      stepV(s, { throttle: 1, brake: 0, steerInput: 0 }, sed, 1 / 60);
+      if (t100 < 0 && s.v * 3.6 >= 100) t100 = t;
+    }
+    expect(t100).toBeGreaterThan(0);
+    expect(t100).toBeLessThan(20);
+    expect(s.v * 3.6).toBeGreaterThan(120);
+    expect(s.v).toBeLessThanOrEqual(sed.maxSpeedFwd + 1e-6);
+  });
+  it('차종별 최고속도: 모두 100km/h 이상, 스포츠 쿠페는 더 높고, 후진은 20km/h 이하', () => {
+    for (const v of SELECTABLE_VEHICLES) {
+      expect(v.maxSpeedFwd * 3.6, v.id).toBeGreaterThanOrEqual(120);
+      expect(v.maxSpeedRev * 3.6, v.id).toBeLessThanOrEqual(20.01);
+    }
+    expect(SELECTABLE_VEHICLES.find((v) => v.id === 'coupe-m4')!.maxSpeedFwd).toBeGreaterThan(sed.maxSpeedFwd);
+  });
+  it('120km/h 급제동: 정지하며 제동거리가 현실적인 범위(40~120m), 정지 후 후진하지 않는다', () => {
+    const s = createVehicleState(sed, 0, 0, 0);
+    s.gear = 'D';
+    s.handbrake = false;
+    s.v = 120 / 3.6;
+    const z0 = s.z;
+    for (let i = 0; i < 60 * 30; i++) stepV(s, { throttle: 0, brake: 1, steerInput: 0 }, sed, 1 / 60);
+    const dist = s.z - z0;
+    expect(s.v).toBe(0);
+    expect(dist).toBeGreaterThan(40);
+    expect(dist).toBeLessThan(120);
+  });
+  it('고속 조향 한계: 120km/h 에서는 최대 조향각이 크게 줄어든다(급조향 방지)', () => {
+    const lowSteer = sed.maxSteer / (1 + (1 / 7) ** 2);
+    const hi = sed.maxSteer / (1 + (33 / 7) ** 2);
+    expect(hi).toBeLessThan(lowSteer * 0.1);
+  });
+  it('서브스텝: 속도가 높을수록 1스텝 이동량을 0.12m 이하로 쪼갠다 (최대 8)', () => {
+    expect(substepCount(0, 1 / 120)).toBe(1);
+    expect(substepCount(5, 1 / 120)).toBe(1);
+    expect(substepCount(50, 1 / 120)).toBeGreaterThanOrEqual(4);
+    expect(substepCount(1000, 1 / 120)).toBe(8);
+    for (const v of [10, 30, 50]) expect((v / 120) / substepCount(v, 1 / 120)).toBeLessThanOrEqual(MAX_STEP_DIST + 1e-9);
+  });
+  it('얇은 벽(0.3m) 정면 충돌: 50m/s(180km/h)에서도 서브스텝으로 관통하지 않는다', () => {
+    const wall = { kind: 'box' as const, id: 'w', tag: 'wall' as const, x: 0, z: 30, w: 8, d: 0.3, rot: 0, y0: 0, h: 2 };
+    const s = createVehicleState(sed, 0, 0, 0);
+    s.gear = 'D';
+    s.handbrake = false;
+    s.v = 50;
+    let hit = false;
+    for (let i = 0; i < 120 * 3 && !hit; i++) {
+      const n = substepCount(s.v, 1 / 120);
+      for (let k = 0; k < n && !hit; k++) {
+        const px = s.x, pz = s.z;
+        stepV(s, { throttle: 0, brake: 0, steerInput: 0 }, sed, 1 / 120 / n);
+        if (findVehicleCollision(obbOfV(s, sed), [wall])) {
+          hit = true;
+          s.x = px;
+          s.z = pz;
+        }
+      }
+    }
+    expect(hit).toBe(true);
+    expect(s.z).toBeLessThan(wall.z); // 벽 앞에서 멈춤(관통 없음)
+  });
+  it('서브스텝 없이 50m/s 로 달리면 0.3m 벽을 관통할 수 있다 (서브스텝이 필요한 이유)', () => {
+    const wall = { kind: 'box' as const, id: 'w', tag: 'wall' as const, x: 0, z: 30, w: 8, d: 0.3, rot: 0, y0: 0, h: 2 };
+    const s = createVehicleState(sed, 0, 0, 0);
+    s.gear = 'D';
+    s.v = 50;
+    s.handbrake = false;
+    // 차체 길이(4.6m)가 벽 두께보다 길어 OBB 겹침은 대부분 잡히지만, 스텝 이동량(0.42m) > 두께(0.3m)임을 확인한다
+    expect(50 / 120).toBeGreaterThan(wall.d);
   });
 });

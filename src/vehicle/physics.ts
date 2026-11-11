@@ -29,6 +29,8 @@ export interface VehicleInput {
   throttle: number; // 0..1
   brake: number; // 0..1
   steerInput: number; // -1..1, 왼쪽 +
+  /** 엔진 시동 상태(생략 = 켜짐). 꺼져 있으면 가속/크리프/엔진 브레이크가 없고 마찰로만 감속한다 */
+  engineOn?: boolean;
 }
 
 export const CREEP_SPEED = 0.9; // m/s (D/R에서 페달을 밟지 않을 때 서행)
@@ -102,6 +104,7 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
 
   // ---- 종방향 ----
   const dirSign = s.gear === 'D' ? 1 : s.gear === 'R' ? -1 : 0;
+  const eng = input.engineOn !== false;
   let a = 0;
   if (s.gear === 'P' || s.handbrake) {
     // 잠금: 강하게 정지
@@ -110,7 +113,9 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
   } else {
     if (dirSign !== 0) {
       const vmax = dirSign > 0 ? spec.maxSpeedFwd : spec.maxSpeedRev;
-      if (input.throttle > 0) {
+      if (!eng) {
+        // 시동 OFF: 구동력/크리프/엔진 브레이크 없음 (아래 구름/공기저항과 브레이크만 작용)
+      } else if (input.throttle > 0) {
         const ratio = Math.sign(s.v) === dirSign ? Math.abs(s.v) / vmax : 0;
         const room = clamp(1 - ratio * ratio * ratio, 0, 1); // 최고속도 근처에서만 가속이 줄어든다
         a += dirSign * spec.accel * input.throttle * room;
@@ -123,7 +128,11 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
     // 경사로: 중력의 진행 방향 성분 (앞이 높으면 앞으로 갈수록 감속, 뒤로 구르면 가속). 풋브레이크/주차브레이크/P 가 잡는다.
     if (s.slope !== 0) a -= 9.81 * s.slope;
     // 구름저항 + 공기저항
-    if (s.v !== 0) a -= Math.sign(s.v) * (0.22 + 0.012 * s.v * s.v);
+    // (v0.5.3) 5m/s(18km/h) 까지는 기존 구름저항 곡선(저속 주차 감각 유지), 그 위는 완만한 공기저항만 더해 120km/h↑ 가속이 가능하다
+    if (s.v !== 0) {
+      const av = Math.abs(s.v);
+      a -= Math.sign(s.v) * (0.22 + 0.012 * Math.min(av, 5) ** 2 + 0.0004 * av * av);
+    }
     // 풋 브레이크
     const prev = s.v;
     s.v += a * dt;
@@ -144,5 +153,9 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
   s.heading = normAngle(s.heading + dh);
   s.wheelRoll += (s.v / spec.wheelRadius) * dt;
 }
+
+/** 고속 연속 충돌 검사를 위한 서브스텝 수: 한 서브스텝 이동량을 MAX_STEP_DIST(0.12m) 이하로 유지(얇은 벽 관통 방지). 최대 8 */
+export const MAX_STEP_DIST = 0.12;
+export const substepCount = (v: number, dt: number): number => Math.min(8, Math.max(1, Math.ceil((Math.abs(v) * dt) / MAX_STEP_DIST)));
 
 export const speedKmh = (s: VehicleState): number => Math.abs(s.v) * 3.6;
