@@ -82,9 +82,35 @@ export function requestGear(s: VehicleState, g: Gear): GearResult {
 }
 
 /** 속도에 따라 줄어드는 최대 조향각 */
+/**
+ * v0.5.4: 저속(2.5m/s = 9km/h 이하)에서는 **풀 조향**이 가능하다(실차와 같음). 이전 식은 2m/s 에서 이미 8% 줄어
+ * 좁은 나선 램프에서 필요한 회전 반경을 못 만들었다(원인 분석: docs/V054.md). 그 위로는 속도에 따라 부드럽게 줄어든다.
+ */
+export const FULL_STEER_SPEED = 2.5;
 export function maxSteerAt(spec: VehicleSpec, v: number): number {
-  const k = Math.abs(v) / 7;
+  const k = Math.max(0, Math.abs(v) - FULL_STEER_SPEED) / 6;
   return spec.maxSteer / (1 + k * k);
+}
+/** 주어진 속도에서 뒷축 중심의 최소 회전 반경 */
+export const minTurnRadius = (spec: VehicleSpec, v = 0): number => spec.wheelbase / Math.tan(maxSteerAt(spec, v));
+/**
+ * 뒷축 중심이 반경 R 의 원을 돌 때 차체가 쓸고 지나가는 환형의 안/바깥 반경 (정상 원선회, 자전거 모델).
+ * 안쪽 = 뒷축 안쪽 옆면, 바깥 = 앞 바깥 모서리.
+ */
+export function sweptAnnulus(spec: VehicleSpec, R: number): { inner: number; outer: number } {
+  const hw = spec.width / 2;
+  const front = spec.length - spec.rearOverhang; // 뒷축 → 앞범퍼
+  return { inner: Math.sqrt(Math.max(0, R - hw) ** 2), outer: Math.hypot(R + hw, front) };
+}
+/** 폭 [r0, r1] 의 원형 통로를 통과할 수 있는 뒷축 반경 구간 [lo, hi] (hi < lo 이면 통과 불가). margin = 벽과의 여유 */
+export function spiralPassBand(spec: VehicleSpec, r0: number, r1: number, v = 0, margin = 0): { lo: number; hi: number } {
+  const hw = spec.width / 2;
+  const front = spec.length - spec.rearOverhang;
+  const loGeom = r0 + margin + hw;
+  const lo = Math.max(loGeom, minTurnRadius(spec, v));
+  const o = r1 - margin;
+  const hi = o > front ? Math.sqrt(o * o - front * front) - hw : -Infinity;
+  return { lo, hi };
 }
 
 /**

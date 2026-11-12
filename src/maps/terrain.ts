@@ -37,6 +37,11 @@ export interface RampSurface {
   width: number;
   y0: number;
   y1: number;
+  /**
+   * 양 끝의 수직 곡선(완화 구간) 길이 m. 0/생략 = 직선 경사(끝에서 경사가 갑자기 바뀜).
+   * 지정하면 시작/끝에서 경사가 0 에서 부드럽게 커졌다 줄어든다 → 차체 피치가 서서히 변하고 하부 접촉(배 긁힘)이 줄어든다.
+   */
+  ease?: number;
 }
 export interface SpiralSurface {
   kind: 'spiral';
@@ -57,10 +62,37 @@ export interface TerrainLevel {
   name: string; // 표시 이름 (예: 1F)
   y: number;
 }
+/** 차량이 지나갈 수 없는 낮은 천장(보/터널 지붕 등). y = 천장 아랫면 높이 */
+export interface CeilingRect {
+  id: string;
+  rect: Rect2;
+  y: number;
+}
 export interface Terrain {
   surfaces: TerrainSurface[];
   levels: TerrainLevel[];
+  /** 데크 아랫면 외의 추가 천장 */
+  ceilings?: CeilingRect[];
 }
+
+/**
+ * 완화 구간이 있는 경사로의 정규화 높이 f(u) ∈ [0,1] (u: 시작점부터의 수평 거리, L: 길이, e: 완화 길이).
+ * 양 끝 e 구간은 포물선(경사 0 → 최대), 가운데는 일정 경사. 최대 경사 = (y1-y0)/(L-e).
+ */
+export function rampProfile(u: number, L: number, e = 0): number {
+  const x = Math.min(L, Math.max(0, u));
+  const ee = Math.min(Math.max(0, e), L / 2);
+  if (ee <= 1e-6) return x / L;
+  const k = 1 / (L - ee); // 가운데 구간의 df/du
+  if (x < ee) return (k * x * x) / (2 * ee);
+  if (x > L - ee) {
+    const r = L - x;
+    return 1 - (k * r * r) / (2 * ee);
+  }
+  return k * (x - ee / 2);
+}
+/** 경사로의 최대 경사(높이/수평) */
+export const rampMaxGrade = (r: Pick<RampSurface, 'length' | 'y0' | 'y1' | 'ease'>): number => Math.abs(r.y1 - r.y0) / (r.length - Math.min(Math.max(0, r.ease ?? 0), r.length / 2));
 
 const inRect = (r: Rect2, x: number, z: number): boolean => {
   const l = worldToLocal(r.x, r.z, r.rot ?? 0, x, z);
@@ -87,7 +119,7 @@ export function surfaceHeight(s: TerrainSurface, x: number, z: number): number |
     const u = dx * fx + dz * fz;
     const v = dx * -fz + dz * fx;
     if (u < 0 || u > s.length || Math.abs(v) > s.width / 2) return null;
-    return s.y0 + ((s.y1 - s.y0) * u) / s.length;
+    return s.y0 + (s.y1 - s.y0) * rampProfile(u, s.length, s.ease);
   }
   const dx = x - s.cx;
   const dz = z - s.cz;
@@ -133,4 +165,53 @@ export function levelAt(t: Terrain, y: number): TerrainLevel {
   let best = t.levels[0];
   for (const l of t.levels) if (Math.abs(l.y - y) < Math.abs(best.y - y)) best = l;
   return best;
+}
+
+/**
+ * (x,z) 에서 높이 y 위에 있는 가장 낮은 천장(데크 아랫면/추가 천장)까지의 여유. 없으면 Infinity.
+ * 차량 높이 검사용: 반환값 < 차고 이면 그 지점을 지나갈 수 없다.
+ */
+export function headroomAt(t: Terrain, x: number, z: number, y: number): number {
+  let best = Infinity;
+  for (const s of t.surfaces) {
+    if (s.kind !== 'deck') continue;
+    const h = surfaceHeight(s, x, z);
+    if (h === null) continue;
+    const bottom = h - (s.thickness ?? 0.3);
+    if (bottom > y + 0.5 && bottom - y < best) best = bottom - y;
+  }
+  for (const c of t.ceilings ?? []) {
+    if (!inRect(c.rect, x, z)) continue;
+    if (c.y > y + 0.5 && c.y - y < best) best = c.y - y;
+  }
+  return best;
+}
+
+/**
+ * 하부(배) 여유: 앞·뒤 차축 접지점을 잇는 직선과 그 사이 지면의 최소 간격에 지상고를 더한 값(m).
+ * 0 이하면 볼록한 경사 전환부(마루)에서 차체 바닥이 닿는다. 지면이 없는 표본점은 건너뛴다.
+ */
+export function underbodyGap(t: Terrain, rx: number, rz: number, yR: number, fx: number, fz: number, yF: number, clearance: number, samples = 5): number {
+  let gap = Infinity;
+  for (let i = 1; i < samples; i++) {
+    const k = i / samples;
+    const x = rx + (fx - rx) * k;
+    const z = rz + (fz - rz) * k;
+    const line = yR + (yF - yR) * k;
+    const g = groundAt(t, x, z, line, 0.9);
+    if (g === null) continue;
+    gap = Math.min(gap, line + clearance - g);
+  }
+  return gap;
+}
+
+/** 지형이 차지하는 높이 범위 (지하층 포함) */
+export function terrainYRange(t: Terrain): { min: number; max: number } {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const l of t.levels) {
+    min = Math.min(min, l.y);
+    max = Math.max(max, l.y);
+  }
+  return { min, max };
 }

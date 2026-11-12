@@ -22,7 +22,8 @@ const bounds = { minX: -36, maxX: 34, minZ: -11, maxZ: 13 };
 // 직선 경사로 R1 (1F → 2F)
 const RAMP = { x: -30, z: 0, rot: Math.PI / 2, length: 22, width: 3.8, y0: 0, y1: FLOOR_H };
 // 나선형 램프 S1 (2F → 3F): 중심, 반경, 각도(CCW), 높이
-const SP = { cx: 24, cz: 5.2, r0: 3.4, r1: 7.0, th0: -Math.PI / 2, th1: Math.PI, y0: FLOOR_H, y1: 2 * FLOOR_H };
+// v0.5.4: 폭 3.6m(r 3.4~7.0) → 4.5m(r 2.8~7.3). 이전 치수는 SUV(4.94m)가 통과할 수 있는 뒷축 반경 구간이 0.25m 뿐이었다(분석: docs/V054.md)
+const SP = { cx: 24, cz: 5.2, r0: 2.8, r1: 7.3, th0: -Math.PI / 2, th1: Math.PI, y0: FLOOR_H, y1: 2 * FLOOR_H };
 const spiralY = (th: number): number => SP.y0 + ((SP.y1 - SP.y0) * (th - SP.th0)) / (SP.th1 - SP.th0);
 
 const decks = [

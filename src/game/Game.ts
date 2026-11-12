@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { findVehicleCollision, type Collider } from '../core/geometry';
+import type { Collider } from '../core/geometry';
 import { DEG, worldToLocal } from '../core/math';
 import { loadRecords, loadSettings, mechMirrorTarget, QUALITY_PRESETS, sanitizeSettings, saveRecords, saveSettings, type Records, type Settings } from '../core/settings';
 import { removeKey } from '../core/storage';
@@ -18,6 +18,8 @@ import { MechPanel } from '../ui/mechPanel';
 import { MechControl } from '../ui/mechControl';
 import { freeSlots } from '../mech/machine';
 import { Beeper } from '../sensors/beeper';
+import { SpatialIndex } from '../core/spatial';
+import { stepVehicleInWorld } from '../vehicle/worldStep';
 import { EngineSound } from '../audio/engineSound';
 import { ENGINE_PROFILES, newEngine, powerOn, engineOn, pressStartStop, profileOf, stepEngine, type Engine } from '../vehicle/engine';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
@@ -63,7 +65,7 @@ import { substepCount,
   centerOf,
   createVehicleState,
   obbOf,
-  stepVehicle,
+ 
   type Gear,
   type VehicleInput,
   type VehicleState,
@@ -113,6 +115,11 @@ export class Game {
   /** v0.5.3: 맵에 설치된 기계식 시설들 — 시설마다 독립 상태기계/모델/셔터 충돌체. `mech`/`mechBuilt` 는 현재(가장 가까운 또는 사용 중인) 시설을 가리킨다 */
   facilities: FacilityRt[] = [];
   private activeFac: FacilityRt | null = null;
+  /** 충돌체 공간 인덱스(균일 격자) + 차량 주변 조회 캐시 */
+  readonly spatial = new SpatialIndex(8);
+  private near: Collider[] = [];
+  private nearCx = Infinity;
+  private nearCz = Infinity;
   /** 주차 현황(구역별 점유/잔여) + 추천 (0.5초마다 갱신) */
   parkAreas: AreaAvail[] = [];
   parkArea: AreaAvail | null = null;
@@ -437,6 +444,7 @@ export class Game {
     this.colliders = map.mech ? [...mapColliders(map)] : mapColliders(map); // 기계식 맵은 셔터 충돌체를 동적으로 넣고 빼므로 복사본을 쓴다
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
+    this.nearCx = this.nearCz = Infinity;
     // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이
     this.rig.ceilingFn = map.terrain ? (x, z, y) => ceilingAbove(map.terrain!, x, z, y) : map.env.indoor ? () => map.env.ceilingHeight ?? 2.9 : null;
     this.hud.minimap.setMap(map);
@@ -1011,7 +1019,7 @@ export class Game {
       critical: this.settings.sensorCritical,
       collectRays: this.settings.sensorDebug,
     };
-    this.sensorSnap = this.settings.sensorEnabled ? readSensors(pose, this.spec.sensors, this.spec.sensorHeight, this.colliders, cfg) : null;
+    this.sensorSnap = this.settings.sensorEnabled ? readSensors(pose, this.spec.sensors, this.spec.sensorHeight, this.nearColliders(), cfg) : null;
     this.updateRisk(dt);
 
     // AUTO Leveling: 속도 변화로 구한 가속도(근사)로 조사각 보정
@@ -1253,72 +1261,33 @@ export class Game {
     return true;
   }
 
+  /** 차량 주변 충돌체(공간 인덱스 조회 결과). 차량이 조회 중심에서 3m 이상 벗어나거나 충돌체 목록이 바뀌면 다시 조회한다 */
+  private nearColliders(): Collider[] {
+    const rebuilt = this.spatial.sync(this.colliders);
+    const dx = this.car.x - this.nearCx;
+    const dz = this.car.z - this.nearCz;
+    if (rebuilt || dx * dx + dz * dz > 9) {
+      this.nearCx = this.car.x;
+      this.nearCz = this.car.z;
+      // 반경 = 재조회 이동 여유(3) + 차체 도달(≈3.5) + 센서/가이드 범위(≈6) + 여유
+      this.spatial.query(this.car.x, this.car.z, 14, this.near);
+    }
+    return this.near;
+  }
+
   private physicsStep(vin: VehicleInput, dt: number): void {
     const car = this.car;
-    const px = car.x;
-    const pz = car.z;
-    const ph = car.heading;
-    const pv = car.v;
-    const py = car.y;
-    const ppitch = car.pitch;
-    const pslope = car.slope;
-    stepVehicle(car, vin, this.spec, dt);
-    // 다층/경사: 앞·뒤 차축 아래의 지면 높이로 차량 높이와 피치를 정한다 (올라설 면이 없으면 이동 불가 = 충돌처럼 처리)
-    let offGround = false;
-    if (this.map.terrain) {
-      const wb = this.spec.wheelbase;
-      const fx = car.x + Math.sin(car.heading) * wb;
-      const fz = car.z + Math.cos(car.heading) * wb;
-      const yR = groundAt(this.map.terrain, car.x, car.z, py);
-      const yF = groundAt(this.map.terrain, fx, fz, py);
-      if (yR === null || yF === null) offGround = true;
-      else {
-        car.y = yR;
-        car.pitch = Math.atan2(yF - yR, wb);
-        car.slope = Math.sin(car.pitch);
-      }
-    }
-    const c = centerOf(car, this.spec);
-    const b = this.map.bounds;
-    const outside = c.x < b.minX || c.x > b.maxX || c.z < b.minZ || c.z > b.maxZ || offGround;
-    // 기계식 맵은 평면이어도 높이 구간을 검사한다: 지상고(0.2m)보다 낮은 구조물(팔레트 가이드/정지턱)은 차체가 지나가고, 타이어 접촉은 mech.guideDrag/bump 가 처리
-    const lvl = !!(this.map.terrain || this.map.mech);
-    let hit = outside ? null : findVehicleCollision(obbOf(car, this.spec), this.colliders, lvl ? car.y : undefined, lvl ? this.spec.height : undefined);
-    if (hit && this.map.mech && !outside) {
-      // 접촉면을 따라 미끄러짐: 이전 자세에서 x 성분만 / z 성분만 이동해 보고 통과 가능하면 채택 (헤딩은 이전 값 유지). 통과 불가이면 아래에서 복원
-      const nx = car.x;
-      const nz = car.z;
-      car.heading = ph;
-      for (const [tx, tz] of [[nx, pz], [px, nz]] as const) {
-        car.x = tx;
-        car.z = tz;
-        if (!findVehicleCollision(obbOf(car, this.spec), this.colliders, lvl ? car.y : undefined, lvl ? this.spec.height : undefined)) {
-          hit = null;
-          car.v = pv * 0.995; // 접촉 마찰/충격 감쇠 (완전 정지가 아니다)
-          this.lastHitId = '';
-          break;
-        }
-      }
-      if (hit) {
-        car.x = nx;
-        car.z = nz;
-      }
-    }
-    if (hit || outside) {
-      car.x = px;
-      car.z = pz;
-      car.heading = ph;
-      car.y = py;
-      car.pitch = ppitch;
-      car.slope = pslope;
-      car.v = 0;
+    // 차량 물리 + 지형/천장/하부/충돌 제약은 vehicle/worldStep.ts (헤드리스 맵 검사와 같은 코드)
+    const r = stepVehicleInWorld(car, vin, this.spec, { terrain: this.map.terrain, bounds: this.map.bounds, colliders: this.nearColliders(), levelAware: !!(this.map.terrain || this.map.mech), slide: !!this.map.mech }, dt);
+    if (r.slid) this.lastHitId = '';
+    if (r.blocked) {
       this.contactClear = 0;
-      this.lastHitId = hit ? hit.id : 'edge'; // 테스트/디버그
-      if (!this.inContact && Math.abs(pv) > 0.1) {
+      this.lastHitId = r.hit ? r.hit.id : r.reason; // 테스트/디버그 ('edge' 경계/지면 없음, 'ceiling' 천장 높이, 'underbody' 하부 접촉)
+      if (!this.inContact && Math.abs(r.prevV) > 0.1) {
         this.inContact = true;
         this.collisions++;
         this.mission?.addCollision();
-        this.hud.toast(`충돌! (${hit ? tagName(hit.tag) : '경계'})`, 'bad');
+        this.hud.toast(`충돌! (${r.hit ? tagName(r.hit.tag) : r.reason === 'ceiling' ? '천장 높이 제한' : r.reason === 'underbody' ? '차체 하부 접촉' : '경계'})`, 'bad');
         this.hud.flash();
       } else if (!this.inContact) {
         this.inContact = true;
