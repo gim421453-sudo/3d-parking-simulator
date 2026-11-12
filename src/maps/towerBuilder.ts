@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { disposeObject } from '../core/dispose';
-import type { CircleHole, DeckSurface, RampSurface, Rect2, SpiralSurface, Terrain } from './terrain';
+import { rampProfile, type CircleHole, type DeckSurface, type RampSurface, type Rect2, type SpiralSurface, type Terrain } from './terrain';
 import type { MapData } from './types';
 
 /**
@@ -66,6 +66,34 @@ function rampMesh(s: RampSurface, mat: THREE.Material): THREE.Object3D {
   return outer;
 }
 
+/** 완화 구간이 있는 경사로: 높이 프로파일을 따라가는 띠(상면) — 지형 데이터(surfaceHeight)와 같은 식(rampProfile)을 쓴다 */
+function easedRampMesh(s: RampSurface, mat: THREE.Material): THREE.Mesh {
+  const n = Math.max(12, Math.ceil(s.length / 1.0));
+  const fx = Math.sin(s.rot);
+  const fz = Math.cos(s.rot);
+  // 폭 방향(로컬 +x = 왼쪽): (cos, -sin)
+  const lx = Math.cos(s.rot);
+  const lz = -Math.sin(s.rot);
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    const u = (s.length * i) / n;
+    const y = s.y0 + (s.y1 - s.y0) * rampProfile(u, s.length, s.ease);
+    for (const side of [-1, 1]) pos.push(s.x + fx * u + lx * side * (s.width / 2), y, s.z + fz * u + lz * side * (s.width / 2));
+    if (i > 0) {
+      const a = (i - 1) * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat);
+  m.receiveShadow = true;
+  return m;
+}
+
 function spiralMesh(s: SpiralSurface, mat: THREE.Material): THREE.Mesh {
   const n = Math.max(24, Math.ceil(Math.abs(s.th1 - s.th0) / 0.1));
   const pos: number[] = [];
@@ -97,7 +125,7 @@ export function buildTowerVisual(map: MapData, terrain: Terrain): TowerVisual {
   const decks: TowerVisual['decks'] = [];
   for (const s of terrain.surfaces) {
     if (s.kind === 'deck') {
-      if (s.y <= 0.001) continue; // 1F 는 맵의 지면(surfaces)이 담당
+      if (Math.abs(s.y) <= 0.001 && !s.render) continue; // 지상(y=0)은 맵의 지면(surfaces)이 담당 — 지하층 지붕처럼 render 가 지정된 것만 슬래브로 그린다
       const m = new THREE.Mesh(deckGeometry(s), concrete);
       m.receiveShadow = true;
       m.castShadow = true;
@@ -105,7 +133,7 @@ export function buildTowerVisual(map: MapData, terrain: Terrain): TowerVisual {
       group.add(m);
       decks.push({ mesh: m, y: s.y });
     } else if (s.kind === 'ramp') {
-      const o = rampMesh(s, ramp);
+      const o = s.ease ? easedRampMesh(s, ramp) : rampMesh(s, ramp);
       o.name = `Ramp_${s.id}`;
       group.add(o);
     } else {

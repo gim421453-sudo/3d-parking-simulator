@@ -194,7 +194,9 @@ export class MechController {
     this.dip += (target - this.dip) * Math.min(1, dt * 14);
     this.kickT += dt;
     const osc = this.kickT < 0.6 ? this.kick * Math.exp(-this.kickT * 9) * Math.cos(this.kickT * 38) : 0;
-    if (!m.locked) {
+    // 승강장 위(정지 홈 근처)에 있을 때만 차체 피치를 덮어쓴다. 그 밖(도로/경사로)에서는 지형이 정한 피치/경사를 건드리지 않는다
+    // (v0.5.4: 통합 맵에서 경사로 위 차량의 피치가 0 으로 지워지던 문제 수정)
+    if (!m.locked && (onLine || this.dip > 1e-4 || osc !== 0)) {
       car.pitch = sign * Math.atan2(this.dip, spec.wheelbase) + osc;
       car.slope = 0;
     }

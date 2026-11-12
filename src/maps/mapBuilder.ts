@@ -18,6 +18,8 @@ export interface BuiltMap {
   textures: TextureSet;
   setTarget(slot: ParkingSlot | null): void;
   /** 다층 맵 성능: 플레이어 높이에서 ±maxDy 밖 층의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 반환: 숨긴 개수 */
+  /** 0 = 야외, 1 = 실내 구역(지하층) 안. 주변광/태양광을 줄인다 */
+  setIndoorFactor(f: number): void;
   setLevelVisibility(playerY: number, maxDy?: number): number;
   /** 통합 맵 성능: 플레이어 (x,z) 에서 반경 밖의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 숨긴 개수 반환 */
   setViewCenter(x: number, z: number, radius: number): number;
@@ -50,11 +52,49 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
 
   // ---- 지면 ----
   const b = map.bounds;
+  // 지면 구멍(지하 진입 경사로 트렌치 등): 구멍과 겹치는 지면은 구멍을 뺀 도형으로 만든다
+  const holes = map.groundHoles ?? [];
+  const holedPlane = (cx: number, cz: number, w: number, d: number, uvScale: number): THREE.BufferGeometry => {
+    const hit = holes.filter((h) => Math.abs(h.x - cx) < (h.w + w) / 2 && Math.abs(h.z - cz) < (h.d + d) / 2);
+    if (!hit.length) {
+      const g = new THREE.PlaneGeometry(w, d);
+      scaleUV(g, w / uvScale, d / uvScale);
+      g.rotateX(-Math.PI / 2);
+      g.translate(cx, 0, cz);
+      return g;
+    }
+    // Shape 좌표 (x, -z) → rotateX(-90°) 후 월드 (x, 0, z)
+    const shape = new THREE.Shape();
+    shape.moveTo(cx - w / 2, -(cz - d / 2));
+    shape.lineTo(cx + w / 2, -(cz - d / 2));
+    shape.lineTo(cx + w / 2, -(cz + d / 2));
+    shape.lineTo(cx - w / 2, -(cz + d / 2));
+    shape.closePath();
+    for (const h of hit) {
+      // 구멍을 지면 도형 안으로 자른다(가장자리에 걸친 구멍 대비 약간 안쪽)
+      const x0 = Math.max(cx - w / 2 + 0.001, h.x - h.w / 2);
+      const x1 = Math.min(cx + w / 2 - 0.001, h.x + h.w / 2);
+      const z0 = Math.max(cz - d / 2 + 0.001, h.z - h.d / 2);
+      const z1 = Math.min(cz + d / 2 - 0.001, h.z + h.d / 2);
+      if (x1 <= x0 || z1 <= z0) continue;
+      const path = new THREE.Path();
+      path.moveTo(x0, -z0);
+      path.lineTo(x0, -z1);
+      path.lineTo(x1, -z1);
+      path.lineTo(x1, -z0);
+      path.closePath();
+      shape.holes.push(path);
+    }
+    const g = new THREE.ShapeGeometry(shape);
+    const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+    const pos = g.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / uvScale, pos.getY(i) / uvScale);
+    g.rotateX(-Math.PI / 2);
+    return g;
+  };
   if (!indoor) {
-    const g = track(new THREE.PlaneGeometry(600, 600));
-    scaleUV(g, 150, 150);
+    const g = track(holedPlane(0, 0, 600, 600, 4));
     const outer = new THREE.Mesh(g, mats.grass);
-    outer.rotation.x = -Math.PI / 2;
     outer.position.y = -0.02;
     outer.receiveShadow = true;
     group.add(outer);
@@ -63,15 +103,15 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   for (const s of map.surfaces) {
     yOff += 0.0008;
     const raised = s.kind === 'sidewalk';
-    const geo = raised ? new THREE.BoxGeometry(s.w, 0.12, s.d) : new THREE.PlaneGeometry(s.w, s.d);
-    track(geo);
-    scaleUV(geo, s.w / 4, s.d / 4);
-    const m = new THREE.Mesh(geo, mats[s.kind]);
+    let m: THREE.Mesh;
     if (raised) {
+      const geo = track(new THREE.BoxGeometry(s.w, 0.12, s.d));
+      scaleUV(geo, s.w / 4, s.d / 4);
+      m = new THREE.Mesh(geo, mats[s.kind]);
       m.position.set(s.x, 0.06 + yOff, s.z);
     } else {
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(s.x, yOff + (s.kind === 'grass' ? 0 : 0.004), s.z);
+      m = new THREE.Mesh(track(holedPlane(s.x, s.z, s.w, s.d, 4)), mats[s.kind]);
+      m.position.y = yOff + (s.kind === 'grass' ? 0 : 0.004);
     }
     m.receiveShadow = true;
     group.add(m);
@@ -255,6 +295,9 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
 
   // ---- 조명 ----
   let sun: THREE.DirectionalLight | null = null;
+  let hemi: THREE.HemisphereLight | null = null;
+  const zoneLights: THREE.PointLight[] = [];
+  const baseAmbient = map.env.ambient + 0.35;
   const sky = new THREE.Color(map.env.sky);
   if (indoor) {
     group.add(new THREE.HemisphereLight(0xa9b8cc, 0x3a3d42, 0.8));
@@ -281,7 +324,30 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       group.add(pl);
     }
   } else {
-    group.add(new THREE.HemisphereLight(0xcfe6ff, 0x5a6b4a, map.env.ambient + 0.35));
+    hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a6b4a, map.env.ambient + 0.35);
+    group.add(hemi);
+    // 야외 맵 안의 실내 구역(지하층): 천장 조명 패널(발광) + 일부만 실제 광원
+    const zl = (map.ceilingLights ?? []).filter((p) => p.y !== undefined);
+    if (zl.length) {
+      const panelGeo = track(new THREE.BoxGeometry(1.6, 0.05, 0.3));
+      const panelMat = track(new THREE.MeshBasicMaterial({ color: 0xf2f6ff }));
+      const im = new THREE.InstancedMesh(panelGeo, panelMat, zl.length);
+      zl.forEach((p, i) => {
+        tmp.position.set(p.x, (p.y as number) - 0.36, p.z);
+        tmp.updateMatrix();
+        im.setMatrixAt(i, tmp.matrix);
+      });
+      group.add(im);
+      const every = Math.max(1, Math.ceil(zl.length / 6));
+      zl.forEach((p, i) => {
+        if (i % every !== 0) return;
+        const pl = new THREE.PointLight(0xe6eeff, 9, 20, 1.4);
+        pl.visible = false; // 실내 구역에 들어갔을 때만 켠다 (setIndoorFactor)
+        pl.position.set(p.x, (p.y as number) - 0.7, p.z);
+        group.add(pl);
+        zoneLights.push(pl);
+      });
+    }
     sun = new THREE.DirectionalLight(0xfff3dc, 2.4);
     sun.position.set(30, 50, 20);
     sun.castShadow = q.shadows;
@@ -311,6 +377,13 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
 
   const result: BuiltMap = {
     group,
+    setIndoorFactor(f) {
+      // 지하/실내 구역 안: 하늘빛과 태양광을 줄이고(지붕이 가린다) 천장 조명만 남긴다
+      const k = Math.min(1, Math.max(0, f));
+      if (hemi) hemi.intensity = baseAmbient * (1 - 0.8 * k);
+      if (sun) sun.intensity = 2.4 * (1 - 0.95 * k);
+      for (const l of zoneLights) l.visible = k > 0.02;
+    },
     setLevelVisibility(playerY, maxDy = 1.7) {
       let hidden = 0;
       for (const l of levelObjects) {

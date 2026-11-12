@@ -1,4 +1,23 @@
 import type { MechFacilityConfig } from '../mech/facility';
+import type { Rect2 } from './terrain';
+
+/** 도로 구간: 중심선 a→b (직선), 폭, 통행 방향. y0/y1 은 경사로(지하 진입 등)의 시작/끝 높이 */
+export interface RoadSeg {
+  id: string;
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  width: number;
+  /** 차로 수(양방향 합계) */
+  lanes: number;
+  /** 일방통행이면 a→b 방향만 */
+  oneway?: boolean;
+  kind: 'avenue' | 'street' | 'access' | 'ramp';
+  y0?: number;
+  y1?: number;
+  name?: string;
+}
 import type { Collider } from '../core/geometry';
 import type { MissionDef, ParkingSlot } from '../mission/parking';
 import type { Terrain } from './terrain';
@@ -89,8 +108,14 @@ export interface MapData {
   obstacles: ObstacleDef[];
   slots: MapSlot[];
   missions: MapMission[];
-  /** 실내 점광원/천장 조명 위치 */
-  ceilingLights?: { x: number; z: number }[];
+  /** 실내 점광원/천장 조명 위치 (y = 조명 높이, 생략하면 env.ceilingHeight) */
+  ceilingLights?: { x: number; z: number; y?: number }[];
+  /** 지면(y=0)에 뚫린 구멍: 지하 진입 경사로 트렌치 등. 지면 메시와 지형(ground deck)이 같은 구멍을 가진다 */
+  groundHoles?: Rect2[];
+  /** 야외 맵 안의 실내 구역(지하층 등): 이 안에서는 어둡게(자동 전조등/주변광 감소) */
+  indoorZones?: { id: string; rect: Rect2; yMin: number; yMax: number }[];
+  /** 도로 중심선 데이터(시각/내비 가중/자동 검사용) */
+  roads?: RoadSeg[];
 }
 
 export function obstacleToCollider(o: ObstacleDef): Collider {

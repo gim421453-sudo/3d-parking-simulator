@@ -21,6 +21,8 @@ export interface DeckSurface {
   y: number;
   holes?: (Rect2 | CircleHole)[];
   thickness?: number;
+  /** 지상(y≈0) 데크는 보통 맵의 지면이 그리므로 슬래브를 만들지 않는다. true 면 강제로 슬래브를 그린다(지하층 지붕 등) */
+  render?: boolean;
 }
 export interface CircleHole {
   cx: number;

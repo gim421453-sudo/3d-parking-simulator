@@ -117,6 +117,8 @@ export class Game {
   private activeFac: FacilityRt | null = null;
   /** 충돌체 공간 인덱스(균일 격자) + 차량 주변 조회 캐시 */
   readonly spatial = new SpatialIndex(8);
+  /** 실내 구역(지하층) 진입 정도 0..1 */
+  indoorK = 0;
   private near: Collider[] = [];
   private nearCx = Infinity;
   private nearCz = Infinity;
@@ -445,6 +447,7 @@ export class Game {
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
     this.nearCx = this.nearCz = Infinity;
+    this.indoorK = 0;
     // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이
     this.rig.ceilingFn = map.terrain ? (x, z, y) => ceilingAbove(map.terrain!, x, z, y) : map.env.indoor ? () => map.env.ceilingHeight ?? 2.9 : null;
     this.hud.minimap.setMap(map);
@@ -1428,7 +1431,7 @@ export class Game {
   }
 
   private currentLighting() {
-    return computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor });
+    return computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor || this.indoorK > 0.5 });
   }
 
   /** 수동 카메라 순환: 현재 진행 방향 카메라가 가장 먼저 (R 에서 전방카메라가 먼저 나오는 일이 없게) */
@@ -1940,6 +1943,15 @@ export class Game {
     else if (this.map.mech) {
       // 단일 맵: 전용 맵(mechpark)은 항상, 그 밖의 맵(outdoor 등)은 시설 입구 앞 구역에서만 기계식 패널을 보인다
       this.mechPanel.setVisible(this.map.id === 'mechpark' || this.facilities.some((f) => { const l = toLocalXZ(f.frame, this.car.x, this.car.z); return l.x > STATION.doorX - 28 && l.x < STATION.palletX + 14 && Math.abs(l.z) < 20; }));
+    }
+    // 야외 맵 안의 실내 구역(지하 B1 등): 들어가면 주변광을 서서히 줄이고 자동 전조등 조건(어두움)을 켠다
+    if (this.map.indoorZones) {
+      const zin = this.map.indoorZones.some((q) => this.car.y >= q.yMin && this.car.y <= q.yMax && Math.abs(this.car.x - q.rect.x) <= q.rect.w / 2 && Math.abs(this.car.z - q.rect.z) <= q.rect.d / 2);
+      const target = zin ? 1 : 0;
+      if (this.indoorK !== target) {
+        this.indoorK += Math.sign(target - this.indoorK) * Math.min(Math.abs(target - this.indoorK), 0.03);
+        this.built?.setIndoorFactor(this.indoorK);
+      }
     }
     if (this.map.terrain) {
       const lv = levelAt(this.map.terrain, this.car.y);
