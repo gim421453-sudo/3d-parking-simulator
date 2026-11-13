@@ -102,7 +102,7 @@ async function waitServer(url, tries = 50) {
   await shot('03-vehicles');
   await page.click('#back');
   await page.click('#m-map');
-  check('맵 선택 화면 (기존 4종 + v0.4.9 신규 4종 + v0.5.0 기계식 + v0.5.2 통합 맵 = 10개)', (await page.locator('#maps .option').count()) === 10);
+  { const names = await page.locator('#maps .option').allTextContents(); check('맵 선택 화면 (기존 10개 + v0.5.4 정비소·골목길·도시형 검증 구역 = 13개, 기존 맵은 모두 남아 있음)', names.length === 13 && ['일반 주차장', '지하 주차장', '야외 주차장', '다층 주차타워', '기계식 주차타워', '통합 주차', '나선형', '정비소', '골목길', '도시형'].every((n) => names.some((t) => t.includes(n))), names.map((t) => t.slice(0, 12)).join(' | ')); }
   await sleep(400);
   await shot('04-maps');
   await page.click('#back');
