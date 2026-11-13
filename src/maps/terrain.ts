@@ -141,7 +141,7 @@ export function surfaceHeight(s: TerrainSurface, x: number, z: number): number |
  */
 export function groundAt(t: Terrain, x: number, z: number, yHint: number, maxStep = 0.7): number | null {
   let best: number | null = null;
-  for (const s of t.surfaces) {
+  for (const s of surfacesNear(t, x, z)) {
     const h = surfaceHeight(s, x, z);
     if (h === null) continue;
     if (Math.abs(h - yHint) <= maxStep && (best === null || h > best)) best = h;
@@ -149,10 +149,81 @@ export function groundAt(t: Terrain, x: number, z: number, yHint: number, maxSte
   return best;
 }
 
+// ---- 지형 면 공간 인덱스 (v0.5.4): 대형 맵에서 (x,z) 주변의 면만 검사한다 ----
+const T_CELL = 16;
+interface TIndex {
+  n: number;
+  cells: Map<number, TerrainSurface[]>;
+  /** 격자에 넣기엔 너무 큰 면(전체 지면 등)은 항상 검사 */
+  big: TerrainSurface[];
+}
+const tIndex = new WeakMap<Terrain, TIndex>();
+const tKey = (ix: number, iz: number): number => (ix + 32768) * 65536 + (iz + 32768);
+function surfaceAabb(s: TerrainSurface): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  if (s.kind === 'deck') {
+    const r = s.rect;
+    const c = Math.abs(Math.cos(r.rot ?? 0));
+    const sn = Math.abs(Math.sin(r.rot ?? 0));
+    const ex = (r.w / 2) * c + (r.d / 2) * sn;
+    const ez = (r.w / 2) * sn + (r.d / 2) * c;
+    return { minX: r.x - ex, maxX: r.x + ex, minZ: r.z - ez, maxZ: r.z + ez };
+  }
+  if (s.kind === 'ramp') {
+    const fx = Math.sin(s.rot);
+    const fz = Math.cos(s.rot);
+    const ex = s.x + fx * s.length;
+    const ez = s.z + fz * s.length;
+    const hw = s.width / 2;
+    return { minX: Math.min(s.x, ex) - hw, maxX: Math.max(s.x, ex) + hw, minZ: Math.min(s.z, ez) - hw, maxZ: Math.max(s.z, ez) + hw };
+  }
+  return { minX: s.cx - s.r1, maxX: s.cx + s.r1, minZ: s.cz - s.r1, maxZ: s.cz + s.r1 };
+}
+function buildTIndex(t: Terrain): TIndex {
+  const idx: TIndex = { n: t.surfaces.length, cells: new Map(), big: [] };
+  for (const s of t.surfaces) {
+    const b = surfaceAabb(s);
+    const x0 = Math.floor(b.minX / T_CELL);
+    const x1 = Math.floor(b.maxX / T_CELL);
+    const z0 = Math.floor(b.minZ / T_CELL);
+    const z1 = Math.floor(b.maxZ / T_CELL);
+    if ((x1 - x0 + 1) * (z1 - z0 + 1) > 64) {
+      idx.big.push(s);
+      continue;
+    }
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iz = z0; iz <= z1; iz++) {
+        const k = tKey(ix, iz);
+        const a = idx.cells.get(k);
+        if (a) a.push(s);
+        else idx.cells.set(k, [s]);
+      }
+    }
+  }
+  return idx;
+}
+const NO_SURF: TerrainSurface[] = [];
+/** (x,z) 를 덮을 수 있는 면 후보. 면이 적은 지형(≤12)은 인덱스 없이 전체를 돌려준다 */
+export function surfacesNear(t: Terrain, x: number, z: number): readonly TerrainSurface[] {
+  if (t.surfaces.length <= 12) return t.surfaces;
+  let idx = tIndex.get(t);
+  if (!idx || idx.n !== t.surfaces.length) {
+    idx = buildTIndex(t);
+    tIndex.set(t, idx);
+  }
+  const cell = idx.cells.get(tKey(Math.floor(x / T_CELL), Math.floor(z / T_CELL))) ?? NO_SURF;
+  if (!idx.big.length) return cell;
+  if (!cell.length) return idx.big;
+  scratchSurf.length = 0;
+  for (const s of idx.big) scratchSurf.push(s);
+  for (const s of cell) scratchSurf.push(s);
+  return scratchSurf;
+}
+const scratchSurf: TerrainSurface[] = [];
+
 /** (x,z) 위쪽으로 가장 가까운 층 바닥 아랫면 높이 (천장). 없으면 Infinity. 카메라 높이 제한용 */
 export function ceilingAbove(t: Terrain, x: number, z: number, y: number): number {
   let best = Infinity;
-  for (const s of t.surfaces) {
+  for (const s of surfacesNear(t, x, z)) {
     if (s.kind !== 'deck') continue;
     const h = surfaceHeight(s, x, z);
     if (h === null) continue;
@@ -175,7 +246,7 @@ export function levelAt(t: Terrain, y: number): TerrainLevel {
  */
 export function headroomAt(t: Terrain, x: number, z: number, y: number): number {
   let best = Infinity;
-  for (const s of t.surfaces) {
+  for (const s of surfacesNear(t, x, z)) {
     if (s.kind !== 'deck') continue;
     const h = surfaceHeight(s, x, z);
     if (h === null) continue;

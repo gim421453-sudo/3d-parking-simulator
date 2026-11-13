@@ -19,6 +19,7 @@ import { MechControl } from '../ui/mechControl';
 import { freeSlots } from '../mech/machine';
 import { Beeper } from '../sensors/beeper';
 import { SpatialIndex } from '../core/spatial';
+import { VIEW_RADIUS } from '../world/tiles';
 import { stepVehicleInWorld } from '../vehicle/worldStep';
 import { EngineSound } from '../audio/engineSound';
 import { ENGINE_PROFILES, newEngine, powerOn, engineOn, pressStartStop, profileOf, stepEngine, type Engine } from '../vehicle/engine';
@@ -442,7 +443,11 @@ export class Game {
       this.activeFac = this.facilities[0] ?? null;
     }
     this.scene.background = new THREE.Color(map.env.sky);
-    this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : new THREE.Fog(map.env.sky, 100, 320);
+    // 대형 맵(통합 맵): 먼 타일은 그리지 않으므로 안개 끝을 가시 반경에 맞춰 경계가 드러나지 않게 한다
+    const vr = VIEW_RADIUS[this.settings.quality].load;
+    const bigMap = (map.bounds.maxX - map.bounds.minX) * (map.bounds.maxZ - map.bounds.minZ) > 40000;
+    this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : bigMap ? new THREE.Fog(map.env.sky, vr * 0.5, vr * 1.02) : new THREE.Fog(map.env.sky, 100, 320);
+    this.zoneAcc = 1; // 첫 프레임에 타일 가시성 갱신
     this.colliders = map.mech ? [...mapColliders(map)] : mapColliders(map); // 기계식 맵은 셔터 충돌체를 동적으로 넣고 빼므로 복사본을 쓴다
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
@@ -1932,7 +1937,7 @@ export class Game {
       this.zoneAcc += 1 / 60;
       if (this.zoneAcc > 0.4) {
         this.zoneAcc = 0;
-        this.built?.setViewCenter(this.car.x, this.car.z, 140);
+        this.built?.setViewCenter(this.car.x, this.car.z, VIEW_RADIUS[this.settings.quality].load); // 화질별 타일/차량 모델 가시 반경
         const zn = zones.find((z) => this.car.x >= z.bounds.minX - 2 && this.car.x <= z.bounds.maxX + 2 && this.car.z >= z.bounds.minZ - 2 && this.car.z <= z.bounds.maxZ + 2) ?? null;
         if (zn?.id !== this.zoneId) {
           this.zoneId = zn?.id ?? null;

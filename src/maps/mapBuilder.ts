@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TileStreamer, WorldGrid } from '../world/tiles';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createCarModel } from '../vehicle/carModel';
 import { parkedSpec } from '../vehicle/spec';
@@ -18,6 +19,8 @@ export interface BuiltMap {
   textures: TextureSet;
   setTarget(slot: ParkingSlot | null): void;
   /** 다층 맵 성능: 플레이어 높이에서 ±maxDy 밖 층의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 반환: 숨긴 개수 */
+  /** 타일 그룹 수 / 현재 보이는 수 (대형 맵이 아니면 0/0) */
+  tileStats(): { tiles: number; visible: number };
   /** 0 = 야외, 1 = 실내 구역(지하층) 안. 주변광/태양광을 줄인다 */
   setIndoorFactor(f: number): void;
   setLevelVisibility(playerY: number, maxDy?: number): number;
@@ -188,6 +191,26 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   type CarEntry = { obj: THREE.Object3D; y: number; x: number; z: number; lv: boolean; dv: boolean };
   const levelObjects: CarEntry[] = [];
   const allCars: CarEntry[] = [];
+  // ---- 타일 그룹(대형 맵): 고정 구조물 메시를 48m 타일별 그룹에 넣고, 차량에서 먼 타일은 통째로 숨긴다(충돌/센서는 데이터 기반이라 무관) ----
+  const large = (b.maxX - b.minX) * (b.maxZ - b.minZ) > 40000;
+  const wgrid = new WorldGrid(48);
+  const tileGroups = new Map<string, THREE.Group>();
+  const addAt = (x: number, z: number, ...objs: THREE.Object3D[]): void => {
+    if (!large) {
+      group.add(...objs);
+      return;
+    }
+    const k = wgrid.keyOf(x, z);
+    let tg = tileGroups.get(k);
+    if (!tg) {
+      tg = new THREE.Group();
+      tg.name = `Tile_${k}`;
+      tileGroups.set(k, tg);
+      group.add(tg);
+    }
+    tg.add(...objs);
+  };
+  let streamer: TileStreamer | null = null;
   for (const o of map.obstacles) {
     switch (o.tag) {
       case 'cone':
@@ -205,7 +228,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         pole.castShadow = true;
         const head = new THREE.Mesh(lampHeadGeo, lampGlow);
         head.position.set(o.x + 0.45, 6.45, o.z);
-        group.add(pole, head);
+        addAt(o.x, o.z, pole, head);
         break;
       }
       case 'tree': {
@@ -215,7 +238,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         const c = new THREE.Mesh(crownGeo, crownMat);
         c.position.set(o.x, 0, o.z);
         c.castShadow = true;
-        group.add(t, c);
+        addAt(o.x, o.z, t, c);
         break;
       }
       case 'car': {
@@ -263,13 +286,13 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         m.rotation.y = o.rot ?? 0;
         m.castShadow = o.h > 0.3;
         m.receiveShadow = true;
-        group.add(m);
+        addAt(o.x, o.z, m);
         if (o.tag === 'pillar') {
           // 하단 경고 띠
           const band = new THREE.Mesh(boxGeo, bandMat);
           band.scale.set((o.w ?? 1) + 0.02, 0.7, (o.d ?? 1) + 0.02);
           band.position.set(o.x, (o.y0 ?? 0) + 0.35, o.z);
-          group.add(band);
+          addAt(o.x, o.z, band);
         }
       }
     }
@@ -377,6 +400,9 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
 
   const result: BuiltMap = {
     group,
+    tileStats() {
+      return { tiles: tileGroups.size, visible: [...tileGroups.values()].filter((g) => g.visible).length };
+    },
     setIndoorFactor(f) {
       // 지하/실내 구역 안: 하늘빛과 태양광을 줄이고(지붕이 가린다) 천장 조명만 남긴다
       const k = Math.min(1, Math.max(0, f));
@@ -396,6 +422,16 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     },
     setViewCenter(x, z, radius) {
       let hidden = 0;
+      // 타일 스트리밍: 로드 반경 = radius, 언로드 반경 = radius + 25m (경계에서 깜박이지 않게)
+      if (large) {
+        if (!streamer || streamer.loadRadius !== radius) {
+          streamer = new TileStreamer(wgrid, radius, radius + 25, new Set(tileGroups.keys()));
+          for (const tg of tileGroups.values()) tg.visible = false;
+        }
+        const u = streamer.update(x, z);
+        for (const k of u.loaded) tileGroups.get(k)!.visible = true;
+        for (const k of u.unloaded) tileGroups.get(k)!.visible = false;
+      }
       const r2 = radius * radius;
       for (const l of allCars) {
         l.dv = (l.x - x) ** 2 + (l.z - z) ** 2 <= r2;

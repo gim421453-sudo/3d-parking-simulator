@@ -298,3 +298,31 @@ describe('나선 램프 실제 주행(헤드리스, 게임과 같은 물리·충
     }
   });
 });
+
+import { surfacesNear } from '../src/maps/terrain';
+describe('지형 면 공간 인덱스', () => {
+  it('megapark: 인덱스로 구한 지면/천장 높이가 전수 검사와 같다 (무작위 3000점 × 높이 4종)', () => {
+    const t = getMap('megapark').terrain!;
+    const brute = (x: number, z: number, yHint: number, maxStep = 0.7): number | null => {
+      let best: number | null = null;
+      for (const s of t.surfaces) {
+        const h = surfaceHeight(s, x, z);
+        if (h === null) continue;
+        if (Math.abs(h - yHint) <= maxStep && (best === null || h > best)) best = h;
+      }
+      return best;
+    };
+    let seed = 777;
+    const rnd = (): number => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff), seed / 0x7fffffff);
+    const b = getMap('megapark').bounds;
+    let cand = 0;
+    for (let i = 0; i < 3000; i++) {
+      const x = b.minX + rnd() * (b.maxX - b.minX);
+      const z = b.minZ + rnd() * (b.maxZ - b.minZ);
+      const y = [0, 3.2, 6.4, -3.2][i % 4];
+      expect(groundAt(t, x, z, y)).toBe(brute(x, z, y));
+      cand += surfacesNear(t, x, z).length;
+    }
+    expect(cand / 3000).toBeLessThan(t.surfaces.length * 0.25);
+  });
+});
