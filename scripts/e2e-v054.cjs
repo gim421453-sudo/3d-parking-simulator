@@ -170,6 +170,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   // ================= 4. 정비소: 2주식 리프트 =================
   await loadMap('garage', 'gar-lift', 'sedan');
   const L = await Y(() => window.__game.lifts[0].cfg);
+  await put(L.x, -14 + 1.4, 0, 0); // 시작 위치(문 앞 진입선)에서 D 단으로 출발
   await Y(([L]) => window.__ap([[L.x, -8], [L.x, 0], [L.x, L.z]], 1.2, 2.5), [L]);
   const inBay = await until(([L]) => { const G = window.__game; const off = G.spec.length / 2 - G.spec.rearOverhang; const cz = G.car.z + Math.cos(G.car.heading) * off; return cz > L.z - 0.12; }, [L], 300000);
   await Y(() => window.__brake());
