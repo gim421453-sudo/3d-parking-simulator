@@ -4,6 +4,8 @@ import type { MapData, MapSlot } from '../maps/types';
 export interface Pt {
   x: number;
   z: number;
+  /** 높이(다층 경로). 평면 맵은 생략 */
+  y?: number;
 }
 export interface Route {
   points: Pt[];

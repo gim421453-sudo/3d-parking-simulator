@@ -490,10 +490,11 @@ export class Game {
     this.viewGate = false;
     this.infoOut = { floatingVisible: false, content: 'nav', override: null, wantVisible: false, reason: '', expanded: false, forcedContent: null };
     this.viewOut = { view: 'rear', auto: false, reason: '' };
+    this.nav.setVehicle(this.spec);
     this.nav.setMap(map);
     this.destIndex = 0;
     const sp0 = this.missionDef?.spawn ?? map.spawn;
-    this.nav.setDestination(this.targetSlot, { x: sp0.x, z: sp0.z });
+    this.nav.setDestination(this.targetSlot, { x: sp0.x, z: sp0.z, y: sp0.y ?? 0 });
     this.navState = this.nav.state;
 
     const sp = this.missionDef?.spawn ?? map.spawn;
@@ -829,7 +830,7 @@ export class Game {
         const slots = this.selectableSlots();
         if (slots.length) {
           this.destIndex = (this.destIndex + 1) % slots.length;
-          this.nav.setDestination(slots[this.destIndex], this.poseNow());
+          this.nav.setDestination(slots[this.destIndex], { x: this.car.x, z: this.car.z, y: this.car.y });
           this.hud.toast(`목적지: ${slots[this.destIndex].id}`);
         }
         break;
@@ -1058,7 +1059,7 @@ export class Game {
     );
     const infoSet: InfoSettings = { autoShow: this.settings.infoAutoShow, autoHide: this.settings.infoAutoHide, autoHideSec: this.settings.infoAutoHideSec };
     this.infoOut = this.info.update({ dt, gear: this.car.gear, parkingActive: this.assistOut.active, firstPerson: this.rig.mode === 'driver' }, infoSet);
-    this.navState = this.nav.update(dt, { x: pose.x, z: pose.z });
+    this.navState = this.nav.update(dt, { x: pose.x, z: pose.z, y: this.car.y });
 
     // 경고음
     this.beeper.enabled = this.settings.sensorSound && this.settings.sensorEnabled;
@@ -1154,6 +1155,7 @@ export class Game {
     }
     this.spec = spec;
     this.engine = newEngine(profileOf(spec), engineRunning);
+    this.nav.setVehicle(spec);
     const next = model ?? createCarModel(spec, { blobTexture: this.built!.textures.blob });
     this.model = next;
     if (!next.root.parent) this.scene.add(next.root);
