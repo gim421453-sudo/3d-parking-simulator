@@ -19,6 +19,7 @@ import { MechControl } from '../ui/mechControl';
 import { freeSlots } from '../mech/machine';
 import { Beeper } from '../sensors/beeper';
 import { SpatialIndex } from '../core/spatial';
+import { newSignalCancel, updateSignalCancel } from '../vehicle/signalCancel';
 import { liftBlocksDriving, liftChecklist, liftDown, liftStop, liftUp, liftedPose, newLift, stepLift, type LiftCarInput, type LiftCheck, type LiftConfig, type LiftState } from '../service/lift';
 import { buildLift, type LiftBuilt } from '../service/liftBuilder';
 import { LiftPanel } from '../ui/liftPanel';
@@ -225,6 +226,10 @@ export class Game {
   private accelF = 0;
   private sigLeft = false;
   private sigRight = false;
+  /** 방향지시등 자동 해제(핸들 180° 이상 돌린 뒤 풀릴 때) */
+  private sigCancel = newSignalCancel();
+  /** 자동 해제된 횟수(테스트/디버그) */
+  sigAutoCancels = 0;
   private hazard = false;
   private blinkOn = false;
   private blinkT = 0;
@@ -1106,6 +1111,11 @@ export class Game {
 
     this.updateParking(dt);
 
+    // 방향지시등 자동 해제: 켠 방향으로 핸들을 180° 이상 돌렸다가 풀리면 끈다 (핸들 각도 = 조향각 비율 × 540°, 왼쪽 +)
+    if (updateSignalCancel(this.sigCancel, this.sigLeft ? 'left' : this.sigRight ? 'right' : null, (this.car.steer / this.spec.maxSteer) * WHEEL_LOCK_DEG)) {
+      this.sigLeft = this.sigRight = false;
+      this.sigAutoCancels++;
+    }
     // 깜빡이
     this.blinkT += dt;
     if (this.blinkT >= 0.38) {
@@ -1474,7 +1484,8 @@ export class Game {
     this.built?.animate(this.time);
 
     // 주차 보조 디스플레이: 실제 3D 장면을 후방/전방 카메라로 렌더링해 패널에 표시
-    const open = this.state !== 'menu' && this.infoOut.floatingVisible;
+    // 시동 OFF: 인포테인먼트(내비/주차 보조) 화면 전원이 꺼진다 — 플로팅 패널을 닫고 실내 화면은 검게
+    const open = this.state !== 'menu' && this.infoOut.floatingVisible && this.screensOn;
     const firstPerson = this.rig.mode === 'driver';
     const parking = this.infoOut.content === 'parking';
     this.hud.setAssistOpen(open);
@@ -1924,6 +1935,11 @@ export class Game {
     drawNavMap(c.getContext('2d')!, c.width, c.height, this.map, pose, this.navState, this.spec);
   }
 
+  /** 차량 화면(계기판/센터 디스플레이/플로팅 인포테인먼트) 전원: 시동이 완전히 꺼진(OFF) 동안에는 꺼진다. 시동 중/정지 중에는 켜져 있다 */
+  get screensOn(): boolean {
+    return this.engine.state !== 'OFF';
+  }
+
   /** 1인칭 실내 센터 디스플레이/계기판 갱신 (설정 FPS) */
   private drawCabin(dt: number): void {
     const cab = this.model?.cabin;
@@ -1931,6 +1947,17 @@ export class Game {
     this.cabinAcc += dt;
     if (this.cabinAcc < 1 / this.settings.cabinFps) return;
     this.cabinAcc = 0;
+    if (!this.screensOn) {
+      // 시동 OFF: 계기판/센터 디스플레이 꺼짐(검은 화면). 터치 영역도 없다
+      for (const scr of [cab.center, cab.cluster]) {
+        scr.ctx.fillStyle = '#020304';
+        scr.ctx.fillRect(0, 0, scr.canvas.width, scr.canvas.height);
+        scr.texture.needsUpdate = true;
+      }
+      this.cabinHits = [];
+      this.lastClusterData = null;
+      return;
+    }
     const c = this.car;
     const slotName = this.navState.destination?.id ?? '';
     this.cabinHits = drawCenterScreen(cab.center.ctx, cab.center.canvas.width, cab.center.canvas.height, {

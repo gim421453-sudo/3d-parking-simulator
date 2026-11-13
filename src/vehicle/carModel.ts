@@ -32,6 +32,8 @@ export interface CarModel {
   frontPivots: THREE.Object3D[];
   rollers: THREE.Object3D[];
   headSpot: THREE.SpotLight | null; // 하향등
+  /** 브레이크를 밟을 때 켜지는 후방 붉은 광원 */
+  brakeGlow: THREE.PointLight | null;
   highSpot: THREE.SpotLight | null; // 상향등
   lights: LightMaterials | null;
   setState(s: CarVisualState): void;
@@ -257,6 +259,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
 
   let lights: LightMaterials | null = null;
   let headSpot: THREE.SpotLight | null = null;
+  let brakeGlow: THREE.PointLight | null = null;
   let highSpot: THREE.SpotLight | null = null;
   const cockpit = new THREE.Group();
   let steeringWheel: THREE.Object3D | null = null;
@@ -313,6 +316,9 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     headSpot.position.set(0, 0.7, hl - 0.2);
     headSpot.target.position.set(0, 0, hl + 8);
     root.add(headSpot, headSpot.target);
+    brakeGlow = new THREE.PointLight(0xff2010, 0, 6, 1.6);
+    brakeGlow.position.set(0, 0.75, -hl - 0.35);
+    root.add(brakeGlow);
     highSpot = new THREE.SpotLight(0xf4f7ff, 0, 48, 0.32, 0.4, 1.3);
     highSpot.position.set(0, 0.72, hl - 0.2);
     highSpot.target.position.set(0, 0.4, hl + 18);
@@ -417,6 +423,7 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     frontPivots,
     rollers,
     headSpot,
+    brakeGlow,
     highSpot,
     lights,
     setState(s) {
@@ -435,7 +442,9 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
       // GLB 에 별도 DRL 재질(Lamp_DRL)이 없으면 주간주행등은 헤드램프 재질을 약하게 켜서 표현한다
       l.head.emissiveIntensity = L.high ? 2.6 : L.low ? 1.6 : root.userData.glbNoDrl ? L.drl * 0.9 : 0;
       l.drl.emissiveIntensity = L.drl * 2.2;
-      l.tail.emissiveIntensity = s.brake ? 2.4 : L.tail > 0 ? 0.8 : 0.06; // 브레이크등은 미등보다 더 밝다
+      // 브레이크등: 미등(0.8)보다 훨씬 밝게(5.0) + 후방 붉은 광원으로 노면/뒤 물체가 물든다 (v0.5.5: 밟았는지 분명히 보이게)
+      l.tail.emissiveIntensity = s.brake ? 5.0 : L.tail > 0 ? 0.8 : 0.06;
+      if (model.brakeGlow) model.brakeGlow.intensity = s.brake ? 7 : 0;
       l.rev.emissiveIntensity = s.reverse ? 2.0 : 0;
       l.sigL.emissiveIntensity = s.signalLeft ? 2.4 : 0;
       l.sigR.emissiveIntensity = s.signalRight ? 2.4 : 0;

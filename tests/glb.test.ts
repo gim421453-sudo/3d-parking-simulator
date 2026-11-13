@@ -61,7 +61,7 @@ function emptyModel(): CarModel {
   bodyGroup.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1))); // 기존 프로시저럴 차체
   return {
     root, bodyGroup, cockpit: new THREE.Group(), steeringWheel: null, frontPivots: [], rollers: [],
-    headSpot: null, highSpot: null, lights: null, cabin: null, mirrors: null, setState: () => {}, dispose: () => {},
+    headSpot: null, brakeGlow: null, highSpot: null, lights: null, cabin: null, mirrors: null, setState: () => {}, dispose: () => {},
   };
 }
 
