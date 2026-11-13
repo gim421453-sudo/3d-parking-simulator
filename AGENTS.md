@@ -19,8 +19,11 @@ npm test             # vitest 단위 테스트
 npm run export:data  # 엔진 독립 JSON 내보내기 (export/)
 npm run build        # 타입검사 + 빌드 → dist/
 node scripts/e2e-smoke.cjs   # 브라우저 통합 테스트 (Playwright 필요, dist 필요)
+node scripts/e2e-v054.cjs    # v0.5.4 맵·지형·도로·시설 브라우저 테스트 (26)
 node scripts/ui-overlap.cjs  # UI 겹침 (6 해상도 × 3 컨텍스트)
 node scripts/perf-v053.cjs   # 맵 전환 누수/거울 갱신율 측정
+node scripts/perf-v054.cjs   # 대형 맵 드로우콜/타일/로딩 측정
+npx tsx scripts/bench-v054.ts # 충돌·지형 인덱스/경로 그래프 벤치
 npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 ```
 
@@ -49,10 +52,11 @@ npm run cap:sync     # 웹 빌드 후 Android 프로젝트 동기화
 
 ## 디렉터리
 
-`src/core`(수학/기하/저장/설정) · `src/vehicle`(spec/physics/carModel) · `src/sensors`(센서/경고음/3D 센서 화면) · `src/pdc`(주차 보조 디스플레이: 모델/정책/가이드라인/패널) · `src/mission`(판정/점수) · `src/maps`(맵 데이터+빌더) · `src/game`(루프/입력/카메라) · `src/ui`(HUD/메뉴/미니맵) · `tests` · `scripts` · `android` · `docs`
+`src/core`(수학/기하/저장/설정) · `src/vehicle`(spec/physics/carModel) · `src/sensors`(센서/경고음/3D 센서 화면) · `src/pdc`(주차 보조 디스플레이: 모델/정책/가이드라인/패널) · `src/mission`(판정/점수) · `src/maps`(맵 데이터+빌더) · `src/game`(루프/입력/카메라) · `src/nav`(도로 그래프/내비) · `src/world`(타일/도시 키트) · `src/sim`(헤드리스 주행/경로 탐색) · `src/service`(리프트) · `src/mech`(기계식 시설) · `src/ui`(HUD/메뉴/미니맵) · `tests` · `scripts` · `android` · `docs`
 
 ## 변경 이력 (최근 순)
 
+- v0.5.4-dev (`feature/v054-map-engine`): **맵·지형·도로·시설 엔진**(`docs/V054.md`). 규칙: 차량 한 스텝(물리+지형+천장+하부+충돌)은 `vehicle/worldStep.ts` 만 쓴다(게임 루프와 헤드리스 검사가 같은 코드 — Game 에 따로 충돌 로직을 넣지 말 것), 충돌/센서는 `core/spatial.ts` 조회 결과(`nearColliders`)를 쓰고 `Game.colliders` 배열을 바꾸면 길이/참조가 바뀌어야 인덱스가 다시 만들어진다(제자리에서 요소 위치만 바꾸지 말 것), 지형 조회는 `surfacesNear` 인덱스를 거친다(`groundAt/headroomAt`), 경사로는 `ease`(완화 구간)와 `rampProfile` 로 높이를 정하고 시각 메시도 같은 식을 쓴다, **천장 높이(`headroomAt`)·하부 접촉(`underbodyGap`)은 이동을 막는 실제 제약**이므로 새 다층 맵은 `tests/mapAudit.test.ts`(모든 맵 자동 검사: 시작 위치/주차칸/경사로 연결/층고/도로)와 `tests/terrainEngine.test.ts` 를 통과해야 한다, 나선 램프는 `spiralPassBand` 로 전 차종 통과 구간 ≥0.6m 를 확인(폭만 보고 정하지 말 것), 저속(≤2.5m/s) 풀 조향(`maxSteerAt`)을 되돌리지 말 것, 지하층은 compose 의 `dy`+`portal`(바닥=지형 데크, 지붕=지상 슬래브, 지면 구멍 `groundHoles`)로 만들고 높이 값만 음수로 바꾸지 말 것, megapark 도로는 `RoadSeg` 데이터(`MEGA_ROADS`)에서 지면/도색/내비 가중이 함께 나온다, 다층·도로 맵의 내비는 `nav/levelGraph.ts`(실제 지면/충돌체에서 만든 3D 그래프, 차종별)만 쓰고 경로를 손으로 잇지 말 것, 통과 가능 여부는 `sim/planner.ts`(기구학 탐색)·주행 가능 여부는 `sim/autodrive.ts`(헤드리스 실주행)로 검사, 기계식 `settle` 은 승강장 근처에서만 피치를 덮어쓴다, 리프트는 `service/lift.ts` 순수 로직(공중에서는 항상 고정 — 불변식), 신규 맵 `garage`/`alley`/`citytest` 는 **임시 배치**(치수 확정 전)이며 실제 도시/장비 사양을 주장하지 말 것, 플로팅 오리진(`world/tiles.ts`)은 로직만 있고 렌더러에 연결되지 않았다, 새 키: PageUp 리프트 상승 · PageDown 하강 · End 정지. 브라우저 검증은 `scripts/e2e-smoke.cjs`(기존 482) + `scripts/e2e-v054.cjs`(26) 둘 다.
 - v0.5.3-dev: **P0 재검증 · 시동/엔진음 · 고속 주행 · 기계식 시설 모듈**(`docs/V053.md`). 규칙: 기계식 시설은 `MechFacilityConfig`(id/위치/회전 90° 배수/층수) + `facilityKit` 으로만 설치하고 장치 로직·모델은 **시설 로컬 좌표**에서 동작(월드는 `mech/facility.ts` 변환만), 시설마다 독립 `MechController`/모델/셔터 충돌체이며 보관 차량 모델 키는 `<시설id>/<슬롯>`, 새 맵에 시설을 넣기 전 `scripts/find-facility-sites.ts` 로 빈 자리/미션 동선 확인(못 넣으면 `mechUnavailable` 사유 기록, 12층을 억지로 넣지 말 것), 엔진은 `vehicle/engine.ts` 상태기계만 거칠 것(시동 OFF 가속 차단은 `VehicleInput.engineOn`, 기계식 하차·입고는 시동 OFF 필요, 출고/하차 후 자동 시동 금지), 엔진음은 합성이며 실제 차량 음원이라고 표기하지 말 것, 고속은 `substepCount`(이동량 ≤0.12m)로 관통 방지, 주차 점유/추천은 `parking/availability.ts`(순수 로직, 20% 임계 설정 `parkLowRatio`)만, 일반 화면에 거리(m) 숫자 금지 유지, 경로는 실제 도로 그래프가 있을 때만(지어내지 말 것), 클러스터 필수 조작 버튼은 7개(시동 포함)이며 `ui-overlap.cjs` 로 확인, BMW 파일은 인증 필요(`docs/BMW_ASSET_REQUEST.md`) — 우회 금지·BMW 가 아닌 모델을 BMW 로 표기 금지.
 - v0.5.2-hotfix: **입고 완료 시 새 차량 자동 생성 금지** — 입고된 차량은 슬롯에 그대로 남고(`playerStoredSlot` 관찰 상태, 모델 소유권은 `storedModels`), 새 차량은 명시적 `mechNewCar`(I)로만 시작, `this.model` 을 null 로 두는 중간 상태 금지(`adoptVehicle(spec, model, 'dispose'|'keep')`), 출고로 차량을 바꿀 때 기존 조작 차량은 삭제하지 말고 `parkOutsideCar`, 미션 성공은 캐리지 복귀 후.
 - v0.5.2-dev: **12층 기계식 타워·전진/후진 입고·통합 맵**(`docs/V052.md`). 규칙: 슬롯 22개/점유/차량 정보는 `MachineState.slots`(장치 상태와 분리), 입고 후 팔레트+차량은 슬롯에 남고 **빈 캐리지가 1F 로 복귀**(차량을 실은 팔레트가 동시에 복귀하는 모순 금지), 전진 입고=앞차축/후진 입고=뒷차축 기준 정렬(`alignment` 모드), 출고 회전은 전진 입고 차량만, 정지턱/가이드는 낮은 구조물이라 차량을 밀어내거나 0 으로 고정하지 말 것(`bumpDecel`/`guideDrag`), 승강 구조는 4모서리 기둥(팔레트 중앙 기둥 금지), 셔터 상단 LED(`statusBoard`)와 거울 옆 표시판(`guidance`)은 별개 장치, 통합 맵은 `compose.ts`(평행이동만 + ID 네임스페이스)로만 합성하고 기계식 구역은 `STATION` 절대 좌표 때문에 원점 고정, 새 키: Y 입고 취소 · Z 제어반, 전체 E2E 는 시작/종료/종료 코드를 남기는 래퍼로 실행하고 불안정 테스트는 약화하지 말고 원인을 조사할 것.

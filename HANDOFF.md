@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.5.3-dev (아래 v0.5.3 섹션) · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.5.4-dev (`feature/v054-map-engine`, 아래 v0.5.4 섹션) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,14 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.5.4 진행 상황 (맵·지형·도로·시설 엔진) — 브랜치 `feature/v054-map-engine`
+
+상세/상태 구분/검증 수치: `docs/V054.md`. `feature/pdc-display-v2`(v0.5.3, `87ad2e0`)는 그대로 보존 — **아직 병합하지 않았다**. Pages 는 여전히 `63fde2e`(v0.5.2 핫픽스 이전) 배포 상태, v0.5.3/v0.5.4 미배포. APK/ADB 보류.
+- 한 일: 지형 엔진(경사로 완화 구간/천장 높이/하부 접촉/공용 월드 스텝/충돌·지형 공간 인덱스), 나선 램프 원인 수정(저속 풀 조향 + 타워 나선 폭 3.6→4.5m), megapark 지하주차장을 실제 B1(-3.2m)로 + 격자형 도로망, 다층 3D 도로 그래프 + A* 내비(층/경사로 안내, 차종별 통행 제한), 월드 타일/스트리밍/플로팅 오리진(로직), megapark 타일 가시성 + 상자 병합, 도시 키트 + `citytest`, 정비소 `garage`(2주식 리프트), 골목길 `alley`, 맵 자동 검사(기존 결함 2건 발견·수정), 헤드리스 자동 주행/기구학 경로 탐색 도구.
+- 남은 일: megapark 경로 그래프 첫 생성 멈칫(약 0.4~0.65s) 제거(사전 생성/워커), megapark 구역 내부 미션 경로의 실주행 검증(102건 중 33건 미증명), 나머지 7개 맵 기계식 시설 설치(위치 결정 필요), 정비소 미션에서 리프트 사용(성공 조건 결정 필요), 도로 표지판/곡선 도로, 그래픽 개선(Gate 5: 바닥 질감·건물 디테일·표지 — 미착수), 플로팅 오리진 렌더 연결, 텍스처 지연 로딩/LOD, 실기기 성능.
+- 알려진 제한: 신규 맵 3종은 임시 배치, 골목길은 차폭 2.34m 컨셉 쿠페 통과 불가, 타일 숨김의 드로우콜 이득은 낮음 화질에서만 약 15%, 소프트웨어 WebGL 측정이라 FPS 수치는 실기기와 무관.
+- 재발 방지: 새 다층/대형 맵은 `tests/mapAudit.test.ts` 통과 필수, 나선은 `spiralPassBand` 로 확인, 지하층은 compose `dy`+`portal`, 차량 이동 제약은 `worldStep.ts` 한 곳.
 
 ## v0.5.3 진행 상황 (P0 재검증 · 시동/엔진음 · 고속 주행 · 기계식 시설 모듈)
 
