@@ -131,3 +131,89 @@ describe('정비소: 리프트 베이 진입과 승강 (헤드리스 실주행 +
     expect(d.blocks[0].id).toMatch(/lift-a-post/);
   });
 });
+
+import { CITY_TEST } from '../src/maps/mapCityTest';
+import { findLevelRoute, levelGraphFor } from '../src/nav/levelGraph';
+import { obbOverlap } from '../src/core/geometry';
+import { mapColliders } from '../src/maps';
+describe('도시 블록 키트 / 도시형 검증 구역', () => {
+  const m = getMap('citytest');
+  it('3×2 블록, 도로 7개(남북 4 + 동서 3), 교차로 12개, 블록 종류 6가지 중 5가지 사용', () => {
+    expect(CITY_TEST.blockRects.length).toBe(6);
+    expect(CITY_TEST.roads.length).toBe(7);
+    expect(CITY_TEST.intersections.length).toBe(12);
+    expect(new Set(CITY_TEST.blockRects.map((b) => b.kind)).size).toBe(5);
+    expect(m.mechFacilities!.length).toBe(1);
+    expect(m.provisional).toBe(true);
+  });
+  it('도로 위에는 건물/벽/주차 차량이 없다 (도로 중심선을 따라 차폭 2.2m 로 훑어 충돌 0)', () => {
+    const cols = mapColliders(m).filter((c) => c.y0 + c.h > 0.2 && !/^edge/.test(c.id));
+    for (const r of CITY_TEST.roads) {
+      const len = Math.hypot(r.bx - r.ax, r.bz - r.az);
+      const rot = Math.atan2(r.bx - r.ax, r.bz - r.az);
+      for (const lane of [-r.width / 4, r.width / 4]) {
+        const ox = Math.cos(rot) * lane;
+        const oz = -Math.sin(rot) * lane;
+        const o = { x: (r.ax + r.bx) / 2 + ox, z: (r.az + r.bz) / 2 + oz, rot, hw: 1.1, hl: len / 2 };
+        for (const c of cols) {
+          if (c.kind !== 'box') continue;
+          expect(obbOverlap(o, { x: c.x, z: c.z, rot: c.rot, hw: c.w / 2, hw2: 0, hl: c.d / 2 } as never), `${r.id} vs ${c.id}`).toBe(false);
+        }
+      }
+    }
+  });
+  it('고속 주행: 외곽 남쪽 도로 직선(가속 구간 약 120m)에서 세단 70km/h↑ · 쿠페 95km/h↑ 까지 가속 후 교차로 전에 정지(충돌 0) — 주차장과 같은 물리', () => {
+    const r = CITY_TEST.roads.find((q) => q.id === 'ct-h0')!;
+    const top: Record<string, number> = {};
+    for (const id of ['sedan', 'coupe-m4']) {
+      const spec = getVehicle(id);
+      const car = startState(m, spec, r.ax + 6, r.az - 2, Math.PI / 2);
+      const d = drivePath(m, spec, car, [[r.bx - 70, r.az - 2]], { speed: 40, lookahead: 12, maxTime: 60, goalRadius: 6 });
+      expect(d.blocks, id).toEqual([]);
+      top[id] = Math.abs(d.car.v) * 3.6;
+      // 급제동: 남은 도로(약 60m) 안에서 정지
+      const stop = drivePath(m, spec, d.car, [[r.bx - 4, r.az - 2]], { speed: 0.01, lookahead: 12, maxTime: 30, goalRadius: 1, brakeWindow: [0, 30] });
+      expect(stop.blocks, id).toEqual([]);
+      expect(Math.abs(stop.car.v)).toBeLessThan(0.1);
+      expect(stop.car.x).toBeLessThan(r.bx);
+    }
+    expect(top.sedan).toBeGreaterThan(70);
+    expect(top['coupe-m4']).toBeGreaterThan(95);
+    expect(top['coupe-m4']).toBeGreaterThan(top.sedan);
+  });
+  it('외곽 순환 도로 한 바퀴(교차로 4번 좌회전)를 SUV 가 달려 출발점으로 돌아온다(충돌 0) — 5·8m/s', () => {
+    const spec = getVehicle('suv-x6');
+    const b = CITY_TEST.roads;
+    const xs = [b.find((q) => q.id === 'ct-v0')!.ax, b.find((q) => q.id === 'ct-v3')!.ax];
+    const zs = [b.find((q) => q.id === 'ct-h0')!.az, b.find((q) => q.id === 'ct-h2')!.az];
+    // 우측통행 차로(중심선에서 2m 오른쪽)로 반시계 방향. 교차로에서는 교차로 안(도로 위)에서 돈다 — 블록 모서리(가로등)를 가로지르지 않는다
+    const L = 2;
+    const p: [number, number][] = [
+      [xs[1] - 14, zs[0] - L], [xs[1] - 3, zs[0] - L], [xs[1] + L, zs[0] + 3], [xs[1] + L, zs[0] + 14],
+      [xs[1] + L, zs[1] - 14], [xs[1] + L, zs[1] - 3], [xs[1] - 3, zs[1] + L], [xs[1] - 14, zs[1] + L],
+      [xs[0] + 14, zs[1] + L], [xs[0] + 3, zs[1] + L], [xs[0] - L, zs[1] - 3], [xs[0] - L, zs[1] - 14],
+      [xs[0] - L, zs[0] + 14], [xs[0] - L, zs[0] + 3], [xs[0] + 3, zs[0] - L], [xs[0] + 14, zs[0] - L], [xs[0] + 40, zs[0] - L],
+    ];
+    for (const v of [5, 8]) {
+      const car = startState(m, spec, xs[0] + 20, zs[0] - L, Math.PI / 2);
+      const d = drivePath(m, spec, car, p, { speed: v, lookahead: 5, maxTime: 300, goalRadius: 4 });
+      expect(d.blocks, `v${v}`).toEqual([]);
+      expect(d.reached, `v${v}`).toBe(true);
+      expect(d.dist).toBeGreaterThan(500);
+    }
+  });
+  it('내비: 시작 위치 → 주차장 빈 칸 / 기계식 타워 입구 경로가 도로를 따라 나오고, 세단이 그 경로로 주차장 안까지 실제 주행', () => {
+    const spec = getVehicle('sedan');
+    const g = levelGraphFor(m, spec);
+    const ms = m.missions[0];
+    const slot = m.slots.find((s) => s.id === ms.slotId)!;
+    const r = findLevelRoute(g, { x: m.spawn.x, z: m.spawn.z, y: 0 }, { x: slot.x, z: slot.z, y: 0 })!;
+    expect(r).not.toBeNull();
+    const pts = r.points.slice(1, -1).map((q) => [q.x, q.z] as [number, number]);
+    const d = drivePath(m, spec, startState(m, spec, m.spawn.x, m.spawn.z, m.spawn.heading), pts, { speed: 4, lookahead: 4, maxTime: 300, goalRadius: 3 });
+    expect(d.blocks).toEqual([]);
+    expect(d.reached).toBe(true);
+    const f = m.mechFacilities![0];
+    expect(findLevelRoute(g, { x: m.spawn.x, z: m.spawn.z, y: 0 }, { x: f.x - 13, z: f.z, y: 0 }, 8)).not.toBeNull();
+  });
+});

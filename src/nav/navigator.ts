@@ -106,10 +106,10 @@ export class Navigator {
   }
   /** 다층(지형) 맵인가 — 3D 도로 그래프(levelGraph)를 쓴다 */
   get multiLevel(): boolean {
-    return !!this.map?.terrain;
+    return !!(this.map?.terrain || this.map?.roads?.length);
   }
   get levelGraph(): LevelGraph | null {
-    if (!this.map?.terrain || !this.spec) return null;
+    if (!this.multiLevel || !this.map || !this.spec) return null;
     if (!this.lgraph) this.lgraph = levelGraphFor(this.map, this.spec);
     return this.lgraph;
   }
@@ -118,7 +118,7 @@ export class Navigator {
     this.map = map;
     this.lgraph = null;
     // 다층 맵(주차타워/통합 맵)은 3D 도로 그래프(levelGraph: 층·경사로·차종 반영)를 쓴다 — 목적지를 정할 때 만든다(지연 생성)
-    this.graph = map.terrain || map.id === 'mechpark' ? null : buildBestRoadGraph(map);
+    this.graph = map.terrain || map.roads?.length || map.id === 'mechpark' ? null : buildBestRoadGraph(map);
     this.dest = null;
     this.route = null;
     this.status = 'idle';

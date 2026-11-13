@@ -89,15 +89,15 @@ describe('층수가 다른 시설의 슬롯', () => {
 
 describe('맵에 설치된 기계식 시설 (데이터)', () => {
   const withFac = MAPS.filter((m) => (m.mechFacilities?.length ?? 0) > 0);
-  it('mechpark / outdoor / megapark 에 시설이 있고 mech 플래그와 일치한다', () => {
-    expect(withFac.map((m) => m.id).sort()).toEqual(['mechpark', 'megapark', 'outdoor']);
+  it('mechpark / outdoor / megapark (+ v0.5.4 도시형 검증 구역) 에 시설이 있고 mech 플래그와 일치한다', () => {
+    expect(withFac.map((m) => m.id).sort()).toEqual(['citytest', 'mechpark', 'megapark', 'outdoor']);
     for (const m of MAPS) expect(!!m.mech).toBe((m.mechFacilities?.length ?? 0) > 0);
     expect(getMap('mechpark').mechFacilities!.length).toBe(1);
     expect(getMap('outdoor').mechFacilities!.length).toBe(2);
     expect(getMap('megapark').mechFacilities!.length).toBe(3);
   });
   it('설치하지 못한 맵은 이유가 기록되어 있다', () => {
-    for (const id of ['lot', 'underground', 'tower', 'garage5', 'carpark3', 'modlot', 'spiral']) {
+    for (const id of ['lot', 'underground', 'tower', 'garage5', 'carpark3', 'modlot', 'spiral', 'garage', 'alley']) {
       const m = getMap(id);
       expect(m.mechFacilities?.length ?? 0).toBe(0);
       expect(m.mechUnavailable, id).toBeTruthy();
