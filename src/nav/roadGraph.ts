@@ -108,10 +108,18 @@ export function nearestNode(g: RoadGraph, x: number, z: number, map?: MapData): 
 
 /** 맵이 좁아도 시작 위치에서 모든 미션 목적지에 도달할 수 있는 가장 넉넉한 여유(clearance)로 그래프를 만든다. */
 export function buildBestRoadGraph(map: MapData): RoadGraph {
-  const levels = [1.3, 1.15, 1.05, 1.0];
+  // [여유, 격자 간격]: 넉넉한 것부터. 마지막 두 단계는 좁은 골목(폭 3.4m 안팎)용 — 격자를 촘촘히 해야 골목 중심선에 노드가 놓인다 (v0.5.4)
+  const levels: [number, number][] = [
+    [1.3, 3],
+    [1.15, 2.5],
+    [1.05, 2.5],
+    [1.0, 2.5],
+    [1.15, 1],
+    [1.0, 1],
+  ];
   let last: RoadGraph | null = null;
-  for (const c of levels) {
-    const g = buildRoadGraph(map, c >= 1.2 ? 3 : 2.5, c);
+  for (const [c, sp] of levels) {
+    const g = buildRoadGraph(map, sp, c);
     last = g;
     if (g.nodes.length < 4) continue;
     const reach = reachableFrom(g, map, map.spawn);
