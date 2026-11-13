@@ -16,8 +16,9 @@ const obstacles: ObstacleDef[] = [
 // 구획 경계 기둥 (4칸마다)
 for (const k of [4, 8, 12]) {
   const x = START - PITCH / 2 + PITCH * k;
-  obstacles.push(pillar(`upil-n${k}`, x, 3.65, 0.5, 2.8, 0x8a8a86));
-  obstacles.push(pillar(`upil-s${k}`, x, -3.65, 0.5, 2.8, 0x8a8a86));
+  // v0.5.4 맵 자동 검사로 발견: 굵기 0.50m 기둥이 옆 칸의 넓은 주차 차량(1.92m, 좌우 ±7cm 흩뜨림)과 최대 13cm 겹쳤다 → 위치는 그대로, 굵기만 0.30m 로
+  obstacles.push(pillar(`upil-n${k}`, x, 3.65, 0.3, 2.8, 0x8a8a86));
+  obstacles.push(pillar(`upil-s${k}`, x, -3.65, 0.3, 2.8, 0x8a8a86));
 }
 // 통로 장애물
 obstacles.push(drum('udrum-1', -20.5, 1.6), drum('udrum-2', -20.5, 2.3));

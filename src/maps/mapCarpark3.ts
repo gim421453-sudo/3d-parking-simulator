@@ -71,6 +71,6 @@ export const MAP_CARPARK3: MapData = {
   missions: [
     { id: 'c3-1', name: '1층 후진 주차 (임시)', kind: 'perpendicular-reverse', slotId: 'c1-n-4', desc: '입구에서 들어가 1층 중앙 블록 북쪽 줄 빈 칸에 후진 주차하세요.', parTimeSec: 90, timeLimitSec: 420 },
     { id: 'c3-2', name: '경사로 → 2층 전면 주차 (임시)', kind: 'perpendicular-front', slotId: 'c2-s-6', desc: '남쪽 차선 경사로를 올라 2층 남쪽 줄 빈 칸에 전면 주차하세요.', parTimeSec: 120, timeLimitSec: 480, spawn: { x: -20, z: -LANE_Z, heading: Math.PI / 2, y: 0 } },
-    { id: 'c3-3', name: '순환 도로 → 3층 후진 주차 (임시)', kind: 'perpendicular-reverse', slotId: 'c3-n-7', desc: '2층 순환 도로를 한 바퀴 돌아 북쪽 경사로로 3층에 올라 북쪽 줄 빈 칸에 후진 주차하세요.', parTimeSec: 150, timeLimitSec: 540, spawn: { x: 0, z: -LANE_Z, heading: Math.PI / 2, y: FH } },
+    { id: 'c3-3', name: '순환 도로 → 3층 후진 주차 (임시)', kind: 'perpendicular-reverse', slotId: 'c3-n-7', desc: '2층 순환 도로를 한 바퀴 돌아 북쪽 경사로로 3층에 올라 북쪽 줄 빈 칸에 후진 주차하세요.', parTimeSec: 150, timeLimitSec: 540, spawn: { x: 12, z: -LANE_Z, heading: Math.PI / 2, y: FH } }, // v0.5.4 맵 자동 검사로 발견: 이전 x=0 은 경사로 개구부(2F 바닥 구멍) 위라 차량이 공중에 떠서 움직이지 못했다 → 경사로 꼭대기(x=8) 지난 2F 바닥 위로 옮김
   ],
 };
