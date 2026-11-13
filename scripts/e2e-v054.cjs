@@ -168,7 +168,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   await pg.screenshot({ path: path.join(OUT, '13-e2e-tower-3f.png') });
 
   // ================= 4. 정비소: 2주식 리프트 =================
-  await loadMap('garage', 'gar-lift', 'sedan');
+  await loadMap('garage', 'free', 'sedan'); // 자유주행: 미션(베이 진입)은 정차하면 결과 화면으로 끝나므로 리프트 조작 검증은 자유주행에서 한다
   const L = await Y(() => window.__game.lifts[0].cfg);
   await put(L.x, -14 + 1.4, 0, 0); // 시작 위치(문 앞 진입선)에서 D 단으로 출발
   await Y(([L]) => window.__ap([[L.x, -8], [L.x, 0], [L.x, L.z]], 1.2, 2.5), [L]);
