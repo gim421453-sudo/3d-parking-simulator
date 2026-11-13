@@ -20,7 +20,7 @@ export interface BuiltMap {
   setTarget(slot: ParkingSlot | null): void;
   /** 다층 맵 성능: 플레이어 높이에서 ±maxDy 밖 층의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 반환: 숨긴 개수 */
   /** 타일 그룹 수 / 현재 보이는 수 (대형 맵이 아니면 0/0) */
-  tileStats(): { tiles: number; visible: number };
+  tileStats(): { tiles: number; visible: number; batchedBoxes: number; batchMeshes: number };
   /** 0 = 야외, 1 = 실내 구역(지하층) 안. 주변광/태양광을 줄인다 */
   setIndoorFactor(f: number): void;
   setLevelVisibility(playerY: number, maxDy?: number): number;
@@ -214,6 +214,19 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     tg.add(...objs);
   };
   let streamer: TileStreamer | null = null;
+  const batches = new Map<string, { mat: THREE.Material; cast: boolean; geos: THREE.BufferGeometry[]; x: number; z: number }>();
+  let batchedBoxes = 0;
+  let batchMeshes = 0;
+  const bm = new THREE.Matrix4();
+  const bq = new THREE.Quaternion();
+  const batchBox = (tx: number, tz: number, mat: THREE.Material, cast: boolean, sx: number, sy: number, sz: number, px: number, py: number, pz: number, rot: number): void => {
+    const k = `${wgrid.keyOf(tx, tz)}|${mat.uuid}|${cast ? 1 : 0}`;
+    let bt = batches.get(k);
+    if (!bt) batches.set(k, (bt = { mat, cast, geos: [], x: tx, z: tz }));
+    bq.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+    bm.compose(new THREE.Vector3(px, py, pz), bq, new THREE.Vector3(sx, sy, sz));
+    bt.geos.push(boxGeo.clone().applyMatrix4(bm));
+  };
   for (const o of map.obstacles) {
     switch (o.tag) {
       case 'cone':
@@ -296,6 +309,12 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         // wall, pillar, barrier, planter, curb
         if (o.shape === 'cyl') break;
         const mat = o.tag === 'barrier' ? bandMat : matFor(o.color ?? 0x999999, o.tag === 'wall' || o.tag === 'pillar' ? 0.95 : 0.8);
+        if (large) {
+          // 대형 맵: 타일 × 재질별로 상자를 하나의 지오메트리로 합친다(드로우콜 감소). 충돌/센서는 데이터 기반이라 무관
+          batchBox(o.x, o.z, mat, o.h > 0.3, o.w ?? 1, o.h, o.d ?? 1, o.x, (o.y0 ?? 0) + o.h / 2, o.z, o.rot ?? 0);
+          if (o.tag === 'pillar') batchBox(o.x, o.z, bandMat, false, (o.w ?? 1) + 0.02, 0.7, (o.d ?? 1) + 0.02, o.x, (o.y0 ?? 0) + 0.35, o.z, 0);
+          break;
+        }
         const m = new THREE.Mesh(boxGeo, mat);
         m.scale.set(o.w ?? 1, o.h, o.d ?? 1);
         m.position.set(o.x, (o.y0 ?? 0) + o.h / 2, o.z);
@@ -312,6 +331,19 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         }
       }
     }
+  }
+  // 합치기: 타일 × 재질 × 그림자 여부마다 메시 1개
+  for (const bt of batches.values()) {
+    const merged = mergeGeometries(bt.geos, false);
+    bt.geos.forEach((g) => g.dispose());
+    if (!merged) continue;
+    track(merged);
+    const mesh = new THREE.Mesh(merged, bt.mat);
+    mesh.castShadow = bt.cast;
+    mesh.receiveShadow = true;
+    addAt(bt.x, bt.z, mesh);
+    batchedBoxes += bt.geos.length;
+    batchMeshes++;
   }
 
   // 반복 객체: 인스턴싱 (콘, 드럼)
@@ -417,7 +449,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   const result: BuiltMap = {
     group,
     tileStats() {
-      return { tiles: tileGroups.size, visible: [...tileGroups.values()].filter((g) => g.visible).length };
+      return { tiles: tileGroups.size, visible: [...tileGroups.values()].filter((g) => g.visible).length, batchedBoxes, batchMeshes };
     },
     setIndoorFactor(f) {
       // 지하/실내 구역 안: 하늘빛과 태양광을 줄이고(지붕이 가린다) 천장 조명만 남긴다
