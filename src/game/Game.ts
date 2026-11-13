@@ -19,6 +19,9 @@ import { MechControl } from '../ui/mechControl';
 import { freeSlots } from '../mech/machine';
 import { Beeper } from '../sensors/beeper';
 import { SpatialIndex } from '../core/spatial';
+import { liftBlocksDriving, liftChecklist, liftDown, liftStop, liftUp, liftedPose, newLift, stepLift, type LiftCarInput, type LiftCheck, type LiftConfig, type LiftState } from '../service/lift';
+import { buildLift, type LiftBuilt } from '../service/liftBuilder';
+import { LiftPanel } from '../ui/liftPanel';
 import { VIEW_RADIUS } from '../world/tiles';
 import { stepVehicleInWorld } from '../vehicle/worldStep';
 import { EngineSound } from '../audio/engineSound';
@@ -140,6 +143,11 @@ export class Game {
   }
   private mechPanel!: MechPanel;
   private mechCtl!: MechControl;
+  /** v0.5.4 정비소 2주식 리프트: 리프트마다 독립 상태/모델. activeLift = 차량에 가장 가까운(6m 이내) 리프트 */
+  lifts: { cfg: LiftConfig; st: LiftState; built: LiftBuilt }[] = [];
+  activeLift: { cfg: LiftConfig; st: LiftState; built: LiftBuilt } | null = null;
+  liftChecks: LiftCheck[] = [];
+  private liftPanel!: LiftPanel;
   private zoneAcc = 0;
   /** 통합 맵: 현재 구역 id */
   zoneId: string | null = null;
@@ -269,6 +277,7 @@ export class Game {
       },
     });
     this.mechPanel = new MechPanel((this.hud.root.querySelector('#top-right') as HTMLElement) ?? this.hud.root, (a) => this.onAction(a));
+    this.liftPanel = new LiftPanel((this.hud.root.querySelector('#top-right') as HTMLElement) ?? this.hud.root, (a) => this.onAction(a));
     this.assistPanel = new AssistPanel(root, {
       onToggleSensor: () => this.onAction('sensorToggle'),
       onToggleSound: () => this.onAction('soundToggle'),
@@ -414,6 +423,12 @@ export class Game {
     }
     this.facilities = [];
     this.activeFac = null;
+    for (const l of this.lifts) {
+      this.scene.remove(l.built.group);
+      l.built.dispose();
+    }
+    this.lifts = [];
+    this.activeLift = null;
     const tier = this.settings.quality;
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
     this.cullLevelY = NaN;
@@ -441,6 +456,11 @@ export class Game {
         this.facilities.push({ cfg, frame: fr, ctl: new MechController(cfg.floors, fr), built, doorCol, doorOn: false });
       }
       this.activeFac = this.facilities[0] ?? null;
+    }
+    for (const cfg of map.lifts ?? []) {
+      const built = buildLift(cfg);
+      this.scene.add(built.group);
+      this.lifts.push({ cfg, st: newLift(), built });
     }
     this.scene.background = new THREE.Color(map.env.sky);
     // 대형 맵(통합 맵): 먼 타일은 그리지 않으므로 안개 끝을 가시 반경에 맞춰 경계가 드러나지 않게 한다
@@ -515,6 +535,11 @@ export class Game {
     }
     this.engine = newEngine(profileOf(this.spec), !this.settings.engineStartOff);
     for (const f of this.facilities) f.ctl.reset();
+    for (const l of this.lifts) {
+      l.st = newLift();
+      l.built.update(l.st);
+    }
+    this.liftPanel.setVisible(false);
     this.parkAcc = 99;
     this.lastHitId = ''; // 이전 런의 충돌 기록이 새 런의 판정/테스트에 남지 않게
     this.newCarCount = 0; // 새 차량 생성 횟수는 런마다 센다(자동 생성 0 검증용)
@@ -756,6 +781,21 @@ export class Game {
         if (r) this.hud.toast(r.msg, r.kind);
         break;
       }
+      case 'liftUp':
+      case 'liftDown':
+      case 'liftStop': {
+        const L = this.activeLift;
+        if (!L) {
+          if (this.lifts.length) this.hud.toast('리프트 베이 안에서 조작하세요', 'warn');
+          break;
+        }
+        let ok: boolean;
+        if (a === 'liftStop') ok = liftStop(L.st);
+        else if (a === 'liftUp') ok = L.st.phase === 'raising' ? liftStop(L.st) : liftUp(L.cfg, this.spec, this.liftInput(), L.st);
+        else ok = L.st.phase === 'lowering' ? liftStop(L.st) : liftDown(L.st);
+        this.hud.toast(L.st.message || (ok ? '리프트 조작' : '지금은 조작할 수 없습니다'), ok ? 'good' : 'warn');
+        break;
+      }
       case 'engineToggle': {
         if (this.playerStoredSlot) {
           this.hud.toast('보관된 차량입니다', 'warn');
@@ -939,6 +979,56 @@ export class Game {
     return { throttle: this.throttle, brake: this.brake, steerInput: this.steerIn };
   }
 
+  private liftInput(): LiftCarInput {
+    const c = centerOf(this.car, this.spec);
+    return { cx: c.x, cz: c.z, heading: this.car.heading, v: this.car.v, gear: this.car.gear, handbrake: this.car.handbrake, engineOn: engineOn(this.engine) };
+  }
+
+  /** 리프트 진행 + 현재 리프트 선택 + 패널 갱신. 차량이 리프트에 고정(또는 암 전개 중)이면 true → 주행 입력 차단 */
+  private updateLifts(dt: number): boolean {
+    if (!this.lifts.length) return false;
+    for (const l of this.lifts) {
+      stepLift(l.cfg, l.st, dt);
+      l.built.update(l.st);
+    }
+    const cur = this.activeLift;
+    if (!cur || !liftBlocksDriving(cur.st)) {
+      const c = centerOf(this.car, this.spec);
+      let best: (typeof this.lifts)[number] | null = null;
+      let bd = 6;
+      for (const l of this.lifts) {
+        const d = Math.hypot(c.x - l.cfg.x, c.z - l.cfg.z);
+        if (d < bd) {
+          bd = d;
+          best = l;
+        }
+      }
+      this.activeLift = best;
+    }
+    const L = this.activeLift;
+    this.liftPanel.setVisible(!!L);
+    if (!L) return false;
+    this.liftChecks = liftChecklist(L.cfg, this.spec, this.liftInput());
+    this.liftPanel.update(L.st, this.liftChecks);
+    return liftBlocksDriving(L.st);
+  }
+
+  /** 리프트에 고정된 차량: 리프트 높이를 따라 올라가고 내려온다(수평 위치/방향 고정, 속도 0) */
+  private applyLiftPose(): void {
+    const L = this.activeLift;
+    if (!L) return;
+    const p = liftedPose(L.cfg, L.st, 0);
+    if (!p) return;
+    const off = this.spec.length / 2 - this.spec.rearOverhang;
+    this.car.x = p.cx - Math.sin(p.heading) * off;
+    this.car.z = p.cz - Math.cos(p.heading) * off;
+    this.car.heading = p.heading;
+    this.car.y = p.y;
+    this.car.v = 0;
+    this.car.pitch = 0;
+    this.car.slope = 0;
+  }
+
   /** 현재 시설 선택: 사용 중(보관 관찰/동작 중/고정)이면 유지, 아니면 가장 가까운 시설로(히스테리시스 3m) */
   private selectActiveFacility(): void {
     if (!this.facilities.length) return;
@@ -961,11 +1051,14 @@ export class Game {
     vin.engineOn = powerOn(this.engine);
     if (this.map.mech) this.mech.engineOn = engineOn(this.engine);
     const mech = this.map.mech ? this.mech : null;
-    if (mech?.blocksDriving()) vin = { throttle: 0, brake: 1, steerInput: 0, engineOn: vin.engineOn }; // 하차했거나 팔레트에 고정된 동안 운전 불가
+    if (mech?.blocksDriving()) vin = { throttle: 0, brake: 1, steerInput: 0, engineOn: vin.engineOn };
+    const liftHold = this.updateLifts(dt);
+    if (liftHold) vin = { throttle: 0, brake: 1, steerInput: 0, engineOn: vin.engineOn }; // 하차했거나 팔레트에 고정된 동안 운전 불가
     this.acc += dt;
     let steps = 0;
     while (this.acc >= STEP && steps < 12) {
       if (mech?.m.locked) mech.applyLocked(this.car);
+      else if (liftHold && this.activeLift?.st.locked) this.applyLiftPose();
       else if (this.playerStoredSlot) this.holdStoredCar();
       else {
         // 고속: 한 스텝 이동량이 0.12m 를 넘지 않도록 서브스텝으로 나눠 충돌을 검사한다 (얇은 벽/기둥 관통 방지)

@@ -185,6 +185,9 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   const coneBaseMat = track(new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 }));
   const drumMat = track(new THREE.MeshStandardMaterial({ color: 0x2a6bd0, roughness: 0.5 }));
 
+  const bollardGeo = track(new THREE.CylinderGeometry(0.1, 0.1, 1, 12));
+  const bollardMat = track(new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.35, metalness: 0.85 }));
+  const bollardBand = track(new THREE.MeshStandardMaterial({ color: 0xfff27a, emissive: 0x6b5a00, roughness: 0.4 }));
   const cones: ObstacleDef[] = [];
   const drums: ObstacleDef[] = [];
 
@@ -219,7 +222,20 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       case 'drum':
         drums.push(o);
         break;
-      case 'bollard': // 금속 볼라드는 기계식 주차장 모델(mech/mechBuilder)이 그린다
+      case 'bollard': {
+        // 기계식 시설 키트의 볼라드(bol-1n 등)는 시설 모델(mech/mechBuilder)이 그린다. 그 밖의 볼라드(지하 경사로 입구, 정비소, 골목)는 여기서 그린다
+        if (/(^|:)bol-\d[ns]$/.test(o.id)) break;
+        const r = o.r ?? 0.1;
+        const post = new THREE.Mesh(bollardGeo, bollardMat);
+        post.scale.set(r / 0.1, o.h, r / 0.1);
+        post.position.set(o.x, (o.y0 ?? 0) + o.h / 2, o.z);
+        post.castShadow = true;
+        const band = new THREE.Mesh(bollardGeo, bollardBand);
+        band.scale.set((r / 0.1) * 1.04, 0.12, (r / 0.1) * 1.04);
+        band.position.set(o.x, (o.y0 ?? 0) + o.h * 0.78, o.z);
+        addAt(o.x, o.z, post, band);
+        break;
+      }
       case 'guide':
         break; // 팔레트 가이드는 이동하는 팔레트 모델(mech/mechBuilder)이 그린다
       case 'lamp': {

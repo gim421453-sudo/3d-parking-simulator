@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// 헤드리스 실주행(게임과 같은 물리)을 여러 조합으로 돌리므로 시간이 걸린다 — CPU 가 바쁠 때도 시간 초과가 나지 않게 넉넉히 둔다
+vi.setConfig({ testTimeout: 180000 });
 import { getMap, mapColliders } from '../src/maps';
 import { B1_Y, MEGA_ROADS, MEGA_ZONES, UG_RAMP } from '../src/maps/mapMegaPark';
 import { groundAt, headroomAt, rampMaxGrade, type RampSurface } from '../src/maps/terrain';

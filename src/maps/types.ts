@@ -1,4 +1,5 @@
 import type { MechFacilityConfig } from '../mech/facility';
+import type { LiftConfig } from '../service/lift';
 import type { Rect2 } from './terrain';
 
 /** 도로 구간: 중심선 a→b (직선), 폭, 통행 방향. y0/y1 은 경사로(지하 진입 등)의 시작/끝 높이 */
@@ -114,6 +115,8 @@ export interface MapData {
   groundHoles?: Rect2[];
   /** 야외 맵 안의 실내 구역(지하층 등): 이 안에서는 어둡게(자동 전조등/주변광 감소) */
   indoorZones?: { id: string; rect: Rect2; yMin: number; yMax: number }[];
+  /** 정비소 2주식 리프트 (service/lift.ts) */
+  lifts?: LiftConfig[];
   /** 도로 중심선 데이터(시각/내비 가중/자동 검사용) */
   roads?: RoadSeg[];
 }
