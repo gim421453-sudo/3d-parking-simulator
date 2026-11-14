@@ -334,6 +334,26 @@ export function createCarModel(spec: VehicleSpec, opts: CarOptions = {}): CarMod
     const hood = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, 0.05, sh.hood + 0.05), bodyMat);
     hood.position.set(0, belt - 0.03, (z1 + hl) / 2);
     cockpit.add(hood);
+    // v0.5.5: 실내 바닥/도어 안쪽/격벽/트렁크 덮개 — 1인칭에서는 차체를 숨기므로 이것이 없으면 아래(팔레트·바닥·아래층 차량)가 그대로 비쳐 보인다
+    const trimMat = sharedMat('cabinTrim', () => new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.9 }));
+    const floorY = 0.3;
+    const pan = new THREE.Mesh(new THREE.BoxGeometry(W * 0.96, 0.05, L - 0.1), trimMat);
+    pan.position.set(0, floorY, 0);
+    cockpit.add(pan);
+    for (const sx of [1, -1]) {
+      const door = new THREE.Mesh(new THREE.BoxGeometry(0.05, belt - floorY, z1 - z0 + 0.3), trimMat);
+      door.position.set(sx * W * 0.47, (belt + floorY) / 2, (z0 + z1) / 2);
+      cockpit.add(door);
+    }
+    const firewall = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, belt - floorY, 0.05), trimMat);
+    firewall.position.set(0, (belt + floorY) / 2, z1 - 0.02);
+    cockpit.add(firewall);
+    const rearWall = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, belt - floorY, 0.05), trimMat);
+    rearWall.position.set(0, (belt + floorY) / 2, z0 + 0.02);
+    cockpit.add(rearWall);
+    const trunkLid = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, 0.05, sh.trunk + 0.05), bodyMat);
+    trunkLid.position.set(0, belt - 0.03, (z0 - hl) / 2);
+    cockpit.add(trunkLid);
     const beam = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): THREE.Mesh => {
       const a = new THREE.Vector3(ax, ay, az);
       const b = new THREE.Vector3(bx, by, bz);
