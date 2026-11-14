@@ -49,9 +49,11 @@ import { buildPdcState, type PdcState } from '../pdc/pdcModel';
 import { WHEEL_LOCK_DEG } from '../core/wheel';
 import { ceilingAbove, groundAt, levelAt } from '../maps/terrain';
 import { gateViewRisk } from '../pdc/viewGate';
+import { RiskRanker, type RiskCandidate } from '../pdc/riskRank';
 import { buildTowerVisual, type TowerVisual } from '../maps/towerBuilder';
 import { chooseBeepTarget } from '../sensors/beepPlan';
-import { buildCameraTiles, buildWarnLines } from '../pdc/overlay';
+import { buildWarnLines } from '../pdc/overlay';
+import { buildSurfaceWarnings } from '../pdc/surfaceWarn';
 import { guideCutDistance } from '../pdc/guidelines';
 import { pointToObbGap, RiskTracker, type RiskOutput } from '../pdc/risk';
 import { frameView } from '../pdc/framing';
@@ -192,6 +194,10 @@ export class Game {
   private outAcc = 0;
   private nearOut = false;
   private sideBlocked = { left: false, right: false };
+  /** v0.6.1 장애물별 위험 순위(디버그/테스트: 근거 로그) */
+  readonly ranker = new RiskRanker();
+  rankOut: RiskCandidate[] = [];
+  private gateSteer0 = 0;
   private blockedAcc = 99;
   private lastHits: { x: number; z: number }[] = [];
   private lastHitsAge = 99;
@@ -1213,8 +1219,11 @@ export class Game {
       this.viewGateGear = this.car.gear;
       this.viewGate = false;
       this.viewPolicy.reset();
+      this.gateSteer0 = this.car.steer;
     }
-    if (!this.viewGate && Math.abs(this.car.v) > 0.3) this.viewGate = true;
+    // v0.6.1: 정지 중에도 핸들을 돌리면(기어 변경 때보다 3° 이상) 조향 경로 기준 위험으로 자동 시점을 허용한다.
+    // 접촉 직전·매우 근접(1·2등급)이면 즉시 허용. 기어만 바꾸고 가만히 있으면 그 방향 기본 카메라 유지(이전 규칙).
+    if (!this.viewGate && (Math.abs(this.car.v) > 0.3 || Math.abs(this.car.steer - this.gateSteer0) > 0.05 || (this.rankOut[0]?.cls ?? 9) <= 2)) this.viewGate = true;
     // 자동 3D 시점(측면 장애물) + 인포테인먼트 공유 상태 + 내비게이션
     this.viewOut = this.viewPolicy.update(
       dt,
@@ -1720,6 +1729,7 @@ export class Game {
       this.pathCut = guideCutDistance(this.spec, this.car.steer, this.car.gear === 'R' ? -1 : 1, pz, this.colliders, pz.y + this.spec.sensorHeight);
     }
     this.riskOut = this.risk.update(dt, this.sensorSnap, obbOf(this.car, this.spec), this.spec);
+    this.rankOut = this.ranker.update(dt, { snap: this.sensorSnap, spec: this.spec, body: obbOf(this.car, this.spec), gear: this.car.gear, v: this.car.v, steer: this.debugViewCtx?.steer !== undefined && typeof this.debugViewCtx.steer === 'number' ? this.debugViewCtx.steer : this.car.steer });
     const hits = this.allHits();
     if (hits.length) {
       this.lastHits = hits;
@@ -1787,7 +1797,10 @@ export class Game {
     );
     const threat = gated.threat;
     const veryClose = gated.veryClose;
-    return { threat, veryClose, pillar: pick((g) => g.pillar), narrow: r.narrow, gap: pick((g) => g.gap), sideBlocked: { ...this.sideBlocked } };
+    const t = this.rankOut[0];
+    // v0.6.1: 1순위 위험(장애물 단위) — 이전 그룹 경쟁(threat/veryClose)은 rankOut 이 없을 때만 쓰인다
+    const top = t ? { group: t.group, place: t.place, cls: t.cls, swing: t.swing, id: t.id } : null;
+    return { threat, veryClose, pillar: pick((g) => g.pillar), narrow: r.narrow, gap: pick((g) => g.gap), sideBlocked: { ...this.sideBlocked }, top };
   }
 
   private sideObservation(snap: SensorSnapshot): SideObservation {
@@ -1924,7 +1937,7 @@ export class Game {
     const rng = this.settings.sensorRange;
     const crt = this.settings.sensorCritical;
     // 전/후방 카메라: 가로 6칸 독립 타일, 3D/탑뷰: 차량 근처 장애물 경계 셀 (같은 센서 스냅샷 사용)
-    let zones = !this.settings.sensorEnabled || !isCar ? [] : buildCameraTiles(this.sensorSnap, this.spec, body, view === 'rear' ? 'rear' : 'front', rng, crt, (id) => { const c = this.colliderById.get(id); return c ? c.y0 + c.h : undefined; }, pose.y ?? 0);
+    let zones = !this.settings.sensorEnabled || !isCar ? [] : buildSurfaceWarnings(this.sensorSnap, this.spec, body, { dir: view === 'rear' ? 'rear' : 'front', range: rng, critical: crt, colliderOf: (id) => this.colliderById.get(id) ?? this.damage?.dynamicColliders.find((c) => c.id === id), baseY: pose.y ?? 0 }); // v0.6.1: 실제 표면에 붙는 경고(차량 축 고정 칸 판 대신)
     const warnLines = !this.settings.sensorEnabled || isCar ? [] : buildWarnLines(this.sensorSnap, body, rng, crt);
     if (!isCar && zones.length) {
       const cbody = this.carBody();

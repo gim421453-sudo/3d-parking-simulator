@@ -35,6 +35,11 @@ export interface ViewRisk {
   gap?: Record<SensorGroup, number | null>;
   /** 해당 측면 3D 시점이 차체/장애물에 가려져 틈이 보이지 않는가 (프레이밍 검사 결과) */
   sideBlocked: { left: boolean; right: boolean };
+  /**
+   * v0.6.1 장애물별 위험 순위의 1순위(pdc/riskRank.ts). 있으면 이것으로 시점을 고른다(그룹 경쟁 방식 대신).
+   * cls 1 접촉 직전 · 2 매우 근접 · 3 경로 교차 · 4 스윙 교차 · 5 근접 · 6 먼 장애물
+   */
+  top?: { group: SensorGroup; place: string; cls: number; swing: boolean; id: string } | null;
 }
 
 export interface SideObservation {
@@ -73,6 +78,8 @@ export interface ViewDecision {
  */
 export class ViewPolicy {
   private cur: AssistView | null = null; // 자동 시점 (null = base)
+  /** 자동 시점을 고를 때의 기준 카메라(기어 방향) */
+  private curBase: AssistView | null = null;
   private since = 0;
   private lastSwitch = -Infinity;
   private cand: AssistView | null = null;
@@ -99,7 +106,28 @@ export class ViewPolicy {
    *  - 진행 방향 위험이 없을 때만 측면: 위험한 쪽의 측면뷰(양쪽이면 더 가까운 쪽, 가려진 쪽은 제외).
    *    양쪽 전체 상황은 오른쪽 3D 서라운드뷰가 보여 주므로 메인 카메라는 전체 탑뷰로 가지 않는다.
    */
+  /**
+   * v0.6.1: 1순위 위험(장애물 단위)으로 시점 선택. 거리만이 아니라 등급(접촉/근접/경로 교차/스윙)을 쓴다.
+   *  - 5·6등급(일반 근접·먼 장애물): 기본 카메라 유지
+   *  - 진행 방향 정면: 1·2등급이면 그 방향 집중 탑뷰, 3등급(경로 교차)은 기본 카메라가 이미 보여 준다
+   *  - 반대 방향 정면: 1등급(접촉 직전)만 그 방향 집중 탑뷰
+   *  - 측면/모서리: 그 쪽 측면뷰. 가려졌거나, 진행 반대쪽 모서리의 스윙이면 모서리가 보이는 집중 탑뷰
+   */
+  private wantTop(t: NonNullable<ViewRisk['top']>, r: ViewRisk, base: AssistView): AssistView | null {
+    const dir: 'front' | 'rear' = base === 'rear' ? 'rear' : 'front';
+    if (t.cls >= 5) return null;
+    const topOf = (d: 'front' | 'rear'): AssistView => (d === 'front' ? 'topFront' : 'topRear');
+    if (t.group === dir) return t.cls <= 2 ? topOf(dir) : null;
+    if (t.group === 'front' || t.group === 'rear') return t.cls === 1 ? topOf(t.group) : null;
+    const corner = t.place.startsWith('front') ? 'front' : t.place.startsWith('rear') ? 'rear' : null;
+    if (t.swing && corner && corner !== dir) return topOf(corner);
+    const side = t.group as 'left' | 'right';
+    if (r.sideBlocked[side]) return topOf(corner ?? dir);
+    return side;
+  }
+
   private wantRisk(r: ViewRisk, base: AssistView): AssistView | null {
+    if (r.top !== undefined) return r.top ? this.wantTop(r.top, r, base) : null;
     const dir: 'front' | 'rear' = base === 'rear' ? 'rear' : 'front';
     if (r.threat[dir]) return r.veryClose[dir] ? (dir === 'front' ? 'topFront' : 'topRear') : null;
     const cands = (['left', 'right'] as const).filter((sd) => r.threat[sd] && !r.sideBlocked[sd]);
@@ -134,15 +162,18 @@ export class ViewPolicy {
       return { view: base, auto: false, reason: enabled ? '센서 없음' : '자동 전환 꺼짐' };
     }
     // 진행 방향이 바뀌었는데(기어 변경) 이전 방향의 집중 탑뷰가 남아 있으면 즉시 기본 카메라로 (새 기어 방향 우선)
-    if ((this.cur === 'topFront' && base !== 'front') || (this.cur === 'topRear' && base !== 'rear')) {
+    // v0.6.1: 기준 카메라가 "바뀐" 경우에만 해제 — R 에서 앞 모서리 스윙 때문에 고른 전방 집중 탑뷰는 유지된다
+    if (this.curBase !== null && this.curBase !== base && (this.cur === 'topFront' || this.cur === 'topRear')) {
       this.cur = null;
       this.cand = null;
       this.candT = 0;
       this.relT = 0;
       this.since = this.t;
     }
-    const held = this.t - this.since >= this.cfg.minHoldSec;
-    const cool = this.t - this.lastSwitch >= this.cfg.cooldownSec;
+    // v0.6.1: 접촉 직전/매우 근접(1·2등급)은 확인 지연·쿨다운·최소 유지 없이 빠르게 반응한다
+    const urgent = !!obs.risk?.top && obs.risk.top.cls <= 2;
+    const held = urgent || this.t - this.since >= this.cfg.minHoldSec;
+    const cool = urgent || this.t - this.lastSwitch >= this.cfg.cooldownSec;
     const enterWant = this.want(obs, this.cfg.enterRank, base);
 
     if (this.cur === null) {
@@ -152,13 +183,14 @@ export class ViewPolicy {
         this.cand = enterWant;
         this.candT = 0;
       }
-      if (this.cand && this.candT >= this.cfg.enterConfirmSec && cool) {
+      if (this.cand && this.candT >= (urgent ? Math.min(0.1, this.cfg.enterConfirmSec) : this.cfg.enterConfirmSec) && cool) {
         this.cur = this.cand;
+        this.curBase = base;
         this.since = this.t;
         this.lastSwitch = this.t;
         this.switches++;
         this.relT = 0;
-        return { view: this.cur, auto: true, reason: '측면 장애물 접근' };
+        return { view: this.cur, auto: true, reason: obs.risk?.top ? `위험 ${obs.risk.top.cls}등급 (${obs.risk.top.place})` : '측면 장애물 접근' };
       }
       return { view: base, auto: false, reason: '' };
     }

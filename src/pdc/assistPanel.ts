@@ -579,7 +579,8 @@ export class AssistPanel {
     }
     for (const [id, st] of this.zoneAnim) {
       if (!seen.has(id)) st.target = 0;
-      st.a += (st.target - st.a) * 0.3;
+      // v0.6.1: 사라진(부서진/밀려난/감지 해제) 물체의 판은 잔상 없이 빨리 지운다, 새 판은 부드럽게 나타난다
+      st.a += (st.target - st.a) * (st.target === 0 ? 0.6 : 0.3);
       if (st.target === 0 && st.a < 0.03) {
         this.zoneAnim.delete(id);
         continue;
@@ -612,12 +613,22 @@ export class AssistPanel {
         g.moveTo(poly[0].x, poly[0].y);
         for (let i = 1; i < poly.length; i++) g.lineTo(poly[i].x, poly[i].y);
         g.closePath();
-        g.globalAlpha = st.a * (st.hits > 1 ? 0.38 : 0.24);
+        // v0.6.1: 표면에 얇게 붙는 반투명 강조 + 윗변/밑변 윤곽 (영상을 가리는 면적 최소화)
+        g.globalAlpha = st.a * (st.hits > 1 ? 0.26 : 0.16);
         g.fillStyle = pal[st.level];
         g.fill();
-        g.globalAlpha = st.a * 0.5; // 0.3m 세분화 타일이 하나의 띠로 보이도록 외곽선은 얇고 옅게
+        g.globalAlpha = st.a * 0.9;
         g.strokeStyle = pal[st.level];
-        g.lineWidth = 1.2;
+        g.lineWidth = st.level === 'critical' ? 2.4 : 1.8;
+        g.beginPath();
+        g.moveTo(poly[0].x, poly[0].y);
+        g.lineTo(poly[1].x, poly[1].y);
+        g.stroke();
+        g.globalAlpha = st.a * 0.55;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(poly[poly.length - 1].x, poly[poly.length - 1].y);
+        g.lineTo(poly[poly.length - 2].x, poly[poly.length - 2].y);
         g.stroke();
         g.restore();
         continue;
