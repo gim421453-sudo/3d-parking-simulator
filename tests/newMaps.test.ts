@@ -84,8 +84,8 @@ describe('좁은 골목길: 차종별 실제 통과 가능 여부 (기구학 경
 
 describe('정비소: 리프트 베이 진입과 승강 (헤드리스 실주행 + 리프트 상태기계)', () => {
   const m = getMap('garage');
-  it('맵에 리프트 1기, 기둥 2개가 실제 충돌체, 기둥 안쪽 간격이 차폭 한계(2.1m)보다 넓다', () => {
-    expect(m.lifts!.length).toBe(1);
+  it('2주식 리프트(lift-a): 기둥 2개가 실제 충돌체, 기둥 안쪽 간격이 차폭 한계(2.1m)보다 넓다', () => {
+    expect(m.lifts!.filter((l) => l.kind === '2post').length).toBe(1);
     const posts = m.obstacles.filter((o) => o.id.startsWith('lift-a-post'));
     expect(posts.length).toBe(2);
     const gap = Math.abs(posts[0].x - posts[1].x) - (posts[0].w ?? 0);
@@ -216,4 +216,38 @@ describe('도시 블록 키트 / 도시형 검증 구역', () => {
     const f = m.mechFacilities![0];
     expect(findLevelRoute(g, { x: m.spawn.x, z: m.spawn.z, y: 0 }, { x: f.x - 13, z: f.z, y: 0 }, 8)).not.toBeNull();
   });
+});
+
+import { GARAGE_LIFT4 } from '../src/maps/mapGarage';
+describe('정비소 4주식 리프트 (v0.5.5)', () => {
+  const m = getMap('garage');
+  it('맵에 리프트 2기(2주식 + 4주식), 4주식 기둥 4개가 실제 충돌체', () => {
+    expect(m.lifts!.map((l) => l.kind)).toEqual(['2post', '4post']);
+    expect(m.obstacles.filter((o) => o.id.startsWith('lift-b-post')).length).toBe(4);
+  });
+  for (const id of ['sedan', 'suv-x6', 'coupe-m4']) {
+    it(`${id}: 문을 지나 기둥 4개 사이 주행판 위 정위치까지 주행 → 조건 충족 → 상승/하강 → 후진 출차 (충돌 0)`, () => {
+      const spec = getVehicle(id);
+      const L = GARAGE_LIFT4;
+      const car = startState(m, spec, L.x, -10, 0) // 앞마당 주차열(z=-17) 차량과 겹치지 않는 위치;
+      const d = drivePath(m, spec, car, [[L.x, -6], [L.x, 0], [L.x, L.z]], { speed: 1.2, lookahead: 2.5, maxTime: 120, goalRadius: 0.25 });
+      expect(d.blocks, id).toEqual([]);
+      expect(d.reached, id).toBe(true);
+      car.v = 0;
+      car.gear = 'P';
+      car.handbrake = true;
+      const c = centerOf(car, spec);
+      const inp = { cx: c.x, cz: c.z, heading: car.heading, v: 0, gear: 'P' as const, handbrake: true, engineOn: false };
+      expect(liftChecklist(L, spec, inp).filter((q) => !q.ok).map((q) => q.key), id).toEqual([]);
+      const st = newLift();
+      expect(liftUp(L, spec, inp, st)).toBe(true);
+      for (let i = 0; i < 20 * 60; i++) stepLift(L, st, 1 / 60);
+      expect(liftedPose(L, st)!.y).toBeCloseTo(L.maxHeight, 6);
+      liftDown(st);
+      for (let i = 0; i < 20 * 60; i++) stepLift(L, st, 1 / 60);
+      expect(st.locked).toBe(false);
+      const out = drivePath(m, spec, car, [[L.x, 0], [L.x, -7]], { speed: 1.2, lookahead: 3.5, maxTime: 120, reverse: true, goalRadius: 2.5 });
+      expect(out.blocks, id).toEqual([]);
+    });
+  }
 });

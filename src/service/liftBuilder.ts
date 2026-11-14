@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { disposeObject } from '../core/dispose';
-import { LIFT_DEFAULT, type LiftConfig, type LiftState } from './lift';
+import { LIFT4_DEFAULT, LIFT_DEFAULT, type LiftConfig, type LiftState } from './lift';
 
 /** 2주식 리프트 3D 모델: 기둥 2개는 맵 충돌체(mapBuilder)가 그리고, 여기서는 캐리지/스윙 암/패드/바닥판/상부 보를 그린다(로컬 좌표 → 그룹 변환) */
 export interface LiftBuilt {
@@ -30,6 +30,35 @@ export function buildLift(cfg: LiftConfig): LiftBuilt {
     parent.add(m);
     return m;
   };
+  if (cfg.kind === '4post') {
+    // 4주식: 주행판 2개 + 앞뒤 가로보가 한 덩어리(platform)로 승강한다. 기둥 4개는 맵 충돌체가 그린다. 고임목은 arms 값으로 올라온다
+    const D = LIFT4_DEFAULT;
+    const platform = new THREE.Group();
+    group.add(platform);
+    for (const sx of [-1, 1]) {
+      add(platform, steel, sx * D.runwayX, -0.05, 0, D.runwayW, 0.1, D.runwayL); // 주행판(윗면 = 바닥 높이)
+      add(platform, warn, sx * (D.runwayX + D.runwayW / 2 - 0.03), 0.005, 0, 0.05, 0.012, D.runwayL); // 가장자리 표시
+    }
+    for (const sz of [-1, 1]) add(platform, dark, 0, -0.14, sz * D.postZ, cfg.postHalf * 2 - 0.1, 0.16, 0.2); // 가로보
+    const chocks: THREE.Mesh[] = [];
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) chocks.push(add(platform, pad, sx * D.runwayX, -0.06, sz * (D.runwayL / 2 - 0.25), D.runwayW - 0.08, 0.1, 0.14));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) add(group, dark, sx * cfg.postHalf, 0.015, sz * D.postZ, 0.5, 0.03, 0.5); // 기둥 바닥판
+    const built4: LiftBuilt = {
+      group,
+      carriageY: 0,
+      armAngle: 0,
+      update(s) {
+        platform.position.y = s.h;
+        for (const c of chocks) c.position.y = -0.06 + 0.12 * s.arms; // 고임목이 주행판 위로 올라와 바퀴를 막는다
+        built4.carriageY = s.h;
+        built4.armAngle = s.arms;
+      },
+      dispose() {
+        disposeObject(group);
+      },
+    };
+    return built4;
+  }
   const H = LIFT_DEFAULT.postHeight;
   // 바닥판 + 상부 연결 보(케이블 덮개)
   for (const sx of [-1, 1]) add(group, dark, sx * cfg.postHalf, 0.015, 0, 0.7, 0.03, 0.9);

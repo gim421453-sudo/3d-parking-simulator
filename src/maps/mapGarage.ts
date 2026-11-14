@@ -1,10 +1,10 @@
-import { LIFT_DEFAULT, makeLift } from '../service/lift';
+import { LIFT4_DEFAULT, LIFT_DEFAULT, makeLift } from '../service/lift';
 import { parkedCar, perimeter, slotPaint, slotRow, wallBox, WHITE, YELLOW } from './helpers';
 import type { MapData, MapSlot, ObstacleDef, PaintRect } from './types';
 
 /**
  * 정비소 (v0.5.4, **임시 검증 맵** — 건물 치수/리프트 규격/배치는 사용자 확정 전의 값).
- *  - 건물(24×14m, 벽 높이 4.2m, 지붕 생략): 남쪽 벽에 출입문 2개(폭 4m). 베이 A = 2주식 리프트, 베이 B = 평지 점검 베이.
+ *  - 건물(24×14m, 벽 높이 4.2m, 지붕 생략): 남쪽 벽에 출입문 2개(폭 4m). 베이 A = 2주식 리프트, 베이 B = 4주식 리프트(v0.5.5).
  *  - 2주식 리프트(`service/lift.ts`): 기둥 2개(실제 충돌체) 사이로 진입 → 정위치 → P·주차 브레이크·시동 OFF → 상승(PageUp) / 하강(PageDown).
  *  - 앞마당: 진입 통로 + 대기 주차 4칸. 실제 정비 장비의 인증 사양을 재현한 것이 아니다.
  */
@@ -14,6 +14,8 @@ const DOOR_W = 4;
 const BAY_A_X = -5;
 const BAY_B_X = 5;
 export const GARAGE_LIFT = makeLift({ id: 'lift-a', name: '베이 A 2주식 리프트', x: BAY_A_X, z: 7, heading: 0 });
+/** 베이 B: 4주식 리프트 (v0.5.5) — 차량이 주행판 위로 그대로 올라서고 주행판 전체가 승강한다 */
+export const GARAGE_LIFT4 = makeLift({ id: 'lift-b', kind: '4post', name: '베이 B 4주식 리프트', x: BAY_B_X, z: 7, heading: 0 });
 
 const obstacles: ObstacleDef[] = [...perimeter(bounds, 0.6, 1.2, 0x8f8f8a)];
 const WALL = 0xb7bcc2;
@@ -35,6 +37,8 @@ obstacles.push(wallBox('gar-divider', 0, 8.5, 0.3, 9, 1.1, 'barrier', 0xe0d040))
 for (const bx of [BAY_A_X, BAY_B_X]) for (const s of [-1, 1]) obstacles.push({ id: `gar-bol-${bx}-${s}`, tag: 'bollard', shape: 'cyl', x: bx + s * (DOOR_W / 2 + 0.25), z: B.z0 - 1.0, r: 0.1, h: 0.95 });
 // 리프트 기둥 2개 (실제 충돌체)
 for (const s of [-1, 1]) obstacles.push({ id: `lift-a-post${s > 0 ? 'R' : 'L'}`, tag: 'pillar', shape: 'box', x: GARAGE_LIFT.x + s * GARAGE_LIFT.postHalf, z: GARAGE_LIFT.z, w: LIFT_DEFAULT.postSize, d: LIFT_DEFAULT.postSize + 0.1, h: LIFT_DEFAULT.postHeight, color: 0x2f5fb8 });
+// 4주식 리프트 기둥 4개 (실제 충돌체)
+for (const sx of [-1, 1]) for (const sz of [-1, 1]) obstacles.push({ id: `lift-b-post${sx > 0 ? 'R' : 'L'}${sz > 0 ? 'F' : 'B'}`, tag: 'pillar', shape: 'box', x: GARAGE_LIFT4.x + sx * GARAGE_LIFT4.postHalf, z: GARAGE_LIFT4.z + sz * LIFT4_DEFAULT.postZ, w: LIFT4_DEFAULT.postSize, d: LIFT4_DEFAULT.postSize, h: LIFT4_DEFAULT.postHeight, color: 0xc23a2a });
 // 공구함/작업대/타이어 랙 (북쪽 벽 앞)
 obstacles.push({ id: 'gar-toolbox-a', tag: 'planter', shape: 'box', x: -9.5, z: 13.2, w: 2.2, d: 0.8, h: 1.1, color: 0xb02a2a });
 obstacles.push({ id: 'gar-bench', tag: 'planter', shape: 'box', x: -5, z: 13.3, w: 3.2, d: 0.7, h: 0.9, color: 0x6f5a43 });
@@ -47,7 +51,7 @@ obstacles.push(...row.cars);
 obstacles.push(parkedCar('gar-wait-car', -17, -6, 0, 2));
 
 const bayLift: MapSlot = { id: 'bay-lift', x: GARAGE_LIFT.x, z: GARAGE_LIFT.z, w: 2.6, l: 5.4, dir: 0, style: 'box' };
-const bayB: MapSlot = { id: 'bay-b', x: BAY_B_X, z: 7, w: 3.0, l: 5.6, dir: 0, style: 'box' };
+const bayB: MapSlot = { id: 'bay-b', x: BAY_B_X, z: 7, w: 2.6, l: 5.3, dir: 0, style: 'box' };
 const slots: MapSlot[] = [bayLift, bayB, ...row.slots];
 
 const paint: PaintRect[] = [
@@ -66,14 +70,14 @@ const paint: PaintRect[] = [
 
 export const MAP_GARAGE: MapData = {
   id: 'garage',
-  name: '정비소 (2주식 리프트 · 임시 배치)',
+  name: '정비소 (2주식·4주식 리프트 · 임시 배치)',
   desc: '정비소 건물의 베이 A 에 진입해 2주식 리프트 사이에 정위치로 세우고(P·주차 브레이크·시동 OFF) 리프트를 올리고 내립니다. ※ 건물 치수/리프트 규격은 사용자 확정 전의 임시 값입니다.',
   bounds,
   env: { indoor: false, sky: 0x9ab4cc, ambient: 0.6 },
   spawn: { x: BAY_A_X, z: -14, heading: 0 },
   provisional: true,
   mechUnavailable: '정비소 전용 맵(리프트 검증용)',
-  lifts: [GARAGE_LIFT],
+  lifts: [GARAGE_LIFT, GARAGE_LIFT4],
   surfaces: [
     { x: 0, z: -3, w: 48, d: 38, kind: 'asphalt' },
     { x: 0, z: 7, w: 24.8, d: 14.8, kind: 'concrete' },

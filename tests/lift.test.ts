@@ -117,3 +117,37 @@ describe('2주식 리프트: 승강 상태기계', () => {
     expect(s.locked).toBe(true);
   });
 });
+
+import { LIFT4_DEFAULT, LIFT4_TOL } from '../src/service/lift';
+describe('4주식 리프트 (v0.5.5): 주행판 위에 올라선 차량을 주행판째 올린다', () => {
+  const c4 = makeLift({ id: 'l4', kind: '4post', x: 5, z: 7, heading: 0 });
+  const at = (o: Partial<LiftCarInput> = {}): LiftCarInput => ({ cx: 5, cz: 7, heading: 0, v: 0, gear: 'P', handbrake: true, engineOn: false, ...o });
+  it('종류/기본 치수: 기둥 4개 간격(좌우 3.1m, 앞뒤 5.5m), 최고 높이 1.9m', () => {
+    expect(c4.kind).toBe('4post');
+    expect(makeLift({ id: 'x', x: 0, z: 0, heading: 0 }).kind).toBe('2post');
+    expect(c4.postHalf * 2).toBeCloseTo(3.1, 9);
+    expect(LIFT4_DEFAULT.postZ * 2).toBeCloseTo(5.5, 9);
+    expect(c4.maxHeight).toBe(1.9);
+  });
+  it('정위치 허용은 2주식보다 넓다(좌우 ±20cm, 앞뒤 ±45cm) — 18cm/40cm 치우쳐도 가능, 25cm 는 거부', () => {
+    expect(LIFT4_TOL.lateral).toBeGreaterThan(0.15);
+    expect(liftChecklist(c4, spec, at({ cx: 5.18, cz: 7.4 })).every((q) => q.ok)).toBe(true);
+    const s = newLift();
+    expect(liftUp(c4, spec, at({ cx: 5.25 }), s)).toBe(false);
+    expect(s.message).toMatch(/주행판/);
+  });
+  it('상승 → 최고 높이 1.9m → 하강 → 고정 해제. 승강 중 차량 수평 위치는 그대로', () => {
+    const s = newLift();
+    expect(liftUp(c4, spec, at({ cx: 5.1 }), s)).toBe(true);
+    expect(s.message).toMatch(/고임목/);
+    for (let i = 0; i < 20 * 60; i++) stepLift(c4, s, 1 / 60);
+    expect(s.phase).toBe('holding');
+    const p = liftedPose(c4, s)!;
+    expect(p.y).toBeCloseTo(1.9, 9);
+    expect(p.cx).toBeCloseTo(5.1, 9);
+    liftDown(s);
+    for (let i = 0; i < 20 * 60; i++) stepLift(c4, s, 1 / 60);
+    expect(s.phase).toBe('idle');
+    expect(s.locked).toBe(false);
+  });
+});

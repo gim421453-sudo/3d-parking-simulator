@@ -10,8 +10,11 @@ import type { VehicleSpec } from '../vehicle/spec';
  *       → [하강] 바닥까지 내려옴 → 암이 빠짐(고정 해제) → 출차 가능.
  * 차량이 고정된 동안(암이 닿아 있는 동안)은 주행 입력이 막히고 차량 높이는 리프트 높이를 따른다(떨어지지 않는다).
  */
+export type LiftKind = '2post' | '4post';
 export interface LiftConfig {
   id: string;
+  /** 2주식(스윙 암이 차체 아래 리프트 포인트를 받침) / 4주식(차량이 올라선 주행판(런웨이) 전체가 승강, v0.5.5) */
+  kind: LiftKind;
   name: string;
   x: number;
   z: number;
@@ -23,6 +26,10 @@ export interface LiftConfig {
   maxHeight: number;
 }
 export const LIFT_DEFAULT = { postHalf: 1.6, maxHeight: 1.8, postSize: 0.3, postHeight: 2.9 } as const;
+/** 4주식: 기둥 4개(x=±postHalf, z=±postZ), 주행판 2개(중심 x=±runwayX, 폭 runwayW, 길이 runwayL). 주행판은 바닥에 매립된 형태(윗면 = 바닥)라 차량이 그대로 올라선다 */
+export const LIFT4_DEFAULT = { postHalf: 1.55, postZ: 2.75, maxHeight: 1.9, postSize: 0.28, postHeight: 2.6, runwayX: 0.78, runwayW: 0.6, runwayL: 5.3 } as const;
+/** 4주식 정위치 허용: 좌우는 타이어가 주행판 위에 있어야 하므로 ±0.20m, 앞뒤는 ±0.45m */
+export const LIFT4_TOL = { lateral: 0.2, longitudinal: 0.45 } as const;
 export const LIFT_TOL = { lateral: 0.15, longitudinal: 0.3, heading: 4 * DEG, stopSpeed: 0.08 } as const;
 export const LIFT_LIMITS = { maxWidth: 2.1, maxWeightKg: 3500 } as const;
 export const LIFT_TIMES = { arms: 1.6, speed: 0.22 } as const; // 암 전개 시간(s), 승강 속도(m/s)
@@ -93,6 +100,17 @@ export interface LiftCheck {
 }
 export function liftChecklist(cfg: LiftConfig, spec: Pick<VehicleSpec, 'width'> & { massKg?: number }, car: LiftCarInput): LiftCheck[] {
   const a = liftAlignment(cfg, car);
+  if (cfg.kind === '4post') {
+    return [
+      { key: 'size', label: `차폭 ${LIFT_LIMITS.maxWidth}m 이하`, ok: spec.width <= LIFT_LIMITS.maxWidth && (spec.massKg ?? 0) <= LIFT_LIMITS.maxWeightKg },
+      { key: 'centered', label: `주행판 중앙 (±${(LIFT4_TOL.lateral * 100).toFixed(0)}cm)`, ok: Math.abs(a.lateral) <= LIFT4_TOL.lateral },
+      { key: 'position', label: `앞뒤 정위치 (±${(LIFT4_TOL.longitudinal * 100).toFixed(0)}cm)`, ok: Math.abs(a.longitudinal) <= LIFT4_TOL.longitudinal },
+      { key: 'heading', label: `방향 정렬 (±${(LIFT_TOL.heading / DEG).toFixed(0)}°)`, ok: a.headingErrDeg <= LIFT_TOL.heading / DEG },
+      { key: 'stopped', label: '정차', ok: Math.abs(car.v) < LIFT_TOL.stopSpeed },
+      { key: 'parked', label: 'P 단 + 주차 브레이크', ok: car.gear === 'P' && car.handbrake },
+      { key: 'engine', label: '시동 OFF', ok: !car.engineOn },
+    ];
+  }
   return [
     { key: 'size', label: `차폭 ${LIFT_LIMITS.maxWidth}m 이하`, ok: spec.width <= LIFT_LIMITS.maxWidth && (spec.massKg ?? 0) <= LIFT_LIMITS.maxWeightKg },
     { key: 'centered', label: `기둥 사이 중앙 (±${(LIFT_TOL.lateral * 100).toFixed(0)}cm)`, ok: Math.abs(a.lateral) <= LIFT_TOL.lateral },
@@ -125,7 +143,7 @@ export function liftUp(cfg: LiftConfig, spec: Pick<VehicleSpec, 'width'> & { mas
   s.rel = { x: l.x, z: l.z, heading: angleDiff(car.heading, cfg.heading) };
   s.phase = 'armsIn';
   s.target = cfg.maxHeight;
-  s.message = '리프트 암 고정 중';
+  s.message = cfg.kind === '4post' ? '바퀴 고임목 고정 중' : '리프트 암 고정 중';
   return true;
 }
 
@@ -205,6 +223,7 @@ export function liftedPose(cfg: LiftConfig, s: LiftState, baseY = 0): { cx: numb
 /** 리프트가 주행을 막는가(암이 들어와 있거나 공중) */
 export const liftBlocksDriving = (s: LiftState): boolean => s.locked || s.phase === 'armsIn';
 
-export function makeLift(p: { id: string; name?: string; x: number; z: number; heading: number; postHalf?: number; maxHeight?: number }): LiftConfig {
-  return { id: p.id, name: p.name ?? '2주식 리프트', x: p.x, z: p.z, heading: p.heading, postHalf: p.postHalf ?? LIFT_DEFAULT.postHalf, maxHeight: p.maxHeight ?? LIFT_DEFAULT.maxHeight };
+export function makeLift(p: { id: string; kind?: LiftKind; name?: string; x: number; z: number; heading: number; postHalf?: number; maxHeight?: number }): LiftConfig {
+  if (p.kind === '4post') return { id: p.id, kind: '4post', name: p.name ?? '4주식 리프트', x: p.x, z: p.z, heading: p.heading, postHalf: p.postHalf ?? LIFT4_DEFAULT.postHalf, maxHeight: p.maxHeight ?? LIFT4_DEFAULT.maxHeight };
+  return { id: p.id, kind: '2post', name: p.name ?? '2주식 리프트', x: p.x, z: p.z, heading: p.heading, postHalf: p.postHalf ?? LIFT_DEFAULT.postHalf, maxHeight: p.maxHeight ?? LIFT_DEFAULT.maxHeight };
 }

@@ -7,6 +7,7 @@ export class LiftPanel {
   readonly el: HTMLDivElement;
   private phaseEl: HTMLElement;
   private msgEl: HTMLElement;
+  private nameEl: HTMLElement;
   private last = '';
 
   constructor(parent: HTMLElement, onAction: (a: Action) => void) {
@@ -24,6 +25,7 @@ export class LiftPanel {
     parent.appendChild(this.el);
     this.phaseEl = this.el.querySelector('[data-r="phase"]')!;
     this.msgEl = this.el.querySelector('[data-r="msg"]')!;
+    this.nameEl = this.el.querySelector('.mc-name')!;
     this.el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => onTap(b, () => onAction(b.dataset.a as Action)));
   }
 
@@ -31,8 +33,9 @@ export class LiftPanel {
     this.el.classList.toggle('hidden', !v);
   }
 
-  update(s: LiftState, checks: LiftCheck[]): void {
-    const PH: Record<string, string> = { idle: '대기', armsIn: '암 고정 중', raising: '상승 중', holding: '정지(고정)', lowering: '하강 중', armsOut: '고정 해제 중' };
+  update(s: LiftState, checks: LiftCheck[], name = ''): void {
+    if (name && this.nameEl.textContent !== name) this.nameEl.textContent = name;
+    const PH: Record<string, string> = { idle: '대기', armsIn: '고정 중', raising: '상승 중', holding: '정지(고정)', lowering: '하강 중', armsOut: '고정 해제 중' };
     const failed = checks.filter((c) => !c.ok);
     const line = s.phase === 'idle' ? (failed.length ? failed[0].label : '상승(PageUp)을 누르세요') : s.message;
     const key = `${s.phase}|${line}`;

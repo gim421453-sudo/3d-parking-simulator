@@ -1014,7 +1014,7 @@ export class Game {
     this.liftPanel.setVisible(!!L);
     if (!L) return false;
     this.liftChecks = liftChecklist(L.cfg, this.spec, this.liftInput());
-    this.liftPanel.update(L.st, this.liftChecks);
+    this.liftPanel.update(L.st, this.liftChecks, L.cfg.kind === '4post' ? '4주식 리프트' : '2주식 리프트');
     return liftBlocksDriving(L.st);
   }
 
