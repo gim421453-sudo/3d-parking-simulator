@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { createCarModel } from '../vehicle/carModel';
 import { parkedSpec } from '../vehicle/spec';
 import { createTextures, type TextureSet } from './textures';
+import { buildGeoLayer, type GeoStats } from './geoBuilder';
 import type { MapData, ObstacleDef } from './types';
 import type { ParkingSlot } from '../mission/parking';
 
@@ -20,7 +21,7 @@ export interface BuiltMap {
   setTarget(slot: ParkingSlot | null): void;
   /** 다층 맵 성능: 플레이어 높이에서 ±maxDy 밖 층의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 반환: 숨긴 개수 */
   /** 타일 그룹 수 / 현재 보이는 수 (대형 맵이 아니면 0/0) */
-  tileStats(): { tiles: number; visible: number; batchedBoxes: number; batchMeshes: number };
+  tileStats(): { tiles: number; visible: number; batchedBoxes: number; batchMeshes: number; geo: GeoStats | null };
   /** 0 = 야외, 1 = 실내 구역(지하층) 안. 주변광/태양광을 줄인다 */
   setIndoorFactor(f: number): void;
   setLevelVisibility(playerY: number, maxDy?: number): number;
@@ -111,7 +112,8 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     return g;
   };
   if (!indoor) {
-    const g = track(holedPlane(0, 0, 600, 600, 4));
+    const og = Math.max(600, 2 * Math.max(Math.abs(b.minX), Math.abs(b.maxX), Math.abs(b.minZ), Math.abs(b.maxZ)) + 300);
+    const g = track(holedPlane(0, 0, og, og, 4));
     const outer = new THREE.Mesh(g, mats.grass);
     outer.position.y = -0.02;
     outer.receiveShadow = true;
@@ -254,6 +256,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     return { key: k, idx: bt.geos.length - 1 };
   };
   for (const o of map.obstacles) {
+    if (o.hidden) continue; // 충돌/센서 전용(외형은 geo 레이어가 그린다)
     switch (o.tag) {
       case 'cone':
         cones.push(o);
@@ -365,6 +368,9 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       }
     }
   }
+  // ---- v0.6.0 실제 지도 표시 레이어 ----
+  let geoStats: GeoStats | null = null;
+  if (map.geo) geoStats = buildGeoLayer({ geo: map.geo, tex, mats: { asphalt: mats.asphalt, grass: mats.grass, concrete: mats.concrete }, grid: wgrid, root: group, addAt, track });
   // 합치기: 타일 × 재질 × 그림자 여부마다 메시 1개
   for (const [bkey, bt] of batches) {
     const merged = mergeGeometries(bt.geos, false);
@@ -487,7 +493,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   const result: BuiltMap = {
     group,
     tileStats() {
-      return { tiles: tileGroups.size, visible: [...tileGroups.values()].filter((g) => g.visible).length, batchedBoxes, batchMeshes };
+      return { tiles: tileGroups.size, visible: [...tileGroups.values()].filter((g) => g.visible).length, batchedBoxes, batchMeshes, geo: geoStats };
     },
     setIndoorFactor(f) {
       // 지하/실내 구역 안: 하늘빛과 태양광을 줄이고(지붕이 가린다) 천장 조명만 남긴다

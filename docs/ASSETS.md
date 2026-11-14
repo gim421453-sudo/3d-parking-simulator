@@ -24,6 +24,8 @@
 | public/models/sedan-test.glb | 시험용 세단 | 이 프로젝트(자체 생성) | - | 프로젝트 자체 | 불필요 | - | v0.4 |
 | public/models/concept-coupe.glb | Car Concept (컨셉 스포츠 쿠페) | Khronos Group (기반 모델 "Free Concept Car 004": Unity Fan, CC0) | https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept | **CC-BY-4.0** (원본 CC0 기반, 로고/상표 제외) | **필요** (앱 크레딧·이 표·`public/models/LICENSE-concept-coupe.md`) | 있음 — 실내 제거·바퀴 재구성·램프 재질 개명·단순화(`scripts/prepare-car-glb.mjs`) | v0.5.0 |
 
+| src/maps/data/goejeong.json | 괴정동(부산 사하구) 괴정역 중심 1km 도로·건물·주차장·녹지·도로망 | **OpenStreetMap contributors** | https://www.openstreetmap.org/copyright (API `map?bbox=128.985881,35.095079,128.997299,35.104421`, 2026-11-14) | **ODbL 1.0** (파생 데이터베이스 — 같은 라이선스로 공유) | **필요** — 맵 설명·미니맵에 "© OpenStreetMap contributors" 표시, `src/maps/data/LICENSE-OSM.md` | 있음 — 투영(미터)·잘라내기·차량 도로 등급만 추출(`scripts/osm-import.ts`), `gen:1` 건물은 절차 생성(실제 아님) | v0.6.0 |
+
 - CC-BY 계열은 저작자 표시를 앱 내 "크레딧" 또는 이 문서에 남겨야 합니다.
 - "개인/비상업적 사용만 허용"·"재배포 금지" 에셋은 GitHub Pages/APK 배포에 쓸 수 없습니다.
 - 에셋 파일은 `public/models/` 에 넣고(앱에 포함되어 오프라인 동작), 위 표에 한 줄 추가하세요.

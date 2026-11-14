@@ -1,4 +1,5 @@
 import { angleDiff } from '../core/math';
+import { buildRoadNetGraph, findRoadNetRoute, type RoadNetGraph } from './roadNet';
 import type { MapData, MapSlot } from '../maps/types';
 import { levelAt } from '../maps/terrain';
 import type { VehicleSpec } from '../vehicle/spec';
@@ -98,6 +99,8 @@ export class Navigator {
   }
 
   private spec: VehicleSpec | null = null;
+  /** v0.6.0 실제 지도 도로망(OSM) 그래프 */
+  private rnet: RoadNetGraph | null = null;
   private lgraph: LevelGraph | null = null;
   /** 다층 맵 경로 탐색에 쓸 차량(차폭/차고/회전 반경에 따라 통과 가능한 길이 달라진다). setMap 전에 호출 */
   setVehicle(spec: VehicleSpec): void {
@@ -118,7 +121,9 @@ export class Navigator {
     this.map = map;
     this.lgraph = null;
     // 다층 맵(주차타워/통합 맵)은 3D 도로 그래프(levelGraph: 층·경사로·차종 반영)를 쓴다 — 목적지를 정할 때 만든다(지연 생성)
-    this.graph = map.terrain || map.roads?.length || map.id === 'mechpark' ? null : buildBestRoadGraph(map);
+    // 실제 지도(roadNet): 도로 중심선 그래프를 그대로 쓴다(격자 탐색은 1km 지도에서 너무 무겁다)
+    this.rnet = map.roadNet ? buildRoadNetGraph(map.roadNet) : null;
+    this.graph = this.rnet || map.terrain || map.roads?.length || map.id === 'mechpark' ? null : buildBestRoadGraph(map);
     this.dest = null;
     this.route = null;
     this.status = 'idle';
@@ -139,11 +144,18 @@ export class Navigator {
     this.offT = 0;
     this.cool = 0;
     if (slot) this.plan(from);
-    if (slot && !this.graph && !this.multiLevel) this.status = 'noRoute';
+    if (slot && !this.graph && !this.multiLevel && !this.rnet) this.status = 'noRoute';
     this.last = this.evaluate(from);
   }
 
   private plan(from: Pt): void {
+    if (this.rnet && this.dest) {
+      const r = findRoadNetRoute(this.rnet, { x: from.x, z: from.z }, { x: this.dest.x, z: this.dest.z });
+      this.route = r ? { points: r.points.map((p) => ({ x: p.x, z: p.z, y: 0 })), length: r.length, dest: this.dest } : null;
+      if (!this.route) this.status = 'noRoute';
+      else if (this.status === 'noRoute') this.status = 'guiding';
+      return;
+    }
     if (this.multiLevel && this.map && this.dest) {
       const g = this.levelGraph;
       const r = g ? findLevelRoute(g, { x: from.x, z: from.z, y: from.y ?? 0 }, { x: this.dest.x, z: this.dest.z, y: this.dest.y ?? 0 }) : null;

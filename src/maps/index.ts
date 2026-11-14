@@ -15,8 +15,9 @@ import type { MapData } from './types';
 import { MAP_ALLEY } from './mapAlley';
 import { MAP_CITYTEST } from './mapCityTest';
 import { MAP_GARAGE } from './mapGarage';
+import { MAP_GOEJEONG } from './mapGoejeong';
 /** 원본 맵(부속 구역을 붙이기 전) — megapark 합성과 배치 탐색 스크립트가 쓴다 */
-export const BASE_MAPS: MapData[] = [MAP_LOT, MAP_UNDERGROUND, MAP_OUTDOOR, MAP_TOWER, MAP_GARAGE5, MAP_CARPARK3, MAP_MODLOT, MAP_SPIRAL, MAP_MECHPARK, MAP_MEGAPARK, MAP_GARAGE, MAP_ALLEY, MAP_CITYTEST];
+export const BASE_MAPS: MapData[] = [MAP_LOT, MAP_UNDERGROUND, MAP_OUTDOOR, MAP_TOWER, MAP_GARAGE5, MAP_CARPARK3, MAP_MODLOT, MAP_SPIRAL, MAP_MECHPARK, MAP_MEGAPARK, MAP_GARAGE, MAP_ALLEY, MAP_CITYTEST, MAP_GOEJEONG];
 /**
  * 맵 옆에 붙이는 기계식 주차 부속 구역 (v0.5.5, 임시 배치): 시설을 놓을 자리가 없던 맵은 외벽에 문을 내고 바로 옆 마당에 시설을 둔다.
  * 문 위치는 scripts/find-annex-sites.ts 로 찾은 값(문 자리에 벽만 있음 · 직선 진입로가 비어 있음 · 시작 위치에서 경로가 있음)이다.

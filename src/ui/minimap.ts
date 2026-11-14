@@ -115,8 +115,45 @@ export class Minimap {
         }
       }
     }
+    // v0.6.0 실제 지도: 면 → 도로 → 건물 다각형 (충돌 전용 숨김 상자는 그리지 않는다)
+    if (map.geo) {
+      const poly = (pts: [number, number][]): void => {
+        g.beginPath();
+        pts.forEach(([x, z], i) => {
+          const [sx, sy] = P(x, z);
+          if (i) g.lineTo(sx, sy);
+          else g.moveTo(sx, sy);
+        });
+        g.closePath();
+      };
+      const AREA: Record<string, string> = { grass: '#2c4a2e', pitch: '#33553a', water: '#24445f', parking: '#3a4048' };
+      for (const a of map.geo.areas) {
+        g.fillStyle = AREA[a.kind] ?? '#333';
+        poly(a.pts);
+        g.fill();
+      }
+      g.strokeStyle = '#5b636d';
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      for (const r of map.geo.roads) {
+        g.lineWidth = Math.max(1, r.w * this.scale);
+        g.beginPath();
+        r.pts.forEach(([x, z], i) => {
+          const [sx, sy] = P(x, z);
+          if (i) g.lineTo(sx, sy);
+          else g.moveTo(sx, sy);
+        });
+        g.stroke();
+      }
+      for (const b of map.geo.buildings) {
+        g.fillStyle = b.gen ? '#4d5560' : '#7b8592';
+        poly(b.pts);
+        g.fill();
+      }
+    }
     // 장애물
     for (const o of map.obstacles) {
+      if (o.hidden) continue;
       if (!onLevel(o.y0 ?? 0, o.h)) continue;
       g.fillStyle = TAG_COLOR[o.tag] ?? '#999';
       if (o.shape === 'cyl') {
@@ -132,6 +169,14 @@ export class Minimap {
         g.fillRect(-((o.w ?? 1) * this.scale) / 2, -((o.d ?? 1) * this.scale) / 2, (o.w ?? 1) * this.scale, (o.d ?? 1) * this.scale);
         g.restore();
       }
+    }
+    if (map.geo) {
+      // 출처 표시 (ODbL)
+      g.fillStyle = 'rgba(255,255,255,.55)';
+      g.font = `${Math.max(8, Math.round(this.h * 0.045))}px sans-serif`;
+      g.textAlign = 'left';
+      g.textBaseline = 'bottom';
+      g.fillText(map.geo.attribution, 4, this.h - 3);
     }
     this.base = c;
   }

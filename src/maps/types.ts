@@ -53,6 +53,17 @@ export interface ObstacleDef {
   color?: number;
   /** tag === 'car' 일 때 VEHICLES 인덱스 */
   carSpec?: number;
+  /** v0.6.0: 충돌/센서 전용(맵 빌더가 그리지 않는다) — 실제 지도 건물처럼 외형은 다른 레이어(geo)가 그릴 때 */
+  hidden?: boolean;
+}
+
+/** v0.6.0 실제 지도(OSM 등) 표시 레이어. 좌표는 맵 좌표(m), 다각형은 [x, z] 점 목록 */
+export interface GeoLayer {
+  buildings: { id: string; pts: [number, number][]; h: number; color: number; name?: string; gen?: boolean }[];
+  roads: { id: string; pts: [number, number][]; w: number; hw: string; name?: string; oneway: boolean }[];
+  areas: { id: string; kind: 'parking' | 'grass' | 'water' | 'pitch'; pts: [number, number][]; name?: string }[];
+  /** 화면에 표시할 출처 (ODbL 등) */
+  attribution: string;
 }
 
 export interface MapSlot extends ParkingSlot {
@@ -123,6 +134,10 @@ export interface MapData {
   lifts?: LiftConfig[];
   /** 도로 중심선 데이터(시각/내비 가중/자동 검사용) */
   roads?: RoadSeg[];
+  /** v0.6.0 실제 지도 표시 레이어(건물 다각형/도로 폴리라인/면) */
+  geo?: GeoLayer;
+  /** v0.6.0 실제 도로망 그래프(내비): 노드 [x,z], 간선 [a, b, 일방통행] */
+  roadNet?: { nodes: [number, number][]; edges: [number, number, 0 | 1][] };
 }
 
 export function obstacleToCollider(o: ObstacleDef): Collider {

@@ -2160,6 +2160,16 @@ export class Game {
     };
     // 통합 맵: 가까운 구역 중심 렌더(주차 차량 모델 거리 컬링) + 구역 이름 알림 + 기계식 패널은 기계식 구역 근처에서만
     const zones = (this.map as unknown as { zones?: { id: string; label: string; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } }[] }).zones;
+    const mb = this.map.bounds;
+    const largeMap = (mb.maxX - mb.minX) * (mb.maxZ - mb.minZ) > 40000;
+    if (largeMap && !zones) {
+      // v0.6.0: 구역이 없는 대형 맵(실제 지도)도 타일 스트리밍 — 먼 타일은 그리지 않는다(충돌/센서는 데이터 기반이라 무관)
+      this.zoneAcc += 1 / 60;
+      if (this.zoneAcc > 0.4) {
+        this.zoneAcc = 0;
+        this.built?.setViewCenter(this.car.x, this.car.z, VIEW_RADIUS[this.settings.quality].load);
+      }
+    }
     if (zones) {
       this.zoneAcc += 1 / 60;
       if (this.zoneAcc > 0.4) {
