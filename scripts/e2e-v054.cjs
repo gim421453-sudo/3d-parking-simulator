@@ -200,6 +200,8 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   const up = await Y(() => { const G = window.__game; return { h: G.lifts[0].st.h, carY: G.car.y, camY: G.rig.active.position.y, phase: G.lifts[0].st.phase }; });
   check('정비소 리프트 최고 높이 1.8m 에서 정지(고정 유지), 추적 카메라가 차량을 따라 올라감', topped && Math.abs(up.h - 1.8) < 1e-6 && Math.abs(up.carY - 1.8) < 0.01 && up.camY > camY0 + 1.0, JSON.stringify({ up, camY0 }));
   await pg.screenshot({ path: path.join(OUT, '14-e2e-lift-up.png') });
+  // v0.5.5: 시동 OFF 는 상승 조건이 아니게 됐으므로 올라간 상태에서 시동을 끈다(이후 출차 단계가 다시 시동을 건다)
+  check('정비소: 리프트에 올라간 상태에서 시동을 끌 수 있다', await engineOff());
   await pg.keyboard.press('PageDown');
   const downed = await until(() => { const s = window.__game.lifts[0].st; return s.phase === 'idle' && !s.locked; }, undefined, 120000);
   const dn = await Y(() => ({ y: window.__game.car.y, h: window.__game.lifts[0].st.h, cycles: window.__game.lifts[0].st.cycles }));
