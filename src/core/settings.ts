@@ -21,6 +21,8 @@ export interface Settings {
   assistFrontMaxKmh: number; // D 에서 주차 보조 화면이 유지되는 최대 속도(km/h)
   assistExitSec: number; // P 로 바꾼 뒤 주차 보조 화면이 닫히기까지(초)
   assistGuides: boolean; // 조향 연동 주차 가이드라인
+  /** v0.6.1 서라운드뷰 예상 이동선: basic = 차체 폭 경계 2선(이전), detail = 앞바퀴 2(실선)+뒷바퀴 2(점선)+앞 모서리 스윙+충돌 예상 지점 */
+  surroundGuideMode: 'basic' | 'detail';
   assistCameraFps: number; // 주차 보조 카메라 갱신 FPS (부하 조절)
   pdcPalette: PdcPaletteId; // PDC 경고 색상 프리셋
   /** 3인칭 화면에 좌/룸/우 미러 표시 (기본 OFF, v0.5.0) */
@@ -75,6 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
   assistFrontMaxKmh: 15,
   assistExitSec: 3,
   assistGuides: true,
+  surroundGuideMode: 'detail',
   assistCameraFps: 30,
   pdcPalette: 'standard',
   thirdMirror: false,
@@ -117,6 +120,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Settings {
   s.assistCameraFps = Math.min(60, Math.max(10, Number(s.assistCameraFps) || 30));
   if (!(s.pdcPalette in PDC_PALETTES)) s.pdcPalette = 'standard';
   s.pdcView = s.pdcView === 'sensor' ? 'sensor' : 'surround';
+  s.surroundGuideMode = s.surroundGuideMode === 'basic' ? 'basic' : 'detail';
   s.thirdMirror = s.thirdMirror === true;
   s.mechAutoSlot = s.mechAutoSlot === true;
   s.engineSound = s.engineSound !== false;

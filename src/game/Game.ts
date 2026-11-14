@@ -49,6 +49,7 @@ import { buildPdcState, type PdcState } from '../pdc/pdcModel';
 import { WHEEL_LOCK_DEG } from '../core/wheel';
 import { ceilingAbove, groundAt, levelAt } from '../maps/terrain';
 import { gateViewRisk } from '../pdc/viewGate';
+import { pathHitIndex } from '../pdc/guidelines';
 import { RiskRanker, type RiskCandidate } from '../pdc/riskRank';
 import { buildTowerVisual, type TowerVisual } from '../maps/towerBuilder';
 import { chooseBeepTarget } from '../sensors/beepPlan';
@@ -2029,6 +2030,8 @@ export class Game {
             dir: sdir,
             guideMax: sGuideMax,
             groundY: this.map.terrain ? (x: number, z: number) => groundAt(this.map.terrain!, x, z, gy, 1.2) ?? gy : undefined,
+            mode: this.settings.surroundGuideMode,
+            hitIndex: (pts) => pathHitIndex(pts, pose, this.nearColliders(), gy + this.spec.sensorHeight),
           }
         : undefined,
     });

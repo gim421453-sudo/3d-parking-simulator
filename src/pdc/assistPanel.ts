@@ -8,7 +8,7 @@ import type { VehicleSpec } from '../vehicle/spec';
 import type { InfoContent } from '../infotainment/controller';
 import type { NavState } from '../nav/navigator';
 import { ASSIST_VIEW_NAME, type AssistView } from './viewPolicy';
-import { buildGuideLines, guideColor } from './guidelines';
+import { buildGuideLines, buildWheelPaths, guideColor } from './guidelines';
 import { PDC_PALETTES, bandLevel, bandLit, outlinePoint, zoneGeometry, type PdcPaletteId, type PdcState, type ZoneBandShape } from './pdcModel';
 
 export interface AssistPanelHandlers {
@@ -436,7 +436,7 @@ export class AssistPanel {
     camera: THREE.PerspectiveCamera;
     y: number;
     warn?: WarnLine[];
-    path?: { pose: { x: number; z: number; heading: number; y?: number }; steer: number; dir: 1 | -1; guideMax: number; groundY?: (x: number, z: number) => number };
+    path?: { pose: { x: number; z: number; heading: number; y?: number }; steer: number; dir: 1 | -1; guideMax: number; groundY?: (x: number, z: number) => number; mode?: 'basic' | 'detail'; hitIndex?: (pts: readonly { x: number; z: number; s: number }[]) => number };
   }): void {
     const g = this.octx;
     const W = this.surOv.width;
@@ -465,6 +465,10 @@ export class AssistPanel {
     }
     if (!o.path || !this.spec) return;
     const p = o.path;
+    if (p.mode === 'detail') {
+      this.drawWheelPaths(g, W, H, o.camera, p);
+      return;
+    }
     const lines = buildGuideLines(this.spec, p.steer, p.dir, Math.max(0.25, p.guideMax));
     const world = (q: { x: number; z: number }): { x: number; y: number; z: number } => {
       const w = localToWorld(p.pose.x, p.pose.z, p.pose.heading, q.x, q.z);
@@ -488,6 +492,69 @@ export class AssistPanel {
       if (drew) this.debugSurLines++;
     }
   }
+  /**
+   * v0.6.1 상세 예상 이동선(서라운드): 앞바퀴 2개 실선, 뒷바퀴 2개 얇은 점선, 앞 모서리 스윙 점선(주황), 장애물과 처음 닿는 지점은 빨간 표시.
+   * 경로는 buildWheelPaths(물리와 같은 강체 기구학) — 정지 중에도 조향각이 바뀌면 즉시 바뀐다.
+   */
+  private drawWheelPaths(g: CanvasRenderingContext2D, W: number, H: number, camera: THREE.PerspectiveCamera, p: NonNullable<Parameters<AssistPanel['drawWarnLines']>[0]['path']>): void {
+    const spec = this.spec!;
+    const wp = buildWheelPaths(spec, p.steer, p.dir, 3.5, 0.15);
+    const world = (q: { x: number; z: number }): { x: number; y: number; z: number } => {
+      const w = localToWorld(p.pose.x, p.pose.z, p.pose.heading, q.x, q.z);
+      return { x: w.x, y: (p.groundY ? p.groundY(w.x, w.z) : (p.pose.y ?? 0)) + 0.04, z: w.z };
+    };
+    this.debugSurPaths = { front: 0, rear: 0, swing: 0, hits: 0 };
+    const draw = (pts: readonly { x: number; z: number; s: number }[], style: { color: string; width: number; dash: number[] }, kind: 'front' | 'rear' | 'swing'): void => {
+      const hit = p.hitIndex ? p.hitIndex(pts) : -1;
+      const end = hit >= 0 ? hit : pts.length - 1;
+      g.save();
+      g.strokeStyle = style.color;
+      g.lineWidth = style.width;
+      g.setLineDash(style.dash);
+      g.lineCap = 'round';
+      let drew = false;
+      for (let i = 0; i < end; i++) {
+        const seg = projectSegment(world(pts[i]), world(pts[i + 1]), camera, W, H, false);
+        if (!seg) continue;
+        g.beginPath();
+        g.moveTo(seg[0].x, seg[0].y);
+        g.lineTo(seg[1].x, seg[1].y);
+        g.stroke();
+        drew = true;
+      }
+      g.restore();
+      if (drew) this.debugSurPaths[kind]++;
+      if (hit >= 0) {
+        // 충돌 예상 지점: 빨간 짧은 구간 + 점
+        const a = world(pts[Math.max(0, hit - 1)]);
+        const b = world(pts[hit]);
+        const seg = projectSegment(a, b, camera, W, H, false);
+        if (seg) {
+          g.save();
+          g.strokeStyle = '#ff3b30';
+          g.fillStyle = '#ff3b30';
+          g.lineWidth = 4;
+          g.beginPath();
+          g.moveTo(seg[0].x, seg[0].y);
+          g.lineTo(seg[1].x, seg[1].y);
+          g.stroke();
+          g.beginPath();
+          g.arc(seg[1].x, seg[1].y, 4, 0, Math.PI * 2);
+          g.fill();
+          g.restore();
+          this.debugSurPaths.hits++;
+        }
+      }
+    };
+    draw(wp.fl, { color: '#ffffff', width: 2.2, dash: [] }, 'front');
+    draw(wp.fr, { color: '#ffffff', width: 2.2, dash: [] }, 'front');
+    draw(wp.rl, { color: 'rgba(255,255,255,0.8)', width: 1.2, dash: [5, 5] }, 'rear');
+    draw(wp.rr, { color: 'rgba(255,255,255,0.8)', width: 1.2, dash: [5, 5] }, 'rear');
+    if (wp.swing) draw(wp.swing, { color: 'rgba(255,170,60,0.95)', width: 1.6, dash: [3, 4] }, 'swing');
+    this.debugSurLines = this.debugSurPaths.front;
+  }
+  /** 테스트/디버그: 상세 예상 이동선 — 그려진 앞바퀴/뒷바퀴/스윙 선 수와 충돌 예상 표시 수 */
+  debugSurPaths = { front: 0, rear: 0, swing: 0, hits: 0 };
   /** 테스트/디버그: 이번 프레임에 서라운드에 그려진 선의 개수 (예측 경계선, 최대 2) */
   debugSurLines = 0;
   /** 테스트/디버그: 이번 프레임에 서라운드에 그려진 거리 단계색 경고선 개수 */

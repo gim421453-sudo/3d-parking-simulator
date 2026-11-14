@@ -90,3 +90,49 @@ export function guideCutDistance(spec: VehicleSpec, steer: number, dir: 1 | -1, 
   }
   return maxDist;
 }
+
+// ---------------------------------------------------------------- v0.6.1 4륜 예상 이동선
+/**
+ * 네 바퀴(접지점)와 앞 모서리 스윙의 예상 경로 — 차체 전체가 같은 선회 중심을 도는 강체 기구학(pathOfPoint, 물리와 같은 식).
+ *  - 전륜 조향 차량: 뒷바퀴는 스스로 조향하지 않고 선회 중심을 도는 궤적을 따라간다(앞바퀴보다 안쪽)
+ *  - 후진(dir −1)은 같은 식으로 뒤로 진행한 궤적이다 — 전진 경로를 좌우 반전한 것이 아니다
+ *  - 스윙: 조향 반대쪽 앞 모서리(전진 좌회전이면 오른쪽 앞, 후진 우조향이면 왼쪽 앞)가 바퀴 경로 바깥으로 나가는 궤적
+ *  - steer 는 **실제 전륜 조향각**(rad). 스티어링 휠 각도(±540°)가 아니다
+ */
+export interface WheelPaths {
+  fl: PathPoint[];
+  fr: PathPoint[];
+  rl: PathPoint[];
+  rr: PathPoint[];
+  /** 앞 모서리 스윙 궤적 (조향이 거의 0 이면 null) */
+  swing: PathPoint[] | null;
+  swingSide: 'left' | 'right' | null;
+}
+
+export function buildWheelPaths(spec: VehicleSpec, steer: number, dir: 1 | -1, maxDist = 4.5, step = 0.2): WheelPaths {
+  const zRear = -spec.length / 2 + spec.rearOverhang;
+  const zFront = zRear + spec.wheelbase;
+  const tw = spec.trackWidth / 2;
+  const P = (x: number, z: number): PathPoint[] => pathOfPoint(spec, steer, dir, x, z, maxDist, step);
+  const turning = Math.abs(steer) > 0.03;
+  // 조향 반대쪽(바깥) 앞 모서리. 로컬 +x = 왼쪽, steer + = 왼쪽
+  const swingSide: 'left' | 'right' | null = turning ? (steer > 0 ? 'right' : 'left') : null;
+  return {
+    fl: P(tw, zFront),
+    fr: P(-tw, zFront),
+    rl: P(tw, zRear),
+    rr: P(-tw, zRear),
+    swing: swingSide ? P(swingSide === 'left' ? spec.width / 2 : -spec.width / 2, spec.length / 2) : null,
+    swingSide,
+  };
+}
+
+/** 경로가 장애물(센서 높이 충돌체)과 처음 겹치는 점의 인덱스 (없으면 -1). pose 는 차체 중심 */
+export function pathHitIndex(path: readonly PathPoint[], pose: { x: number; z: number; heading: number }, colliders: readonly Collider[], sensorY = 0.55): number {
+  const solid = colliders.filter((c) => sensorY >= c.y0 && sensorY <= c.y0 + c.h);
+  for (let i = 0; i < path.length; i++) {
+    const w = localToWorld(pose.x, pose.z, pose.heading, path[i].x, path[i].z);
+    if (solid.some((c) => insideFootprint(c, w.x, w.z))) return i;
+  }
+  return -1;
+}

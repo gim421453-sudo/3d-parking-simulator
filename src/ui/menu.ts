@@ -276,6 +276,7 @@ export class Menu {
                ${rng('mechMirrorFps', '기계식 주차장 거울 속도 (0=자동)', '자동: 높음 30 / 보통 24 / 낮음 16 FPS. 거울이 화면에 보일 때만 렌더링', 0, 30, 5, s.mechMirrorFps)}
                ${rng('cabinFps', '1인칭 실내 화면 갱신 속도', '낮추면 모바일 부하 감소', 5, 30, 5, s.cabinFps)}
                ${chk('assistGuides', '조향 연동 주차 가이드라인', '카메라 영상 위에 예상 경로 표시', s.assistGuides)}
+               ${sel('surroundGuideMode', '서라운드뷰 예상 이동선', '기본: 차체 폭 경계선 2개 / 상세: 앞바퀴(실선)·뒷바퀴(점선)·앞 모서리 스윙·충돌 예상 지점', [['detail', '상세 (4륜)'], ['basic', '기본']], s.surroundGuideMode)}
                ${sel('pdcPalette', 'PDC 경고 색상', '', Object.entries(PDC_PALETTES).map(([k, v]) => [k, v.name] as [string, string]), s.pdcPalette)}
                ${rng('assistCameraFps', '주차 보조 카메라 갱신 속도', '낮추면 모바일 부하 감소', 10, 60, 5, s.assistCameraFps)}
                ${chk('rearMirror', '후방 카메라 좌우 반전', '실제 후방카메라처럼 거울상으로 표시', s.rearMirror)}`,
