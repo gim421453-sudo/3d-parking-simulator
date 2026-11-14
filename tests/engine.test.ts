@@ -135,3 +135,65 @@ describe('엔진음 합성 파라미터 (RPM/스로틀/상태/실내외/볼륨 �
     expect(engineSoundParams(mk(300, 'STOPPING'), 0, false, 0.5).master).toBeLessThan(run.master);
   });
 });
+
+import { PULSE_CYCLES, REF_RPM, enginePulseWave } from '../src/audio/engineSound';
+describe('엔진음 재제작 (v0.5.5): 폭발 펄스 파형 + 추가 파라미터', () => {
+  const SR = 24000;
+  const mk = (rpm: number, state: Engine['state'] = 'RUNNING', prof = ENGINE_PROFILES.sedan): Engine => ({ state, rpm, t: 0, profile: prof, starts: 0, stops: 0 });
+  /** 단일 주파수 성분 크기(DFT 한 점) */
+  const mag = (w: Float32Array, hz: number): number => {
+    let re = 0;
+    let im = 0;
+    for (let i = 0; i < w.length; i++) {
+      const a = (2 * Math.PI * hz * i) / SR;
+      re += w[i] * Math.cos(a);
+      im -= w[i] * Math.sin(a);
+    }
+    return Math.hypot(re, im) / w.length;
+  };
+  it('버퍼 길이 = 기준 회전수의 사이클 8개, [-1,1] 정규화, 직류 성분 0, 같은 입력이면 같은 파형(결정적)', () => {
+    const w = enginePulseWave(4, SR, false, 0.3);
+    expect(w.length).toBe(Math.round((120 / REF_RPM) * PULSE_CYCLES * SR));
+    let peak = 0;
+    let sum = 0;
+    for (const v of w) {
+      peak = Math.max(peak, Math.abs(v));
+      sum += v;
+      expect(Number.isFinite(v)).toBe(true);
+    }
+    expect(peak).toBeCloseTo(1, 5);
+    expect(Math.abs(sum / w.length)).toBeLessThan(1e-6);
+    expect(Array.from(enginePulseWave(4, SR, false, 0.3))).toEqual(Array.from(w));
+  });
+  it('가장 강한 성분은 점화 주파수(기준 1200rpm: 4기통 40Hz, 6기통 60Hz, 3기통 30Hz)이고 그 사이 주파수보다 훨씬 크다', () => {
+    for (const cyl of [3, 4, 6]) {
+      const w = enginePulseWave(cyl, SR, false, 0.3);
+      const f = (REF_RPM / 60) * (cyl / 2);
+      expect(mag(w, f), `cyl ${cyl}`).toBeGreaterThan(4 * mag(w, f * 1.37));
+      expect(mag(w, f), `cyl ${cyl}`).toBeGreaterThan(4 * mag(w, f * 0.71));
+    }
+  });
+  it('실린더별 세기 차이가 반차수 성분(사이클 주파수 10Hz 의 배수)을 만든다 — 거친 엔진일수록 크다', () => {
+    const smooth = enginePulseWave(6, SR, false, 0.05);
+    const rough = enginePulseWave(6, SR, false, 0.9);
+    const half = (w: Float32Array): number => mag(w, 10) + mag(w, 20) + mag(w, 30);
+    expect(half(rough)).toBeGreaterThan(0.003);
+    expect(half(rough)).toBeGreaterThan(1.5 * half(smooth));
+  });
+  it('고부하용(hard) 파형은 높은 배음이 더 많다', () => {
+    const hi = (w: Float32Array): number => [5, 6, 7, 8, 9].reduce((a, k) => a + mag(w, 40 * k), 0) / mag(w, 40);
+    expect(hi(enginePulseWave(4, SR, true, 0.3))).toBeGreaterThan(1.5 * hi(enginePulseWave(4, SR, false, 0.3)));
+  });
+  it('재생 속도는 회전수에 비례, 왜곡은 부하·거친 엔진에서 증가, 공회전 떨림은 공회전·무부하에서만', () => {
+    expect(engineSoundParams(mk(1200), 0, false, 0.5).rate).toBeCloseTo(1, 9);
+    expect(engineSoundParams(mk(3600), 0, false, 0.5).rate).toBeCloseTo(3, 9);
+    expect(engineSoundParams(mk(2500), 1, false, 0.5).drive).toBeGreaterThan(engineSoundParams(mk(2500), 0, false, 0.5).drive);
+    expect(engineSoundParams(mk(2500, 'RUNNING', ENGINE_PROFILES.coupe), 0.5, false, 0.5).drive).toBeGreaterThan(engineSoundParams(mk(2500, 'RUNNING', ENGINE_PROFILES.suv), 0.5, false, 0.5).drive);
+    expect(engineSoundParams(mk(750), 0, false, 0.5).lope).toBeGreaterThan(0);
+    expect(engineSoundParams(mk(750), 0.5, false, 0.5).lope).toBe(0);
+    expect(engineSoundParams(mk(3000), 0, false, 0.5).lope).toBe(0);
+    expect(engineSoundParams(mk(0, 'OFF'), 0, false, 0.5).drive).toBe(0);
+    // 가속하면 밝아진다(고역 선반 이득)
+    expect(engineSoundParams(mk(2500), 1, false, 0.5).bright).toBeGreaterThan(engineSoundParams(mk(2500), 0, false, 0.5).bright + 6);
+  });
+});
