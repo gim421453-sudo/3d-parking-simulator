@@ -52,9 +52,10 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
     const dir = target > cur ? 1 : -1;
     await input({ throttle: 0, brake: 1, steerInput: dir });
     const ok = await until(([t, d]) => { const G = window.__game; const w = (G.car.steer / G.spec.maxSteer) * 540; return d > 0 ? w >= t : w <= t; }, [target, dir], 30000);
+    const reached = await deg(); // 입력을 놓기 전 실제 도달 각도
     await input({ throttle: 0, brake: 1, steerInput: 0 });
     await sleep(250);
-    return ok;
+    return ok ? reached : NaN;
   };
   // 왼쪽 깜빡이: 100° 만 돌렸다 풀면 유지
   await turnTo(100);
@@ -63,9 +64,8 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   const keep = await Y(() => window.__game.sigLeft);
   // 220° 까지 돌린 동안은 유지, 풀리면 해제
   const c0 = await Y(() => window.__game.sigAutoCancels);
-  await turnTo(220);
+  const dmax = await turnTo(220);
   const armed = await Y(() => window.__game.sigLeft);
-  const dmax = await deg();
   await turnTo(5);
   const cancelled = await until(() => !window.__game.sigLeft, undefined, 10000);
   const c1 = await Y(() => window.__game.sigAutoCancels);
