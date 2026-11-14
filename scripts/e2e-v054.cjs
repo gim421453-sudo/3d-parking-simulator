@@ -178,11 +178,13 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   await Y(() => { const G = window.__game; G.car.gear = 'P'; G.car.handbrake = true; });
   await sleep(500);
   const lp = await Y(() => { const G = window.__game; return { col: G.collisions, visible: !document.getElementById('lift-panel').classList.contains('hidden'), checks: G.liftChecks.filter((c) => !c.ok).map((c) => c.key), active: !!G.activeLift }; });
-  check('정비소: 문을 지나 두 기둥 사이 정위치 정차(충돌 0), 리프트 패널 표시, 남은 조건은 "시동 OFF" 뿐', inBay && lp.col === 0 && lp.visible && lp.active && lp.checks.join() === 'engine', JSON.stringify(lp));
+  // v0.5.5 조건 완화: 주차 브레이크/시동 OFF 는 더 이상 필수 조건이 아니다 → 정위치 + P 단이면 남은 조건이 없다
+  check('정비소: 문을 지나 두 기둥 사이 정위치 정차(충돌 0), 리프트 패널 표시, 남은 조건 없음(v0.5.5 완화)', inBay && lp.col === 0 && lp.visible && lp.active && lp.checks.join() === '', JSON.stringify(lp));
+  await Y(() => { window.__game.car.gear = 'D'; });
   await pg.keyboard.press('PageUp');
   await sleep(400);
-  check('정비소: 시동이 걸려 있으면 리프트가 올라가지 않는다', (await Y(() => window.__game.lifts[0].st.phase)) === 'idle');
-  await engineOff();
+  check('정비소: P 단이 아니면 리프트가 올라가지 않는다', (await Y(() => window.__game.lifts[0].st.phase)) === 'idle');
+  await Y(() => { window.__game.car.gear = 'P'; window.__game.car.handbrake = false; });
   const camY0 = await Y(() => window.__game.rig.active.position.y);
   await pg.keyboard.press('PageUp');
   const rising = await until(() => { const s = window.__game.lifts[0].st; return s.locked && s.h > 0.6; }, undefined, 120000);

@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.5.4-dev (`feature/v054-map-engine`, 아래 v0.5.4 섹션) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.5.5-dev (`feature/v055-controls`, 아래 v0.5.5 섹션) · 이전 v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,15 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.5.5 진행 상황 (조작·표시 개선 · 4주식 리프트 · 모든 맵 기계식 · 엔진음/계기판) — 브랜치 `feature/v055-controls`
+
+상세/검증: `docs/V055.md`. **`feature/pdc-display-v2` 에 병합하지 않는다**(사용자 결정). Pages 는 v0.5.4(`f6a8b50`) 배포 상태 그대로 — v0.5.5 미배포(승인 필요). APK/ADB 보류.
+- 한 일: 방향지시등 자동 해제(같은 방향 180° 이상 → 풀리면 해제), 시동 OFF 시 계기판·내비 화면 꺼짐, 1인칭 실내 바닥/격벽(팔레트가 비쳐 보이던 문제), 제동등 강화, 정비소 4주식 리프트, **모든 맵(13개)에 기계식 주차장**(자리가 없던 9개 맵은 `maps/mechAnnex.ts` 로 옆 마당에 연결), 엔진음 재제작(폭발 펄스열 + 공명 필터), 계기판 구체화, 시동 끄기/리프트 상승 조건 완화.
+- 남은 일(사용자 답 필요): ① "팔레트 안 보임" 재현 조건(맵/시점/순간) — 재현 실패 ② 실제 지도 도시의 지역·범위 ③ 조건 완화가 의도와 맞는지(Claude 가 정한 해석: 시동 끄기 = 정차만, 리프트 = 주차 브레이크/시동 OFF 불필요 + 허용치 확대) ④ 엔진음 직접 청취 평가.
+- 알려진 제한: 부속 구역 치수(27×22m, 문 6m)는 임시 배치, 엔진음은 합성이고 귀로 확인하지 못함, 팔레트 위에서 추적 카메라가 LED 표시판에 가려지는 경우 있음(미수정).
+- 버그 기록: [1인칭에서 팔레트가 차 바닥을 뚫고 보임] 원인 = 1인칭은 차체 메시를 숨기는데 실내 모델에 바닥/격벽이 없었다 · 수정 = 실내 바닥·도어 안쪽·격벽·뒤 벽·트렁크 덮개 추가 · 재발 방지 = 1인칭에서 숨기는 메시를 바꿀 때 아래/뒤가 막혀 있는지 `scripts/shot-v055.cjs` 로 확인.
+- 재발 방지/규칙: 맵 원본은 `BASE_MAPS`, 공개 목록은 `MAPS`(부속 구역 포함) — megapark 합성은 원본만 쓴다. 부속 구역 문 위치는 `scripts/find-annex-sites.ts` 로 찾고 `tests/mechAnnex.test.ts` 통과 필수. 엔진음은 `buildEngineGraph`/`applyEngineParams` 를 실시간·오프라인이 함께 쓰므로 바꾸면 `scripts/audio-v055.cjs` 실행.
 
 ## v0.5.4 진행 상황 (맵·지형·도로·시설 엔진) — 브랜치 `feature/v054-map-engine`
 
