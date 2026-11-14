@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { obbOverlap } from '../src/core/geometry';
-import { MAPS, getMap, mapColliders } from '../src/maps';
+import { BASE_MAPS, MAPS, MECH_ANNEX, getMap, mapColliders } from '../src/maps';
 import { FACILITY_FOOTPRINT, facilityKit, footprintObb } from '../src/maps/mechKit';
 import { capacityOf, frameOf, headingToLocal, headingToWorld, makeFacility, toLocalXZ, toWorldXZ } from '../src/mech/facility';
 import { MechController } from '../src/mech/controller';
@@ -89,18 +89,24 @@ describe('층수가 다른 시설의 슬롯', () => {
 
 describe('맵에 설치된 기계식 시설 (데이터)', () => {
   const withFac = MAPS.filter((m) => (m.mechFacilities?.length ?? 0) > 0);
-  it('mechpark / outdoor / megapark (+ v0.5.4 도시형 검증 구역) 에 시설이 있고 mech 플래그와 일치한다', () => {
-    expect(withFac.map((m) => m.id).sort()).toEqual(['citytest', 'mechpark', 'megapark', 'outdoor']);
+  it('v0.5.5: 모든 맵에 시설이 있고 mech 플래그와 일치한다 (자리가 없던 9개 맵은 옆에 붙인 부속 구역)', () => {
+    expect(withFac.map((m) => m.id).sort()).toEqual(MAPS.map((m) => m.id).sort());
     for (const m of MAPS) expect(!!m.mech).toBe((m.mechFacilities?.length ?? 0) > 0);
     expect(getMap('mechpark').mechFacilities!.length).toBe(1);
     expect(getMap('outdoor').mechFacilities!.length).toBe(2);
     expect(getMap('megapark').mechFacilities!.length).toBe(3);
+    for (const id of Object.keys(MECH_ANNEX)) {
+      expect(getMap(id).mechFacilities!.length, id).toBe(1);
+      expect(getMap(id).annex!.length, id).toBe(1);
+      expect(getMap(id).mechUnavailable, id).toBeUndefined();
+    }
   });
-  it('설치하지 못한 맵은 이유가 기록되어 있다', () => {
-    for (const id of ['lot', 'underground', 'tower', 'garage5', 'carpark3', 'modlot', 'spiral', 'garage', 'alley']) {
-      const m = getMap(id);
-      expect(m.mechFacilities?.length ?? 0).toBe(0);
-      expect(m.mechUnavailable, id).toBeTruthy();
+  it('원본 맵(BASE_MAPS)은 그대로다: megapark 합성이 쓰는 데이터에는 부속 구역이 없고 설치 불가 사유가 남아 있다', () => {
+    for (const id of Object.keys(MECH_ANNEX)) {
+      const b = BASE_MAPS.find((m) => m.id === id)!;
+      expect(b.mechFacilities?.length ?? 0, id).toBe(0);
+      expect(b.mechUnavailable, id).toBeTruthy();
+      expect(b.annex, id).toBeUndefined();
     }
   });
   it('시설 ID 는 맵 안에서 유일하고 정원은 층수와 일치한다', () => {

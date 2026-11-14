@@ -373,10 +373,11 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   if (indoor) {
     group.add(new THREE.HemisphereLight(0xa9b8cc, 0x3a3d42, 0.8));
     const ch = map.env.ceilingHeight ?? 2.9;
-    const ceilGeo = track(new THREE.PlaneGeometry(b.maxX - b.minX, b.maxZ - b.minZ));
+    const cr = map.env.ceilingRect ?? b;
+    const ceilGeo = track(new THREE.PlaneGeometry(cr.maxX - cr.minX, cr.maxZ - cr.minZ));
     const ceil = new THREE.Mesh(ceilGeo, matFor(0x55585c, 0.95));
     ceil.rotation.x = Math.PI / 2;
-    ceil.position.set((b.minX + b.maxX) / 2, ch, (b.minZ + b.maxZ) / 2);
+    ceil.position.set((cr.minX + cr.maxX) / 2, ch, (cr.minZ + cr.maxZ) / 2);
     group.add(ceil);
     const panels = map.ceilingLights ?? [];
     const panelGeo = track(new THREE.BoxGeometry(1.6, 0.05, 0.3));

@@ -479,7 +479,7 @@ export class Game {
     this.nearCx = this.nearCz = Infinity;
     this.indoorK = 0;
     // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이
-    this.rig.ceilingFn = map.terrain ? (x, z, y) => ceilingAbove(map.terrain!, x, z, y) : map.env.indoor ? () => map.env.ceilingHeight ?? 2.9 : null;
+    this.rig.ceilingFn = map.terrain ? (x, z, y) => ceilingAbove(map.terrain!, x, z, y) : map.env.indoor ? (x, z) => { const r = map.env.ceilingRect; return !r || (x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ) ? (map.env.ceilingHeight ?? 2.9) : Infinity; } : null;
     this.hud.minimap.setMap(map);
     this.loadedMapId = map.id;
     this.map = map;

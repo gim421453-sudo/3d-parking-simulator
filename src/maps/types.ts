@@ -89,6 +89,8 @@ export interface MapData {
     indoor: boolean;
     sky: number;
     ceilingHeight?: number;
+    /** 실내 천장이 덮는 범위(생략하면 맵 경계 전체). 옆에 붙은 기계식 구역처럼 천장이 없는 부분을 뺄 때 쓴다 */
+    ceilingRect?: { minX: number; maxX: number; minZ: number; maxZ: number };
     ambient: number;
   };
   spawn: { x: number; z: number; heading: number; y?: number };
@@ -100,6 +102,8 @@ export interface MapData {
   mech?: boolean;
   /** 기계식 주차 시설 목록(재사용 모듈). 시설마다 독립 ID/위치/회전/층수 — mech 플래그는 목록이 비어 있지 않을 때 true */
   mechFacilities?: MechFacilityConfig[];
+  /** 맵 옆에 붙인 기계식 부속 구역(maps/mechAnnex.ts) — 마당/문/접근 자세. 검증·문서용 데이터 */
+  annex?: { facility: string; side: 'east' | 'west' | 'north' | 'south'; yard: { minX: number; maxX: number; minZ: number; maxZ: number }; gate: { minX: number; maxX: number; minZ: number; maxZ: number }; approach: { x: number; z: number; heading: number } }[];
   /** 기계식 시설을 설치하지 못한 이유(문서/추천 정책 표시용) */
   mechUnavailable?: string;
   /** 최종 확정된 맵이 아니라 검증용 임시 레이아웃인가 */

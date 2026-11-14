@@ -431,7 +431,12 @@ export function findLevelRoute(g: LevelGraph, from: Pt3, dest: Pt3, destRadius =
   if (!starts.length) return null;
   const goalList = nearestNodes(g, dest, 12, 0.6, destRadius);
   if (!goalList.length) return null;
-  const chain = astar(g, starts, new Set(goalList), dest);
+  let chain = astar(g, starts, new Set(goalList), dest);
+  if (!chain) {
+    // 목적지 바로 옆 노드가 전부 막힌 주머니(예: 문 폭 2.4m 기계식 승강장 안)에 있을 때: 범위를 넓혀 도달 가능한 가장 가까운 지점(문 앞)까지 안내한다
+    const wide = nearestNodes(g, dest, 60, 0.6, destRadius * 2);
+    if (wide.length > goalList.length) chain = astar(g, starts, new Set(wide), dest);
+  }
   if (!chain) return null;
   const points: Pt3[] = [{ x: from.x, z: from.z, y: from.y }, ...chain.map((i) => ({ x: g.nodes[i].x, z: g.nodes[i].z, y: g.nodes[i].y })), { x: dest.x, z: dest.z, y: dest.y }];
   let length = 0;
