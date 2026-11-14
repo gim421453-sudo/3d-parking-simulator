@@ -26,6 +26,7 @@ import { LiftPanel } from '../ui/liftPanel';
 import { VIEW_RADIUS } from '../world/tiles';
 import { stepVehicleInWorld } from '../vehicle/worldStep';
 import { EngineSound } from '../audio/engineSound';
+import { epbAutoRelease } from '../vehicle/epb';
 import { ENGINE_PROFILES, newEngine, powerOn, engineOn, pressStartStop, profileOf, stepEngine, type Engine } from '../vehicle/engine';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
 import {
@@ -238,6 +239,8 @@ export class Game {
   private sigCancel = newSignalCancel();
   /** 자동 해제된 횟수(테스트/디버그) */
   sigAutoCancels = 0;
+  /** 테스트/디버그: 가속 페달로 주차 브레이크가 자동 해제된 횟수 */
+  epbAutoReleases = 0;
   private hazard = false;
   private blinkOn = false;
   private blinkT = 0;
@@ -1065,6 +1068,11 @@ export class Game {
     let vin = this.readInput(dt);
     stepEngine(this.engine, dt, { throttle: this.throttle, speed: Math.abs(this.car.v), gear: this.car.gear });
     vin.engineOn = powerOn(this.engine);
+    // v0.6.0: D/R 에서 가속 페달을 밟으면 주차 브레이크 자동 해제 (보관/고정 중에는 입력 자체가 막힌다)
+    if (!this.playerStoredSlot && epbAutoRelease(this.car, vin.throttle, vin.engineOn)) {
+      this.epbAutoReleases++;
+      this.hud.toast('주차 브레이크 자동 해제');
+    }
     if (this.map.mech) this.mech.engineOn = engineOn(this.engine);
     const mech = this.map.mech ? this.mech : null;
     if (mech?.blocksDriving()) vin = { throttle: 0, brake: 1, steerInput: 0, engineOn: vin.engineOn };

@@ -1,3 +1,4 @@
+import { epbOnShift } from './epb';
 import { PARK_SPEED_LIMIT, SHIFT_SPEED_LIMIT, requestGear, type Gear, type VehicleState } from './physics';
 
 /**
@@ -53,6 +54,7 @@ export function shiftGear(s: VehicleState, target: Gear, brake: boolean): ShiftD
   if (!d.ok) return d;
   const r = requestGear(s, target); // 물리 쪽의 속도 조건도 한 번 더 확인 (이중 안전)
   if (!r.ok) return { ok: false, code: 'must_stop_for_park', reason: r.reason };
+  epbOnShift(s, target); // v0.6.0: P 로 들어가면 주차 브레이크 자동 체결
   return d;
 }
 
