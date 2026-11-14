@@ -56,7 +56,7 @@ import { segmentBlocked } from '../pdc/visibility';
 import { allowedViews, autoViewAllowed, cameraCycle, clampView, restrictAssist } from '../pdc/capabilities';
 import { ASSIST_VIEW_NAME, ViewPolicy, type AssistView, type SideObservation } from '../pdc/viewPolicy';
 import { InfotainmentController, type InfoOutput, type InfoSettings } from '../infotainment/controller';
-import { drawCenterScreen, drawCluster, type CabinHit, type ClusterData } from '../infotainment/cabinScreens';
+import { drawCenterScreen, drawCluster, speedScale, type CabinHit, type ClusterData } from '../infotainment/cabinScreens';
 import { Navigator, type NavState } from '../nav/navigator';
 import { drawNavMap } from '../nav/navView';
 import { SHIFTER_ORDER } from '../ui/shifter';
@@ -171,6 +171,14 @@ export class Game {
   private parkedCars: { model: CarModel; col: Collider }[] = [];
   private cullLevelY = NaN;
   lastClusterData: ClusterData | null = null;
+  private clusterSpeedMax = 60;
+  /** 방향별 PDC 최고 단계(계기판 평면도용, 색만) */
+  private clusterZones(): NonNullable<ClusterData['zones']> {
+    const rank: Record<string, number> = { none: 0, far: 1, mid: 2, near: 3, critical: 4 };
+    const z = { front: 'none', rear: 'none', left: 'none', right: 'none' };
+    for (const q of this.pdcState?.zones ?? []) if (rank[q.level] > rank[z[q.group]]) z[q.group] = q.level;
+    return z;
+  }
   lastHitId = '';
   /** 테스트 전용: 자동 시점 게이트 입력을 덮어쓴다(정지 상태에서 "그 쪽으로 조향하며 접근 중"인 상황을 재현). steer 'closest' = 더 가까운 쪽으로 조향 */
   debugViewCtx: { v?: number; steer?: number | 'closest'; pathCut?: number } | null = null;
@@ -794,7 +802,7 @@ export class Game {
           if (this.lifts.length) this.hud.toast('리프트 베이 안에서 조작하세요', 'warn');
           break;
         }
-        let ok: boolean;
+        let ok = false;
         if (a === 'liftStop') ok = liftStop(L.st);
         else if (a === 'liftUp') ok = L.st.phase === 'raising' ? liftStop(L.st) : liftUp(L.cfg, this.spec, this.liftInput(), L.st);
         else ok = L.st.phase === 'lowering' ? liftStop(L.st) : liftDown(L.st);
@@ -808,6 +816,8 @@ export class Game {
         }
         this.engineSound.init();
         const r = pressStartStop(this.engine, { speed: Math.abs(this.car.v), gear: this.car.gear, brake: this.brake });
+        // 시동을 끄면서 P 로: 정차 상태에서만 일어나므로 브레이크를 밟은 것과 같은 조건으로 인터록(shiftGear)을 통과시킨다
+        if (r.ok && r.autoPark) shiftGear(this.car, 'P', true);
         this.hud.toast(r.reason, r.ok ? 'good' : 'warn');
         break;
       }
@@ -1020,6 +1030,7 @@ export class Game {
 
   /** 리프트에 고정된 차량: 리프트 높이를 따라 올라가고 내려온다(수평 위치/방향 고정, 속도 0) */
   private applyLiftPose(): void {
+    this.car.handbrake = true; // v0.5.5: 리프트에 고정된 동안 주차 브레이크 자동(상승 조건에서는 뺐다)
     const L = this.activeLift;
     if (!L) return;
     const p = liftedPose(L.cfg, L.st, 0);
@@ -2002,6 +2013,17 @@ export class Game {
       wheelDeg: (c.steer / this.spec.maxSteer) * 540,
       floor: this.map.terrain ? levelAt(this.map.terrain, c.y).name : null,
       mission: this.mission ? this.mission.def.name.replace(/ \(임시\)/, '') : '자유주행',
+      throttle: Math.max(0, this.throttle),
+      brake: Math.max(0, this.brake),
+      pitchDeg: (c.pitch ?? 0) / DEG,
+      speedMax: (this.clusterSpeedMax = speedScale(spd, this.clusterSpeedMax, this.spec.maxSpeedFwd * 3.6)),
+      redline: this.engine.profile.redline,
+      engineLabel: this.engine.profile.label,
+      clock: new Date().toTimeString().slice(0, 5),
+      tail: L.tail > 0.5,
+      doorOpen: this.mech.m.occupant === 'out',
+      locked: this.mech.m.locked ? 'mech' : this.activeLift?.st.locked ? 'lift' : null,
+      zones: this.clusterZones(),
     };
     this.lastClusterData = clusterData; // 테스트/디버그: 계기판이 실제 게임 상태와 일치하는지 검사
     drawCluster(cab.cluster.ctx, cab.cluster.canvas.width, cab.cluster.canvas.height, clusterData);

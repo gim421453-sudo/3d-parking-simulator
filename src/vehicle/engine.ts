@@ -67,7 +67,7 @@ export interface StartStopCtx {
 }
 
 /** 시동 버튼: 조건을 검사하고 상태를 전이한다. 조건 불충족 시 이유를 반환 */
-export function pressStartStop(e: Engine, c: StartStopCtx): { ok: boolean; reason: string } {
+export function pressStartStop(e: Engine, c: StartStopCtx): { ok: boolean; reason: string; autoPark?: boolean } {
   if (e.state === 'STARTING' || e.state === 'STOPPING') return { ok: false, reason: e.state === 'STARTING' ? '시동 중입니다' : '시동을 끄는 중입니다' };
   if (e.state === 'OFF' || e.state === 'ACC') {
     if (c.speed > 0.2) return { ok: false, reason: '차량이 정차한 상태에서만 시동을 걸 수 있습니다' };
@@ -80,11 +80,12 @@ export function pressStartStop(e: Engine, c: StartStopCtx): { ok: boolean; reaso
   }
   // RUNNING
   if (c.speed > 0.2) return { ok: false, reason: '정차 후 시동을 끌 수 있습니다' };
-  if (c.gear !== 'P' && c.gear !== 'N') return { ok: false, reason: 'P 또는 N 단에서 시동을 꺼주세요' };
+  // v0.5.5 조건 완화: 정차만 했으면 어느 기어에서든 끌 수 있다. D/R 이면 호출 쪽이 P 로 자동 변속한다(autoPark)
+  const autoPark = c.gear !== 'P' && c.gear !== 'N';
   e.state = 'STOPPING';
   e.t = 0;
   e.stops++;
-  return { ok: true, reason: '시동 종료' };
+  return { ok: true, reason: autoPark ? '시동 종료 (P 단 자동 변속)' : '시동 종료', autoPark };
 }
 
 /** 주행 동력 사용 가능 여부: RUNNING 일 때만 가속/크리프/엔진브레이크가 작동한다 */

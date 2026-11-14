@@ -33,10 +33,23 @@ describe('엔진 시동 상태기계', () => {
     expect(e.state).toBe('OFF');
     expect(pressStartStop(e, ctx({ gear: 'N' })).ok).toBe(true);
   });
-  it('시동 종료: 정차 + P/N 에서만, STOPPING 동안 RPM 하강 후 OFF, RPM 0, 동력 차단', () => {
+  it('v0.5.5 조건 완화: 정차만 했으면 D/R 에서도 시동을 끌 수 있고 P 자동 변속(autoPark)을 알린다. 주행 중에는 여전히 거부', () => {
+    for (const gear of ['D', 'R'] as const) {
+      const e = newEngine(ENGINE_PROFILES.sedan, true);
+      expect(pressStartStop(e, ctx({ speed: 5, gear })).ok).toBe(false);
+      expect(e.state).toBe('RUNNING');
+      const r = pressStartStop(e, ctx({ gear }));
+      expect(r.ok).toBe(true);
+      expect(r.autoPark).toBe(true);
+      expect(r.reason).toMatch(/P 단 자동/);
+      expect(e.state).toBe('STOPPING');
+    }
+    const p = newEngine(ENGINE_PROFILES.sedan, true);
+    expect(pressStartStop(p, ctx()).autoPark).toBe(false);
+  });
+  it('시동 종료: 정차 상태에서만, STOPPING 동안 RPM 하강 후 OFF, RPM 0, 동력 차단', () => {
     const e = newEngine(ENGINE_PROFILES.sedan, true);
     expect(pressStartStop(e, ctx({ speed: 5, gear: 'D' })).ok).toBe(false);
-    expect(pressStartStop(e, ctx({ gear: 'D' })).ok).toBe(false);
     expect(e.state).toBe('RUNNING');
     expect(pressStartStop(e, ctx()).ok).toBe(true);
     expect(e.state).toBe('STOPPING');

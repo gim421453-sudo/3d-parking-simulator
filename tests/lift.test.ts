@@ -23,15 +23,13 @@ describe('2주식 리프트: 정렬/조건', () => {
     expect(rev.reversed).toBe(true);
     expect(rev.headingErrDeg).toBeLessThan(0.01);
   });
-  it('좌우 20cm 치우침/앞뒤 40cm/방향 6°/주행 중/D 단/브레이크 없음/시동 ON 은 각각 거부되고 이유가 표시된다', () => {
+  it('v0.5.5 완화 후 허용치: 좌우 30cm 치우침/앞뒤 50cm/방향 7°/주행 중/D 단 은 각각 거부되고 이유가 표시된다', () => {
     const cases: [Partial<LiftCarInput>, RegExp][] = [
-      [{ cz: -4.2 }, /중앙/],
-      [{ cx: 10.4 }, /앞뒤/],
-      [{ heading: Math.PI / 2 + 0.105 }, /방향/],
+      [{ cz: -4.3 }, /중앙/],
+      [{ cx: 10.5 }, /앞뒤/],
+      [{ heading: Math.PI / 2 + 0.125 }, /방향/],
       [{ v: 0.5 }, /정차/],
       [{ gear: 'D' }, /P 단/],
-      [{ handbrake: false }, /P 단/],
-      [{ engineOn: true }, /시동/],
     ];
     for (const [o, re] of cases) {
       const s = newLift();
@@ -39,6 +37,13 @@ describe('2주식 리프트: 정렬/조건', () => {
       expect(s.message).toMatch(re);
       expect(s.phase).toBe('idle');
       expect(s.locked).toBe(false);
+    }
+  });
+  it('v0.5.5 조건 완화: 좌우 20cm·앞뒤 40cm·방향 5° 치우침, 주차 브레이크 OFF, 시동 ON 이어도 상승할 수 있다', () => {
+    for (const o of [{ cz: -4.2 }, { cx: 10.4 }, { heading: Math.PI / 2 + 0.087 }, { handbrake: false }, { engineOn: true }] as Partial<LiftCarInput>[]) {
+      const s = newLift();
+      expect(liftUp(cfg, spec, ideal(o), s), JSON.stringify(o)).toBe(true);
+      expect(s.phase).not.toBe('idle');
     }
   });
   it('차폭 2.1m 초과 차량은 거부', () => {

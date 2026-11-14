@@ -30,7 +30,8 @@ export const LIFT_DEFAULT = { postHalf: 1.6, maxHeight: 1.8, postSize: 0.3, post
 export const LIFT4_DEFAULT = { postHalf: 1.55, postZ: 2.75, maxHeight: 1.9, postSize: 0.28, postHeight: 2.6, runwayX: 0.78, runwayW: 0.6, runwayL: 5.3 } as const;
 /** 4주식 정위치 허용: 좌우는 타이어가 주행판 위에 있어야 하므로 ±0.20m, 앞뒤는 ±0.45m */
 export const LIFT4_TOL = { lateral: 0.2, longitudinal: 0.45 } as const;
-export const LIFT_TOL = { lateral: 0.15, longitudinal: 0.3, heading: 4 * DEG, stopSpeed: 0.08 } as const;
+/** v0.5.5 조건 완화: 좌우 ±15→25cm, 앞뒤 ±30→45cm, 방향 ±4→6°. 주차 브레이크/시동 OFF 는 필수 조건에서 뺐다(고정되면 주차 브레이크는 자동) */
+export const LIFT_TOL = { lateral: 0.25, longitudinal: 0.45, heading: 6 * DEG, stopSpeed: 0.08 } as const;
 export const LIFT_LIMITS = { maxWidth: 2.1, maxWeightKg: 3500 } as const;
 export const LIFT_TIMES = { arms: 1.6, speed: 0.22 } as const; // 암 전개 시간(s), 승강 속도(m/s)
 
@@ -107,8 +108,7 @@ export function liftChecklist(cfg: LiftConfig, spec: Pick<VehicleSpec, 'width'> 
       { key: 'position', label: `앞뒤 정위치 (±${(LIFT4_TOL.longitudinal * 100).toFixed(0)}cm)`, ok: Math.abs(a.longitudinal) <= LIFT4_TOL.longitudinal },
       { key: 'heading', label: `방향 정렬 (±${(LIFT_TOL.heading / DEG).toFixed(0)}°)`, ok: a.headingErrDeg <= LIFT_TOL.heading / DEG },
       { key: 'stopped', label: '정차', ok: Math.abs(car.v) < LIFT_TOL.stopSpeed },
-      { key: 'parked', label: 'P 단 + 주차 브레이크', ok: car.gear === 'P' && car.handbrake },
-      { key: 'engine', label: '시동 OFF', ok: !car.engineOn },
+      { key: 'parked', label: 'P 단', ok: car.gear === 'P' },
     ];
   }
   return [
@@ -117,8 +117,7 @@ export function liftChecklist(cfg: LiftConfig, spec: Pick<VehicleSpec, 'width'> 
     { key: 'position', label: `앞뒤 정위치 (±${(LIFT_TOL.longitudinal * 100).toFixed(0)}cm)`, ok: Math.abs(a.longitudinal) <= LIFT_TOL.longitudinal },
     { key: 'heading', label: `방향 정렬 (±${(LIFT_TOL.heading / DEG).toFixed(0)}°)`, ok: a.headingErrDeg <= LIFT_TOL.heading / DEG },
     { key: 'stopped', label: '정차', ok: Math.abs(car.v) < LIFT_TOL.stopSpeed },
-    { key: 'parked', label: 'P 단 + 주차 브레이크', ok: car.gear === 'P' && car.handbrake },
-    { key: 'engine', label: '시동 OFF', ok: !car.engineOn },
+    { key: 'parked', label: 'P 단', ok: car.gear === 'P' },
   ];
 }
 

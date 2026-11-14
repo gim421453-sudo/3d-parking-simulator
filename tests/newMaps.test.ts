@@ -108,7 +108,7 @@ describe('정비소: 리프트 베이 진입과 승강 (헤드리스 실주행 +
       const checks = liftChecklist(L, spec, inp);
       expect(checks.filter((q) => !q.ok).map((q) => q.key), id).toEqual([]);
       const st = newLift();
-      expect(liftUp(L, spec, { ...inp, engineOn: true }, st)).toBe(false); // 시동 ON 이면 거부
+      expect(liftUp(L, spec, { ...inp, gear: 'D' as const }, newLift())).toBe(false); // P 단이 아니면 거부 (v0.5.5: 시동 ON/주차 브레이크는 더 이상 필수 아님)
       expect(liftUp(L, spec, inp, st)).toBe(true);
       for (let i = 0; i < 20 * 60; i++) stepLift(L, st, 1 / 60);
       expect(st.phase).toBe('holding');

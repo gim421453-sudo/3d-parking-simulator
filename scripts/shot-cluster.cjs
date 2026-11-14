@@ -1,25 +1,28 @@
-/** 계기판 캔버스 원본(768×294) 덤프: node scripts/shot-cluster.cjs → docs/screenshots/v049/cluster-<veh>-<scene>.png */
-const { chromium } = require('playwright'); const { spawn } = require('child_process');
-const fs = require('fs'); const path = require('path');
-const OUT = path.join(__dirname, '..', 'docs', 'screenshots', 'v049'); fs.mkdirSync(OUT, { recursive: true });
+/** v0.5.5 계기판 화면 확인: drawCluster 를 여러 상태로 그려 PNG 저장. node scripts/shot-cluster.cjs */
+const { chromium } = require('playwright');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const OUT = path.join(__dirname, '..', 'docs', 'screenshots', 'v055');
 (async () => {
-  const srv = spawn('npx', ['vite', 'preview', '--port', '4198', '--host', '127.0.0.1', '--strictPort'], { stdio: 'ignore' });
-  await new Promise((r) => setTimeout(r, 3500));
-  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'] });
-  for (const veh of ['suv-x6', 'coupe-m4']) {
-    const ctx = await b.newContext({ viewport: { width: 1280, height: 800 } });
-    const p = await ctx.newPage();
-    await p.addInitScript((v) => localStorage.setItem('parksim.v1.settings', JSON.stringify({ quality: 'low', resolutionScale: 0.6, shadows: 'off', vehicleId: v, cabinFps: 30, mapId: 'garage5', missionId: 'g5-2' })), veh);
-    await p.goto('http://127.0.0.1:4198/'); await p.waitForSelector('#m-start'); await p.click('#m-start');
-    await p.waitForSelector('#hud:not(.hidden)', { timeout: 20000 }); await p.waitForTimeout(1500);
-    const dump = async (name) => { await p.waitForTimeout(1500); const url = await p.evaluate(() => window.__game.model.cabin.cluster.canvas.toDataURL('image/png')); fs.writeFileSync(path.join(OUT, `cluster-${veh}-${name}.png`), Buffer.from(url.split(',')[1], 'base64')); };
-    await p.evaluate(() => { const G = window.__game; G.rig.setMode('driver'); const c = G.car; c.gear = 'D'; c.handbrake = true; c.v = 0; });
-    await dump('parked');
-    await p.evaluate(() => { const G = window.__game; const c = G.car; c.handbrake = false; c.gear = 'D'; c.v = 4.0; c.steer = 0.25; G.sigLeft = true; G.lightMode = 'auto'; G.debugInput = { throttle: 0.4, brake: 0, steerInput: 0.4 }; });
-    await dump('driving-left');
-    await p.evaluate(() => { const G = window.__game; const c = G.car; G.debugInput = null; c.v = -1.2; c.gear = 'R'; c.steer = -0.3; G.sigLeft = false; G.hazard = true; G.lightMode = 'high'; });
-    await dump('reverse-hazard');
-    await ctx.close();
+  const srv = spawn('npx', ['vite', '--port', '4365', '--host', '127.0.0.1', '--strictPort'], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 5000));
+  const b = await chromium.launch({ args: ['--no-sandbox'] });
+  const p = await b.newPage();
+  await p.goto('http://127.0.0.1:4365/');
+  const base = { speedKmh: 0, gear: 'P', rpm: 750, engineState: 'RUNNING', signalLeft: false, signalRight: false, hazard: false, lightMode: 'AUTO', lowBeam: false, highBeam: false, handbrake: true, pdcLevel: 'none', pdcOn: true, steerDeg: 0, wheelDeg: 0, floor: null, mission: '자유주행', throttle: 0, brake: 0, pitchDeg: 0, speedMax: 60, redline: 6000, engineLabel: '세단 4기통(합성)', clock: '12:34', tail: false, doorOpen: false, locked: null, zones: { front: 'none', rear: 'none', left: 'none', right: 'none' } };
+  const cases = {
+    'cluster-1-idle': base,
+    'cluster-2-reverse-pdc': { ...base, gear: 'R', speedKmh: 4, rpm: 1100, handbrake: false, brake: 0.4, pdcLevel: 'near', zones: { front: 'none', rear: 'near', left: 'far', right: 'mid' }, wheelDeg: -210, lowBeam: true, tail: true, lightMode: '하향등' },
+    'cluster-3-ramp-drive': { ...base, gear: 'D', speedKmh: 18, rpm: 2300, handbrake: false, throttle: 0.6, pitchDeg: 8, floor: '2F', mission: '경사로 → 2층 전면 주차', signalLeft: true, wheelDeg: 35 },
+    'cluster-4-fast': { ...base, gear: 'D', speedKmh: 132, speedMax: 160, rpm: 6100, handbrake: false, throttle: 1, highBeam: true, lowBeam: true, tail: true, lightMode: '상향등' },
+    'cluster-5-critical-lift': { ...base, pdcLevel: 'critical', zones: { front: 'critical', rear: 'none', left: 'none', right: 'none' }, engineState: 'OFF', rpm: 0, locked: 'lift', hazard: true },
+  };
+  for (const [name, c] of Object.entries(cases)) {
+    const url = await p.evaluate(async (c) => { const M = await import('/src/infotainment/cabinScreens.ts'); const cv = document.createElement('canvas'); cv.width = 768; cv.height = 294; M.drawCluster(cv.getContext('2d'), 768, 294, c); return cv.toDataURL('image/png'); }, c);
+    fs.writeFileSync(path.join(OUT, name + '.png'), Buffer.from(url.split(',')[1], 'base64'));
+    console.log('saved', name);
   }
-  await b.close(); srv.kill();
-})();
+  await b.close();
+  srv.kill();
+})().catch((e) => { console.error(e); process.exit(1); });
