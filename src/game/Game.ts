@@ -1399,10 +1399,23 @@ export class Game {
     return this.near;
   }
 
+  /**
+   * 접촉면 미끄러짐을 쓰는 곳: 기계식 시설 구역(문틀/가이드에 스치며 들어가는 곳).
+   * 부속 구역을 붙인 일반 맵(map.annex)은 시설 입구 앞 구역 안에서만 — 그 밖에서는 이전처럼 스치는 접촉도 충돌로 기록한다.
+   */
+  private slideZone(): boolean {
+    if (!this.map.mech) return false;
+    if (!this.map.annex) return true;
+    return this.facilities.some((f) => {
+      const l = toLocalXZ(f.frame, this.car.x, this.car.z);
+      return l.x > STATION.doorX - 14 && l.x < STATION.palletX + 6 && Math.abs(l.z) < 9;
+    });
+  }
+
   private physicsStep(vin: VehicleInput, dt: number): void {
     const car = this.car;
     // 차량 물리 + 지형/천장/하부/충돌 제약은 vehicle/worldStep.ts (헤드리스 맵 검사와 같은 코드)
-    const r = stepVehicleInWorld(car, vin, this.spec, { terrain: this.map.terrain, bounds: this.map.bounds, colliders: this.nearColliders(), levelAware: !!(this.map.terrain || this.map.mech), slide: !!this.map.mech }, dt);
+    const r = stepVehicleInWorld(car, vin, this.spec, { terrain: this.map.terrain, bounds: this.map.bounds, colliders: this.nearColliders(), levelAware: !!(this.map.terrain || this.map.mech), slide: this.slideZone() }, dt);
     if (r.slid) this.lastHitId = '';
     if (r.blocked) {
       this.contactClear = 0;

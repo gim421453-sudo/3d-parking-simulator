@@ -70,10 +70,14 @@ export function stepVehicleInWorld(car: VehicleState, vin: VehicleInput, spec: V
     const nx = car.x;
     const nz = car.z;
     car.heading = ph;
+    // 정면으로 들이받은 경우는 미끄러짐이 아니다: 한 축만 남긴 이동량이 원래 이동량의 30% 미만이면 제자리나 다름없으므로 충돌로 처리한다.
+    // (v0.5.5 수정: 이 검사가 없으면 벽에 수직으로 돌진해도 "미끄러짐"으로 채택돼 차는 멈추지만 충돌이 기록되지 않았다)
+    const stepLen = Math.hypot(nx - px, nz - pz);
     for (const [tx, tz] of [
       [nx, pz],
       [px, nz],
     ] as const) {
+      if (Math.hypot(tx - px, tz - pz) < stepLen * 0.3) continue;
       car.x = tx;
       car.z = tz;
       if (!test()) {
