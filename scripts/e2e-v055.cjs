@@ -47,34 +47,32 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   const leftOn = sig.l;
   const deg = () => Y(() => { const G = window.__game; return (G.car.steer / G.spec.maxSteer) * 540; });
   // 실제 조향 입력으로 핸들을 돌린다(정차 중에는 놓아도 각도가 유지되므로 반대로 돌려서 푼다)
+  // 조향 입력은 목표 각도 비율(steerInput = 목표/540°)이다 → 넘치지 않고 정확히 그 각도까지만 돈다
   const turnTo = async (target) => {
-    const cur = await deg();
-    const dir = target > cur ? 1 : -1;
-    await input({ throttle: 0, brake: 1, steerInput: dir });
-    const ok = await until(([t, d]) => { const G = window.__game; const w = (G.car.steer / G.spec.maxSteer) * 540; return d > 0 ? w >= t : w <= t; }, [target, dir], 30000);
-    const reached = await deg(); // 입력을 놓기 전 실제 도달 각도
-    await input({ throttle: 0, brake: 1, steerInput: 0 });
-    await sleep(250);
+    await input({ throttle: 0, brake: 1, steerInput: target / 540 });
+    const ok = await until((t) => { const G = window.__game; return Math.abs((G.car.steer / G.spec.maxSteer) * 540 - t) < 6; }, target, 30000);
+    await sleep(300);
+    const reached = await deg();
     return ok ? reached : NaN;
   };
   // 왼쪽 깜빡이: 100° 만 돌렸다 풀면 유지
-  await turnTo(100);
-  await turnTo(5);
+  const d100 = await turnTo(100);
+  await turnTo(0);
   await sleep(400);
   const keep = await Y(() => window.__game.sigLeft);
   // 220° 까지 돌린 동안은 유지, 풀리면 해제
   const c0 = await Y(() => window.__game.sigAutoCancels);
   const dmax = await turnTo(220);
   const armed = await Y(() => window.__game.sigLeft);
-  await turnTo(5);
+  await turnTo(0);
   const cancelled = await until(() => !window.__game.sigLeft, undefined, 10000);
   const c1 = await Y(() => window.__game.sigAutoCancels);
-  check('방향지시등: 왼쪽 켜짐 → 핸들 100° 만 돌렸다 풀면 유지', leftOn && keep, JSON.stringify({ leftOn, keep }));
+  check('방향지시등: 왼쪽 켜짐 → 핸들 100° 만 돌렸다 풀면 유지', leftOn && keep && d100 > 90 && d100 < 110, JSON.stringify({ leftOn, keep, d100: Math.round(d100) }));
   check('방향지시등: 같은 방향으로 180° 이상(220°) 돌린 동안은 유지, 풀리면 자동 해제(해제 횟수 +1)', armed && dmax > 180 && cancelled && c1 === c0 + 1, JSON.stringify({ armed, dmax: Math.round(dmax), cancelled, c0, c1 }));
   // 반대 방향으로 돌렸다 풀면 해제되지 않는다
   await Y(() => { const G = window.__game; if (!G.sigLeft) G.onAction('signalLeft'); });
   await turnTo(-300);
-  await turnTo(-5);
+  await turnTo(0);
   await sleep(500);
   const st3 = await Y(() => ({ l: window.__game.sigLeft, n: window.__game.sigAutoCancels }));
   check('방향지시등: 반대 방향(오른쪽 300°)으로 돌렸다 풀어도 왼쪽 깜빡이는 유지', st3.l && st3.n === c1, JSON.stringify(st3));
