@@ -61,13 +61,13 @@ export interface BurstOpts {
 export function burst(s: DebrisSim, o: BurstOpts): number {
   const k = Math.max(0, Math.min(1, o.strength));
   const kind = o.kind ?? 'chip';
-  const n = o.count ?? Math.round(kind === 'spark' ? 6 + 18 * k : 4 + 40 * k);
+  const n = o.count ?? Math.round(kind === 'spark' ? 5 + 14 * k : 4 + 28 * k);
   const dl = Math.hypot(o.dirX, o.dirZ) || 1;
   const dx = o.dirX / dl;
   const dz = o.dirZ / dl;
   for (let i = 0; i < n; i++) {
     const spread = (rnd(s) - 0.5) * 2.2;
-    const sp = (kind === 'spark' ? 3 : 1.2) + (kind === 'spark' ? 6 : 6.5) * k * (0.35 + rnd(s));
+    const sp = (kind === 'spark' ? 2.5 : 0.8) + (kind === 'spark' ? 5 : 3.2) * k * (0.35 + rnd(s));
     const ca = Math.cos(spread);
     const sa = Math.sin(spread);
     const hx = dx * ca - dz * sa;
@@ -77,7 +77,7 @@ export function burst(s: DebrisSim, o: BurstOpts): number {
       y: o.y + (rnd(s) - 0.5) * 0.3,
       z: o.z + (rnd(s) - 0.5) * 0.3,
       vx: hx * sp,
-      vy: (kind === 'smoke' ? 0.6 : 1.5 + 4 * k) * (0.4 + rnd(s)),
+      vy: (kind === 'smoke' ? 0.6 : 1.0 + 2.6 * k) * (0.4 + rnd(s)),
       vz: hz * sp,
       rx: rnd(s) * 6,
       ry: rnd(s) * 6,
@@ -85,7 +85,7 @@ export function burst(s: DebrisSim, o: BurstOpts): number {
       wx: (rnd(s) - 0.5) * 14,
       wy: (rnd(s) - 0.5) * 14,
       wz: (rnd(s) - 0.5) * 14,
-      size: kind === 'smoke' ? 0.35 + 0.3 * rnd(s) : kind === 'spark' ? 0.03 + 0.03 * rnd(s) : 0.05 + (0.12 + 0.25 * k) * rnd(s),
+      size: kind === 'smoke' ? 0.16 + 0.12 * rnd(s) : kind === 'spark' ? 0.025 + 0.025 * rnd(s) : 0.035 + (0.07 + 0.13 * k) * rnd(s),
       color: o.color,
       ground: o.ground,
       age: 0,
@@ -112,7 +112,7 @@ export function stepDebris(s: DebrisSim, dt: number): void {
       p.z += p.vz * dt * 0.3;
       p.y += p.vy * dt;
       p.vy = Math.max(0.3, p.vy - 0.2 * dt);
-      p.size += dt * 0.55;
+      p.size += dt * 0.32;
       out.push(p);
       continue;
     }

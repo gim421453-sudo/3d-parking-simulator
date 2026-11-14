@@ -20,6 +20,16 @@ export interface WorldEnv {
   levelAware: boolean;
   /** 접촉면을 따라 미끄러짐 허용(기계식 맵의 볼라드/가이드) */
   slide?: boolean;
+  /**
+   * 충돌 파손 처리(v0.6.0, 게임에서만): 부딪힌 충돌체와 (겹친 새 자세의) 차량을 받아 결과를 돌려준다.
+   * 'pass' = 장애물이 부서지거나 밀려나 차량이 계속 진행(속도 v), 'block' = 막힘(이전 자세 복원, 속도 v — 빠른 충돌은 튕김).
+   * 없으면(헤드리스 검사) 이전처럼 막히고 속도 0.
+   */
+  impact?: (hit: Collider, car: VehicleState, prevV: number) => { action: 'block' | 'pass'; v: number };
+}
+export interface ImpactEvent {
+  hit: Collider;
+  action: 'block' | 'pass';
 }
 export type BlockReason = '' | 'collider' | 'edge' | 'ceiling' | 'underbody';
 export interface WorldStepResult {
@@ -29,6 +39,8 @@ export interface WorldStepResult {
   /** 스텝 전 속도 (충돌 판정/카운트용) */
   prevV: number;
   slid: boolean;
+  /** 이번 스텝의 파손 처리 결과(impact 가 있을 때) */
+  impacts: ImpactEvent[];
 }
 
 export function stepVehicleInWorld(car: VehicleState, vin: VehicleInput, spec: VehicleSpec, env: WorldEnv, dt: number): WorldStepResult {
@@ -92,6 +104,23 @@ export function stepVehicleInWorld(car: VehicleState, vin: VehicleInput, spec: V
       car.z = nz;
     }
   }
+  const impacts: ImpactEvent[] = [];
+  let blockV = 0;
+  if (hit && env.impact) {
+    // 부서지거나 밀려난 물체는 이번 스텝 검사에서 빼고 다시 검사(뒤에 다른 물체가 있을 수 있다). 한 스텝 최대 4개
+    const passed = new Set<string>();
+    while (hit && passed.size < 4) {
+      const r = env.impact(hit, car, car.v);
+      impacts.push({ hit, action: r.action });
+      if (r.action !== 'pass') {
+        blockV = r.v;
+        break;
+      }
+      passed.add(hit.id);
+      car.v = r.v;
+      hit = findVehicleCollision(obbOf(car, spec), env.colliders.filter((c) => !passed.has(c.id)), lv ? car.y : undefined, lv ? spec.height : undefined);
+    }
+  }
   if (hit) reason = 'collider';
   if (reason) {
     car.x = px;
@@ -100,7 +129,7 @@ export function stepVehicleInWorld(car: VehicleState, vin: VehicleInput, spec: V
     car.y = py;
     car.pitch = ppitch;
     car.slope = pslope;
-    car.v = 0;
+    car.v = reason === 'collider' ? blockV : 0;
   }
-  return { blocked: !!reason, reason, hit, prevV: pv, slid };
+  return { blocked: !!reason, reason, hit, prevV: pv, slid, impacts };
 }

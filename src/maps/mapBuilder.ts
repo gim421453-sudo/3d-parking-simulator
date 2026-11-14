@@ -27,7 +27,22 @@ export interface BuiltMap {
   /** 통합 맵 성능: 플레이어 (x,z) 에서 반경 밖의 주차 차량 모델을 그리지 않는다(충돌/센서는 데이터 기반이라 무관). 숨긴 개수 반환 */
   setViewCenter(x: number, z: number, radius: number): number;
   animate(t: number): void;
+  /**
+   * v0.6.0 파손: 장애물 id 의 시각 객체를 원래 자리(합친 메시/인스턴스 포함)에서 떼어 내 독립 그룹(피벗)으로 돌려준다.
+   * 피벗 원점 = 장애물 바닥 중심(x, y0, z), 회전 0 — 이후 이동/회전/숨김은 피벗으로 한다. 두 번째 호출부터는 같은 피벗.
+   * 그 장애물을 이 빌더가 그리지 않으면(기계식 시설 모델 등) null → 파손(제거/이동) 대상에서 빼야 한다.
+   */
+  extract(id: string): ExtractedVisual | null;
+  /** 이 빌더가 그리는 장애물인가 (extract 가능 여부) */
+  canExtract(id: string): boolean;
   dispose(): void;
+}
+
+export interface ExtractedVisual {
+  pivot: THREE.Group;
+  /** 대표 재질(벽 조각을 새로 만들 때 같은 재질을 쓴다) */
+  material: THREE.Material | null;
+  def: ObstacleDef;
 }
 
 function scaleUV(g: THREE.BufferGeometry, su: number, sv: number): void {
@@ -190,6 +205,16 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   const bollardBand = track(new THREE.MeshStandardMaterial({ color: 0xfff27a, emissive: 0x6b5a00, roughness: 0.4 }));
   const cones: ObstacleDef[] = [];
   const drums: ObstacleDef[] = [];
+  // ---- v0.6.0 파손용 시각 객체 등록부: 장애물 id → 메시들 / 인스턴스 / 합친 메시 안의 상자 ----
+  type VisReg = { def: ObstacleDef; objs: THREE.Object3D[]; inst: { im: () => THREE.InstancedMesh | null; i: number }[]; batch: { key: string; idx: number; mat: THREE.Material } | null };
+  const vis = new Map<string, VisReg>();
+  const reg = (o: ObstacleDef): VisReg => {
+    let r = vis.get(o.id);
+    if (!r) vis.set(o.id, (r = { def: o, objs: [], inst: [], batch: null }));
+    return r;
+  };
+  const batchMeshByKey = new Map<string, THREE.Mesh>();
+  const BOX_VERTS = 24; // BoxGeometry 정점 수(합친 지오메트리 안에서 상자 i 의 정점 범위 = [24i, 24i+24))
 
   type CarEntry = { obj: THREE.Object3D; y: number; x: number; z: number; lv: boolean; dv: boolean };
   const levelObjects: CarEntry[] = [];
@@ -219,13 +244,14 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   let batchMeshes = 0;
   const bm = new THREE.Matrix4();
   const bq = new THREE.Quaternion();
-  const batchBox = (tx: number, tz: number, mat: THREE.Material, cast: boolean, sx: number, sy: number, sz: number, px: number, py: number, pz: number, rot: number): void => {
+  const batchBox = (tx: number, tz: number, mat: THREE.Material, cast: boolean, sx: number, sy: number, sz: number, px: number, py: number, pz: number, rot: number): { key: string; idx: number } => {
     const k = `${wgrid.keyOf(tx, tz)}|${mat.uuid}|${cast ? 1 : 0}`;
     let bt = batches.get(k);
     if (!bt) batches.set(k, (bt = { mat, cast, geos: [], x: tx, z: tz }));
     bq.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot);
     bm.compose(new THREE.Vector3(px, py, pz), bq, new THREE.Vector3(sx, sy, sz));
     bt.geos.push(boxGeo.clone().applyMatrix4(bm));
+    return { key: k, idx: bt.geos.length - 1 };
   };
   for (const o of map.obstacles) {
     switch (o.tag) {
@@ -247,6 +273,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         band.scale.set((r / 0.1) * 1.04, 0.12, (r / 0.1) * 1.04);
         band.position.set(o.x, (o.y0 ?? 0) + o.h * 0.78, o.z);
         addAt(o.x, o.z, post, band);
+        reg(o).objs.push(post, band);
         break;
       }
       case 'guide':
@@ -258,6 +285,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         const head = new THREE.Mesh(lampHeadGeo, lampGlow);
         head.position.set(o.x + 0.45, 6.45, o.z);
         addAt(o.x, o.z, pole, head);
+        reg(o).objs.push(pole, head);
         break;
       }
       case 'tree': {
@@ -268,6 +296,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         c.position.set(o.x, 0, o.z);
         c.castShadow = true;
         addAt(o.x, o.z, t, c);
+        reg(o).objs.push(t, c);
         break;
       }
       case 'car': {
@@ -276,6 +305,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         car.root.position.set(o.x, o.y0 ?? 0, o.z);
         car.root.rotation.y = o.rot ?? 0;
         group.add(car.root);
+        reg(o).objs.push(car.root);
         const entry: CarEntry = { obj: car.root, y: o.y0 ?? 0, x: o.x, z: o.z, lv: true, dv: true };
         allCars.push(entry);
         if ((o.y0 ?? 0) !== 0 || map.terrain) levelObjects.push(entry);
@@ -303,6 +333,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         m.castShadow = true;
         m.receiveShadow = true;
         group.add(m);
+        reg(o).objs.push(m);
         break;
       }
       default: {
@@ -311,7 +342,8 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         const mat = o.tag === 'barrier' ? bandMat : matFor(o.color ?? 0x999999, o.tag === 'wall' || o.tag === 'pillar' ? 0.95 : 0.8);
         if (large) {
           // 대형 맵: 타일 × 재질별로 상자를 하나의 지오메트리로 합친다(드로우콜 감소). 충돌/센서는 데이터 기반이라 무관
-          batchBox(o.x, o.z, mat, o.h > 0.3, o.w ?? 1, o.h, o.d ?? 1, o.x, (o.y0 ?? 0) + o.h / 2, o.z, o.rot ?? 0);
+          const bb = batchBox(o.x, o.z, mat, o.h > 0.3, o.w ?? 1, o.h, o.d ?? 1, o.x, (o.y0 ?? 0) + o.h / 2, o.z, o.rot ?? 0);
+          reg(o).batch = { ...bb, mat };
           if (o.tag === 'pillar') batchBox(o.x, o.z, bandMat, false, (o.w ?? 1) + 0.02, 0.7, (o.d ?? 1) + 0.02, o.x, (o.y0 ?? 0) + 0.35, o.z, 0);
           break;
         }
@@ -322,6 +354,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
         m.castShadow = o.h > 0.3;
         m.receiveShadow = true;
         addAt(o.x, o.z, m);
+        reg(o).objs.push(m);
         if (o.tag === 'pillar') {
           // 하단 경고 띠
           const band = new THREE.Mesh(boxGeo, bandMat);
@@ -333,7 +366,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     }
   }
   // 합치기: 타일 × 재질 × 그림자 여부마다 메시 1개
-  for (const bt of batches.values()) {
+  for (const [bkey, bt] of batches) {
     const merged = mergeGeometries(bt.geos, false);
     bt.geos.forEach((g) => g.dispose());
     if (!merged) continue;
@@ -342,6 +375,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     mesh.castShadow = bt.cast;
     mesh.receiveShadow = true;
     addAt(bt.x, bt.z, mesh);
+    batchMeshByKey.set(bkey, mesh);
     batchedBoxes += bt.geos.length;
     batchMeshes++;
   }
@@ -360,9 +394,11 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     group.add(im);
     return im;
   };
-  makeInstances(cones, coneGeo, coneMat);
-  makeInstances(cones, coneBaseGeo, coneBaseMat);
-  makeInstances(drums, drumGeo, drumMat);
+  const coneIm = makeInstances(cones, coneGeo, coneMat);
+  const coneBaseIm = makeInstances(cones, coneBaseGeo, coneBaseMat);
+  const drumIm = makeInstances(drums, drumGeo, drumMat);
+  cones.forEach((o, i) => reg(o).inst.push({ im: () => coneIm, i }, { im: () => coneBaseIm, i }));
+  drums.forEach((o, i) => reg(o).inst.push({ im: () => drumIm, i }));
 
   // ---- 조명 ----
   let sun: THREE.DirectionalLight | null = null;
@@ -447,6 +483,7 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
   beam.visible = false;
   group.add(beam);
 
+  const extracted = new Map<string, ExtractedVisual>();
   const result: BuiltMap = {
     group,
     tileStats() {
@@ -509,6 +546,69 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
       targetMesh.rotation.z = 0;
       beam.visible = true;
       beam.position.set(slot.x, (slot.y ?? 0) + 3, slot.z);
+    },
+    canExtract(id) {
+      const r = vis.get(id);
+      return !!r && (r.objs.length > 0 || r.inst.length > 0 || r.batch !== null);
+    },
+    extract(id) {
+      const r = vis.get(id);
+      if (!r) return null;
+      const done = extracted.get(id);
+      if (done) return done;
+      const o = r.def;
+      const pivot = new THREE.Group();
+      pivot.name = `Damage_${id}`;
+      pivot.position.set(o.x, o.y0 ?? 0, o.z);
+      group.add(pivot);
+      group.updateMatrixWorld(true);
+      let material: THREE.Material | null = null;
+      for (const obj of r.objs) {
+        pivot.attach(obj); // 월드 변환 유지
+        const m = obj as THREE.Mesh;
+        if (!material && m.isMesh) material = Array.isArray(m.material) ? m.material[0] : m.material;
+      }
+      const mtx = new THREE.Matrix4();
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (const it of r.inst) {
+        const im = it.im();
+        if (!im) continue;
+        im.getMatrixAt(it.i, mtx);
+        const m = new THREE.Mesh(im.geometry, im.material as THREE.Material);
+        mtx.decompose(m.position, m.quaternion, m.scale);
+        m.castShadow = true;
+        group.add(m);
+        pivot.attach(m);
+        im.setMatrixAt(it.i, zero); // 원래 인스턴스는 숨긴다
+        im.instanceMatrix.needsUpdate = true;
+        material = material ?? (im.material as THREE.Material);
+      }
+      if (r.batch) {
+        const bmesh = batchMeshByKey.get(r.batch.key);
+        if (bmesh) {
+          // 합친 지오메트리 안의 이 상자 정점을 한 점으로 모아 숨긴다(삼각형 면적 0)
+          const pos = bmesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+          const a = r.batch.idx * BOX_VERTS;
+          const x0 = pos.getX(a);
+          const y0 = pos.getY(a);
+          const z0 = pos.getZ(a);
+          for (let v = a; v < a + BOX_VERTS && v < pos.count; v++) pos.setXYZ(v, x0, y0, z0);
+          pos.needsUpdate = true;
+        }
+        const m = new THREE.Mesh(boxGeo, r.batch.mat);
+        m.scale.set(o.w ?? 1, o.h, o.d ?? 1);
+        m.position.set(o.x, (o.y0 ?? 0) + o.h / 2, o.z);
+        m.rotation.y = o.rot ?? 0;
+        m.castShadow = o.h > 0.3;
+        m.receiveShadow = true;
+        group.add(m);
+        group.updateMatrixWorld(true);
+        pivot.attach(m);
+        material = material ?? r.batch.mat;
+      }
+      const ev: ExtractedVisual = { pivot, material, def: o };
+      extracted.set(id, ev);
+      return ev;
     },
     animate(t) {
       const p = 0.28 + 0.12 * Math.sin(t * 3);

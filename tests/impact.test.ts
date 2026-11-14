@@ -90,6 +90,8 @@ describe('충돌 결과: 속도에 따라 달라진다', () => {
     expect(r40.v).toBeLessThan(0); // 튕김
     expect(Math.abs(r40.v)).toBeLessThan(kmh(40) * 0.2);
     const r80 = hit(w, kmh(80));
+    expect(r80.carEnergy).toBeCloseTo(materialOf(w).hp, 3); // 부서지면 차량은 벽이 버틴 만큼만 에너지를 받는다
+    expect(r80.carEnergy).toBeLessThan(r80.energy);
     expect(r80.action).toBe('pass');
     expect(r80.broke).toBe(true);
     expect(r80.v).toBeGreaterThan(0);

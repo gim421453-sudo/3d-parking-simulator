@@ -28,6 +28,8 @@ import { stepVehicleInWorld } from '../vehicle/worldStep';
 import { EngineSound } from '../audio/engineSound';
 import { epbAutoRelease } from '../vehicle/epb';
 import { facilityCameraOccluders } from '../maps/mechKit';
+import { DamageWorld } from '../fx/damageWorld';
+import { CAR_DAMAGE_LEVEL_NAME, carSeverity } from '../physics/impact';
 import { ENGINE_PROFILES, newEngine, powerOn, engineOn, pressStartStop, profileOf, stepEngine, type Engine } from '../vehicle/engine';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
 import {
@@ -240,6 +242,9 @@ export class Game {
   private sigCancel = newSignalCancel();
   /** 자동 해제된 횟수(테스트/디버그) */
   sigAutoCancels = 0;
+  /** v0.6.0 충돌 파손 (맵마다 새로 만든다) */
+  damage: DamageWorld | null = null;
+  private nearPlus: Collider[] = [];
   /** 테스트/디버그: 가속 페달로 주차 브레이크가 자동 해제된 횟수 */
   epbAutoReleases = 0;
   private hazard = false;
@@ -425,6 +430,9 @@ export class Game {
 
   // ------------------------------------------------------------ 맵/실행
   private loadMap(map: MapData): void {
+    this.damage?.resetCar(this.model?.bodyGroup ?? null); // 내 차 외형 변형을 되돌린 뒤 버린다
+    this.damage?.dispose();
+    this.damage = null;
     if (this.built) {
       this.scene.remove(this.built.group);
       this.built.dispose();
@@ -485,10 +493,20 @@ export class Game {
     const bigMap = (map.bounds.maxX - map.bounds.minX) * (map.bounds.maxZ - map.bounds.minZ) > 40000;
     this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : bigMap ? new THREE.Fog(map.env.sky, vr * 0.5, vr * 1.02) : new THREE.Fog(map.env.sky, 100, 320);
     this.zoneAcc = 1; // 첫 프레임에 타일 가시성 갱신
-    this.colliders = map.mech ? [...mapColliders(map)] : mapColliders(map); // 기계식 맵은 셔터 충돌체를 동적으로 넣고 빼므로 복사본을 쓴다
+    // 복사본: 기계식 셔터 충돌체(동적)와 v0.6.0 파손(제거/벽 분할)이 이 배열을 제자리에서 바꾼다 — 맵 데이터 캐시는 그대로 둔다
+    this.colliders = [...mapColliders(map)];
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
     this.rig.cameraOccluders = (map.mechFacilities ?? []).flatMap((f) => facilityCameraOccluders(f, `${f.id}:`));
+    this.damage = new DamageWorld(this.scene, this.built!, {
+      colliders: this.colliders,
+      byId: this.colliderById,
+      query: (x, z, r) => {
+        this.spatial.sync(this.colliders);
+        return this.spatial.query(x, z, r, []);
+      },
+      groundAt: (x, z, y) => (map.terrain ? groundAt(map.terrain, x, z, y) ?? y : 0),
+    });
     this.nearCx = this.nearCz = Infinity;
     this.indoorK = 0;
     // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이
@@ -506,7 +524,9 @@ export class Game {
     this.engineSound.volume = this.settings.engineVolume;
     this.beeper.volume = this.settings.sensorVolume;
     const map = getMap(this.settings.mapId);
-    if (this.loadedMapId !== map.id || !this.built) this.loadMap(map);
+    // v0.6.0: 부서지거나 밀린 물체가 있으면 다시 만든다(재시작 = 원래 상태)
+    if (this.loadedMapId !== map.id || !this.built || this.damage?.worldChanged) this.loadMap(map);
+    else this.damage?.resetCar(this.model?.bodyGroup ?? null);
     this.map = map;
     this.missionDef = map.missions.find((m) => m.id === this.settings.missionId) ?? null;
     this.targetSlot = this.missionDef ? (map.slots.find((s) => s.id === this.missionDef!.slotId) ?? null) : null;
@@ -820,6 +840,10 @@ export class Game {
           break;
         }
         this.engineSound.init();
+        if (this.damage?.effects.disabled) {
+          this.hud.toast('차량이 파손되어 시동을 걸 수 없습니다 — 다시 시작(T)', 'warn');
+          break;
+        }
         const r = pressStartStop(this.engine, { speed: Math.abs(this.car.v), gear: this.car.gear, brake: this.brake });
         // 시동을 끄면서 P 로: 정차 상태에서만 일어나므로 브레이크를 밟은 것과 같은 조건으로 인터록(shiftGear)을 통과시킨다
         if (r.ok && r.autoPark) shiftGear(this.car, 'P', true);
@@ -1075,6 +1099,19 @@ export class Game {
       this.epbAutoReleases++;
       this.hud.toast('주차 브레이크 자동 해제');
     }
+    // v0.6.0 차량 손상 효과: 출력/최고속도 감소, 측면 손상 쏠림, 완전 파손이면 엔진 정지
+    const dfx = this.damage?.effects;
+    if (dfx && dfx.level !== 'none') {
+      vin.throttle *= dfx.power;
+      if (Math.abs(this.car.v) > this.spec.maxSpeedFwd * dfx.topSpeed) vin.throttle = 0;
+      if (Math.abs(this.car.v) > 1) vin.steerInput = Math.max(-1, Math.min(1, vin.steerInput + dfx.steerPull / this.spec.maxSteer));
+      if (dfx.disabled && this.engine.state !== 'OFF') {
+        this.engine.state = 'OFF';
+        this.engine.rpm = 0;
+        vin.engineOn = false;
+        this.hud.toast('차량이 크게 파손되어 엔진이 멈췄습니다 — 다시 시작(T)', 'bad');
+      }
+    }
     if (this.map.mech) this.mech.engineOn = engineOn(this.engine);
     const mech = this.map.mech ? this.mech : null;
     if (mech?.blocksDriving()) vin = { throttle: 0, brake: 1, steerInput: 0, engineOn: vin.engineOn };
@@ -1283,6 +1320,7 @@ export class Game {
       // 'keep': 보관 슬롯/입구 밖에 서 있는 차량 — 씬에서 제거하지 않는다
     }
     this.spec = spec;
+    this.damage?.resetCar(null); // 다른 차량으로 바뀌면 내 차 손상은 새로
     this.engine = newEngine(profileOf(spec), engineRunning);
     this.nav.setVehicle(spec);
     const next = model ?? createCarModel(spec, { blobTexture: this.built!.textures.blob });
@@ -1406,6 +1444,14 @@ export class Game {
       // 반경 = 재조회 이동 여유(3) + 차체 도달(≈3.5) + 센서/가이드 범위(≈6) + 여유
       this.spatial.query(this.car.x, this.car.z, 14, this.near);
     }
+    const dyn = this.damage?.dynamicColliders;
+    if (dyn && dyn.length) {
+      // 밀려난 물체(동적)는 공간 인덱스에 없다 — 매번 붙인다(개수가 적다)
+      this.nearPlus.length = 0;
+      for (const c of this.near) this.nearPlus.push(c);
+      for (const c of dyn) this.nearPlus.push(c);
+      return this.nearPlus;
+    }
     return this.near;
   }
 
@@ -1425,16 +1471,27 @@ export class Game {
   private physicsStep(vin: VehicleInput, dt: number): void {
     const car = this.car;
     // 차량 물리 + 지형/천장/하부/충돌 제약은 vehicle/worldStep.ts (헤드리스 맵 검사와 같은 코드)
-    const r = stepVehicleInWorld(car, vin, this.spec, { terrain: this.map.terrain, bounds: this.map.bounds, colliders: this.nearColliders(), levelAware: !!(this.map.terrain || this.map.mech), slide: this.slideZone() }, dt);
+    const r = stepVehicleInWorld(car, vin, this.spec, { terrain: this.map.terrain, bounds: this.map.bounds, colliders: this.nearColliders(), levelAware: !!(this.map.terrain || this.map.mech), slide: this.slideZone(), impact: this.damage ? (hit, c) => this.damage!.onImpact(hit, c, this.spec) : undefined }, dt);
     if (r.slid) this.lastHitId = '';
-    if (r.blocked) {
+    // v0.6.0: 부서지거나 밀려나 막히지 않은 충돌(r.impacts)도 충돌로 센다
+    const touched = r.hit ?? r.impacts[0]?.hit ?? null;
+    if (r.blocked || r.impacts.length) {
       this.contactClear = 0;
-      this.lastHitId = r.hit ? r.hit.id : r.reason; // 테스트/디버그 ('edge' 경계/지면 없음, 'ceiling' 천장 높이, 'underbody' 하부 접촉)
-      if (!this.inContact && Math.abs(r.prevV) > 0.1) {
+      this.lastHitId = touched ? touched.id : r.reason; // 테스트/디버그 ('edge' 경계/지면 없음, 'ceiling' 천장 높이, 'underbody' 하부 접촉)
+      const ev = this.damage?.lastEvent ?? null;
+      if (this.damage) this.damage.lastEvent = null;
+      const big = !!ev && (ev.broke || ev.carDamage > 0.04);
+      if ((!this.inContact || big) && Math.abs(r.prevV) > 0.1) {
+        if (!this.inContact) {
+          this.collisions++;
+          this.mission?.addCollision();
+        }
         this.inContact = true;
-        this.collisions++;
-        this.mission?.addCollision();
-        this.hud.toast(`충돌! (${r.hit ? tagName(r.hit.tag) : r.reason === 'ceiling' ? '천장 높이 제한' : r.reason === 'underbody' ? '차체 하부 접촉' : '경계'})`, 'bad');
+        const what = touched ? tagName(touched.tag) : r.reason === 'ceiling' ? '천장 높이 제한' : r.reason === 'underbody' ? '차체 하부 접촉' : '경계';
+        const broke = ev?.broke ? (ev.mode === 'hole' ? ' · 벽이 뚫렸습니다' : ev.mode === 'topple' ? ' · 쓰러졌습니다' : ' · 부서졌습니다') : '';
+        const sev = this.damage ? carSeverity(this.damage.carDamage) : 0;
+        const dmg = ev && ev.carDamage > 0.005 ? ` · 차량 ${CAR_DAMAGE_LEVEL_NAME[this.damage!.effects.level]} ${Math.round(sev * 100)}%` : '';
+        this.hud.toast(`충돌! (${what})${broke}${dmg}`, 'bad');
         this.hud.flash();
       } else if (!this.inContact) {
         this.inContact = true;
@@ -1505,6 +1562,7 @@ export class Game {
       signalLeft: (this.sigLeft || this.hazard) && this.blinkOn,
       signalRight: (this.sigRight || this.hazard) && this.blinkOn,
     });
+    this.damage?.update(dt, car, this.spec, model);
     const driver = this.rig.mode === 'driver';
     model.bodyGroup.visible = !driver;
     model.cockpit.visible = driver;
@@ -1576,7 +1634,10 @@ export class Game {
   }
 
   private currentLighting() {
-    return computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor || this.indoorK > 0.5 });
+    const L = computeLighting({ mode: this.lightMode, gear: this.car.gear, ambientDark: this.map.env.indoor || this.indoorK > 0.5 });
+    // v0.6.0: 앞부분이 크게 부서지면 전조등이 깨져 켜지지 않는다
+    if (this.damage?.effects.headlightsBroken) return { ...L, low: false, high: false, drl: 0 };
+    return L;
   }
 
   /** 수동 카메라 순환: 현재 진행 방향 카메라가 가장 먼저 (R 에서 전방카메라가 먼저 나오는 일이 없게) */
@@ -2047,6 +2108,7 @@ export class Game {
       doorOpen: this.mech.m.occupant === 'out',
       locked: this.mech.m.locked ? 'mech' : this.activeLift?.st.locked ? 'lift' : null,
       zones: this.clusterZones(),
+      damage: this.damage ? { ...this.damage.carDamage, level: this.damage.effects.level } : undefined,
     };
     this.lastClusterData = clusterData; // 테스트/디버그: 계기판이 실제 게임 상태와 일치하는지 검사
     drawCluster(cab.cluster.ctx, cab.cluster.canvas.width, cab.cluster.canvas.height, clusterData);

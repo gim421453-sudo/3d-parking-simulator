@@ -185,6 +185,8 @@ export interface ClusterData {
   locked?: 'lift' | 'mech' | null;
   /** 방향별 PDC 단계(색만) */
   zones?: { front: string; rear: string; left: string; right: string };
+  /** v0.6.0 차체 손상: 부위별 0~1 과 단계 */
+  damage?: { front: number; rear: number; left: number; right: number; level: 'none' | 'minor' | 'moderate' | 'severe' | 'wrecked' };
 }
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif';
@@ -317,7 +319,7 @@ function vbar(ctx: CanvasRenderingContext2D, x: number, y0: number, y1: number, 
 }
 
 /** 작은 차량 평면도 + 전/후/좌/우 PDC 단계(색만, 숫자 없음) */
-function miniCar(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, z: NonNullable<ClusterData['zones']>, on: boolean): void {
+function miniCar(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, z: NonNullable<ClusterData['zones']>, on: boolean, dmg?: ClusterData['damage']): void {
   const bw = s * 0.42;
   const bl = s * 0.9;
   ctx.fillStyle = 'rgba(255,255,255,.16)';
@@ -329,6 +331,31 @@ function miniCar(ctx: CanvasRenderingContext2D, x: number, y: number, s: number,
   ctx.fillStyle = 'rgba(120,170,230,.5)';
   rr(ctx, x - bw * 0.36, y - bl * 0.22, bw * 0.72, bl * 0.4, bw * 0.12);
   ctx.fill();
+  // 차체 손상 부위: 앞/뒤/좌/우 가장자리를 손상 정도에 따라 주황→빨강으로 칠한다(숫자 없음)
+  if (dmg && dmg.level !== 'none') {
+    const col = (d: number): string => `rgba(${d > 0.6 ? 255 : 255},${Math.round(170 - 150 * Math.min(1, d))},40,${Math.min(0.95, 0.25 + d)})`;
+    const t = bw * 0.22;
+    if (dmg.front > 0.02) {
+      ctx.fillStyle = col(dmg.front);
+      rr(ctx, x - bw / 2, y - bl / 2, bw, bl * 0.18, t);
+      ctx.fill();
+    }
+    if (dmg.rear > 0.02) {
+      ctx.fillStyle = col(dmg.rear);
+      rr(ctx, x - bw / 2, y + bl / 2 - bl * 0.18, bw, bl * 0.18, t);
+      ctx.fill();
+    }
+    if (dmg.left > 0.02) {
+      ctx.fillStyle = col(dmg.left);
+      rr(ctx, x - bw / 2, y - bl * 0.3, bw * 0.2, bl * 0.6, t * 0.5);
+      ctx.fill();
+    }
+    if (dmg.right > 0.02) {
+      ctx.fillStyle = col(dmg.right);
+      rr(ctx, x + bw / 2 - bw * 0.2, y - bl * 0.3, bw * 0.2, bl * 0.6, t * 0.5);
+      ctx.fill();
+    }
+  }
   const seg = (lv: string, x0: number, y0: number, x1: number, y1: number): void => {
     const col = on ? PDC_COL[lv] : undefined;
     ctx.strokeStyle = col ?? 'rgba(255,255,255,.14)';
@@ -472,7 +499,7 @@ export function drawCluster(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.textAlign = 'center';
   const sd = Math.round(Math.abs(wd));
   ctx.fillText(`${sd}°${sd < 3 ? '' : wd > 0 ? ' 좌' : ' 우'}`, cx - h * 0.3, rowY + h * 0.075);
-  miniCar(ctx, cx, rowY, h * 0.19, c.zones ?? { front: 'none', rear: 'none', left: 'none', right: 'none' }, c.pdcOn !== false);
+  miniCar(ctx, cx, rowY, h * 0.19, c.zones ?? { front: 'none', rear: 'none', left: 'none', right: 'none' }, c.pdcOn !== false, c.damage);
   const pitch = c.pitchDeg ?? 0;
   inclinometer(ctx, cx + h * 0.3, rowY + h * 0.02, h * 0.2, pitch);
   ctx.fillStyle = Math.abs(pitch) >= 1 ? '#8fd0ff' : 'rgba(255,255,255,.45)';
@@ -501,7 +528,8 @@ export function drawCluster(ctx: CanvasRenderingContext2D, w: number, h: number,
   }
   // ---- 중앙 경고 문구 (우선순위: 장애물 근접 > 장치 고정 > 문 열림) ----
   const pdcOn = c.pdcOn !== false;
-  const warn = c.pdcLevel === 'critical' && pdcOn ? { t: '장애물 근접', col: '#ff3b30' } : c.locked ? { t: c.locked === 'lift' ? '리프트 고정' : '기계식 장치 고정', col: '#ffb020' } : c.doorOpen ? { t: '하차 중', col: '#ffb020' } : null;
+  const dl = c.damage?.level ?? 'none';
+  const warn = c.pdcLevel === 'critical' && pdcOn ? { t: '장애물 근접', col: '#ff3b30' } : dl === 'wrecked' ? { t: '차량 파손 · 운행 불가', col: '#ff3b30' } : dl === 'severe' ? { t: '차체 심한 손상', col: '#ff7a3a' } : c.locked ? { t: c.locked === 'lift' ? '리프트 고정' : '기계식 장치 고정', col: '#ffb020' } : c.doorOpen ? { t: '하차 중', col: '#ffb020' } : null;
   if (warn) {
     ctx.fillStyle = warn.col;
     ctx.font = `800 ${Math.round(h * 0.062)}px ${FONT}`;
@@ -520,6 +548,7 @@ export function drawCluster(ctx: CanvasRenderingContext2D, w: number, h: number,
     { t: 'P', on: c.handbrake, col: '#ff5a4d' },
     { t: '제동', on: (c.brake ?? 0) > 0.05, col: '#ff5a4d' },
     { t: '비상', on: c.hazard, col: '#ffb020' },
+    { t: '손상', on: dl !== 'none', col: dl === 'wrecked' || dl === 'severe' ? '#ff3b30' : '#ffb020' },
     { t: pdcOn ? 'PDC' : 'PDC OFF', on: pdcOn && !!lvlCol, col: lvlCol ?? '#7fc24d' },
   ];
   const x0 = lx + R * 0.5;

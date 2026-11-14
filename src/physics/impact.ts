@@ -160,8 +160,10 @@ export interface ImpactResult {
   /** 접촉점/법선(장애물 → 차량) */
   point: { x: number; z: number };
   normal: { x: number; z: number };
-  /** 차량 손상 부위와 에너지 */
+  /** 차량 손상 부위 */
   zone: CarZone;
+  /** 차량이 받는 에너지(J): 부서진 경우 장애물이 흡수한 만큼(남은 내구도), 그 외에는 충돌 에너지 */
+  carEnergy: number;
 }
 
 /** 이 속도(접근 속도, m/s)보다 빠른 정면 충돌만 튕겨 나온다. 그보다 느리면 이전처럼 그 자리에 멈춘다(주차 중 접촉) */
@@ -192,7 +194,7 @@ export function resolveImpact(i: ImpactInput): ImpactResult {
   const mu = movable ? (i.carMass * mat.mass) / (i.carMass + mat.mass) : i.carMass;
   const energy = 0.5 * mu * vn * vn;
   const zone = carZoneOf(i.car, cp.x, cp.z);
-  const base = { vn, energy, point: { x: cp.x, z: cp.z }, normal: { x: nx, z: nz }, zone, mode: mat.mode };
+  const base = { vn, energy, carEnergy: energy, point: { x: cp.x, z: cp.z }, normal: { x: nx, z: nz }, zone, mode: mat.mode };
   const dmg = mat.mode === 'none' || energy < mat.minE ? 0 : energy;
 
   if (movable && mat.mode === 'push') {
@@ -220,7 +222,7 @@ export function resolveImpact(i: ImpactInput): ImpactResult {
     const absorbed = Math.max(0, Math.min(energy, mat.hp - i.damage));
     const ke = 0.5 * i.carMass * i.v * i.v;
     const k = ke > 1e-9 ? Math.sqrt(Math.max(0, 1 - absorbed / ke)) : 0;
-    return { ...base, action: 'pass', v: i.v * k, damage: dmg, broke: true, push: null };
+    return { ...base, carEnergy: absorbed, action: 'pass', v: i.v * k, damage: dmg, broke: true, push: null };
   }
   // 버팀: 막힘. 빠른 정면 충돌은 법선 방향으로 조금 튕긴다(반발계수 e)
   const v = vn > BOUNCE_MIN_VN ? -Math.sign(i.v) * mat.e * vn : 0;
