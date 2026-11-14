@@ -2848,8 +2848,18 @@ async function waitServer(url, tries = 50) {
       // 열린 차선(z=0)으로 -x → +x 달려 동쪽 벽(e-wall x=27.6)에 부딪힌다
       await Y(() => { const G = window.__game; const c = G.car; c.x = -30; c.z = 0; c.heading = Math.PI / 2; c.v = 38; c.gear = 'D'; c.handbrake = false; c.steer = 0; G.debugInput = { throttle: 1, brake: 0, steerInput: 0 }; });
       const hit = await yuntil(() => window.__game.car.x > -29.9 && Math.abs(window.__game.car.v) < 0.5, undefined, 60000);
-      const r = await Y(() => { const G = window.__game; return { x: G.car.x, v: G.car.v, front: G.car.x + G.spec.length - G.spec.rearOverhang, kmh: 0 }; });
-      check('v0.5.3 137km/h 정면 충돌: 벽을 관통하지 않고 정지한다(앞범퍼 < 벽 안쪽면 27.3m)', hit && r.front <= 27.31 && r.x > -36, JSON.stringify(r));
+      const r = await Y(() => { const G = window.__game; return { x: G.car.x, v: G.car.v, front: G.car.x + G.spec.length - G.spec.rearOverhang, kmh: 0, holes: G.damage ? G.damage.stats.holes : 0, ewall: G.colliders.filter((c) => /^e-wall/.test(c.id)).map((c) => c.id) }; });
+      // v0.6.0: 벽은 충분히 빠르면 부서진다(파손 물리). 벽 너머에 있으려면 반드시 그 벽에 구멍이 기록되어야 한다 — 기록 없이 지나가면 관통(실패)
+      check('v0.5.3/v0.6.0 137km/h 정면 충돌: 벽을 그냥 관통하지 않는다(멈추거나, 파손 물리로 구멍을 내고 통과)', hit && r.x > -36 && (r.front <= 27.31 || (r.holes >= 1 && !r.ewall.includes('e-wall') && r.ewall.length === 2)), JSON.stringify(r));
+      // 고속 관통 방지(서브스텝) 자체는 부서지지 않는 얇은 기둥(pil-1, 0.55m)으로 확인한다
+      await Y(() => window.__game.startRun());
+      await yuntil(() => window.__game.state === 'playing' && window.__game.damage && window.__game.damage.stats.impacts === 0, undefined, 30000);
+      await Y(() => { const G = window.__game; const c = G.car; c.x = -11.2; c.z = -8 - (G.spec.length / 2 - G.spec.rearOverhang); c.heading = 0; c.v = 38; c.gear = 'D'; c.handbrake = false; c.steer = 0; G.debugInput = { throttle: 1, brake: 0, steerInput: 0 }; });
+      const hitP = await yuntil(() => Math.abs(window.__game.car.v) < 0.5 && window.__game.damage.stats.impacts > 0, undefined, 60000);
+      const rp = await Y(() => { const G = window.__game; const off = G.spec.length / 2 - G.spec.rearOverhang; const cz = G.car.z + off; return { front: cz + G.spec.length / 2, last: G.damage.log.filter((l) => l.kmh > 1).slice(-1)[0], pillar: G.colliders.some((c) => c.id === 'pil-1') }; });
+      check('v0.6.0 137km/h 로 부서지지 않는 얇은 기둥(0.55m)에 충돌: 관통하지 않고 기둥 앞에서 멈춘다(앞범퍼 < 16.93m, 기둥 유지)', hitP && rp.front <= 16.93 && rp.pillar && rp.last && rp.last.id === 'pil-1', JSON.stringify(rp));
+      await Y(() => window.__game.startRun());
+      await yuntil(() => window.__game.state === 'playing', undefined, 30000);
       await Y(() => { const G = window.__game; const c = G.car; c.x = -30; c.z = 0; c.heading = Math.PI / 2; c.v = 27.7; c.gear = 'D'; c.handbrake = false; c.steer = 0; G.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; });
       const stopped = await yuntil(() => window.__game.car.x > -29.9 && Math.abs(window.__game.car.v) < 0.05, undefined, 60000);
       const b = await Y(() => ({ x: window.__game.car.x, v: window.__game.car.v }));
