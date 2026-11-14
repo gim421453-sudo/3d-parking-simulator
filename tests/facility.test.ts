@@ -159,3 +159,24 @@ describe('맵에 설치된 기계식 시설 (데이터)', () => {
 });
 
 void makeFacility;
+
+import { facilityCameraOccluders } from '../src/maps/mechKit';
+import { freeFraction } from '../src/pdc/visibility';
+describe('추적 카메라 가림: 셔터 위 상인방/LED 안내판 (v0.6.0)', () => {
+  for (const rot of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+    it(`회전 ${Math.round((rot * 180) / Math.PI)}°: 팔레트 위 차량 → 기본 추적 위치(뒤 6m·높이 3.1m) 시선은 안내판에 막히고, 높인 위치(5.3m)는 트인다`, () => {
+      const cfg = { x: 10, z: -4, rotationY: rot };
+      const occ = facilityCameraOccluders(cfg);
+      expect(occ.length).toBe(1);
+      expect(occ[0].tag).toBe('camera-only');
+      const f = frameOf(cfg);
+      const car = toWorldXZ(f, STATION.palletX, 0);
+      const back = toWorldXZ(f, STATION.palletX - 6.2, 0);
+      expect(freeFraction({ x: car.x, y: 1.2, z: car.z }, { x: back.x, y: 3.1, z: back.z }, occ, 0.3, 0.05)).toBeLessThan(0.99);
+      expect(freeFraction({ x: car.x, y: 1.2, z: car.z }, { x: back.x, y: 5.3, z: back.z }, occ, 0.3, 0.05)).toBe(1);
+    });
+  }
+  it('카메라 전용 물체는 맵 충돌체에 들어가지 않는다(차량/센서에 영향 없음)', () => {
+    for (const m of MAPS) expect(mapColliders(m).some((c) => c.tag === 'camera-only'), m.id).toBe(false);
+  });
+});

@@ -1,3 +1,4 @@
+import type { Collider } from '../core/geometry';
 import { MECH_LIMITS } from '../mech/limits';
 import { STATION } from '../mech/machine';
 import { frameOf, toWorldXZ, type Frame, type MechFacilityConfig } from '../mech/facility';
@@ -112,4 +113,20 @@ export function footprintObb(cfg: Pick<MechFacilityConfig, 'x' | 'z' | 'rotation
   const f = frameOf(cfg);
   const c = toWorldXZ(f, (rect.minX + rect.maxX) / 2, (rect.minZ + rect.maxZ) / 2);
   return { x: c.x, z: c.z, rot: Math.PI / 2 + f.yaw, hw: (rect.maxZ - rect.minZ) / 2 + margin, hl: (rect.maxX - rect.minX) / 2 + margin };
+}
+
+/**
+ * 카메라 가림 전용 물체 (v0.6.0): 셔터 위 상인방 + 작동 상태 LED 안내판은 차량이 닿지 않는 높이라 충돌체가 아니지만,
+ * 승강장 안 팔레트 위 차량을 뒤에서 비추는 추적 카메라 시선을 가린다. 카메라 가림 보정(`CameraRig.colliders`)에만 넣는다.
+ * 치수는 mechBuilder 의 상인방(doorH+0.15, 두께 0.3)·안내판(doorX-0.4, 중심 doorH+0.85, 높이 0.95, 폭 3.5)과 같다.
+ */
+export function facilityCameraOccluders(cfg: Pick<MechFacilityConfig, 'x' | 'z' | 'rotationY'>, idPrefix = ''): Collider[] {
+  const f = frameOf(cfg);
+  const dh = MECH_LIMITS.doorHeight;
+  const cx = STATION.doorX - 0.15;
+  const c = toWorldXZ(f, cx, 0);
+  const swap = Math.abs(Math.sin(f.yaw)) > 0.5;
+  const w = 0.6; // 로컬 x 두께 (상인방 0.3 + 안내판 뒷판 사이 포함)
+  const d = MECH_LIMITS.doorWidth + 1.2; // 로컬 z 폭 (안내판 3.5m 보다 약간 넓게)
+  return [{ kind: 'box', id: `${idPrefix}cam-occ-door-header`, tag: 'camera-only', x: c.x, z: c.z, w: swap ? d : w, d: swap ? w : d, rot: 0, y0: dh, h: 1.45 }];
 }

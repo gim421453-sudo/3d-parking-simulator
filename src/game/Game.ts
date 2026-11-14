@@ -27,6 +27,7 @@ import { VIEW_RADIUS } from '../world/tiles';
 import { stepVehicleInWorld } from '../vehicle/worldStep';
 import { EngineSound } from '../audio/engineSound';
 import { epbAutoRelease } from '../vehicle/epb';
+import { facilityCameraOccluders } from '../maps/mechKit';
 import { ENGINE_PROFILES, newEngine, powerOn, engineOn, pressStartStop, profileOf, stepEngine, type Engine } from '../vehicle/engine';
 import { SensorView, type SensorViewSize } from '../sensors/SensorView';
 import {
@@ -487,6 +488,7 @@ export class Game {
     this.colliders = map.mech ? [...mapColliders(map)] : mapColliders(map); // 기계식 맵은 셔터 충돌체를 동적으로 넣고 빼므로 복사본을 쓴다
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
+    this.rig.cameraOccluders = (map.mechFacilities ?? []).flatMap((f) => facilityCameraOccluders(f, `${f.id}:`));
     this.nearCx = this.nearCz = Infinity;
     this.indoorK = 0;
     // 천장 아래로 추적 카메라 높이 제한: 다층 맵은 위층 바닥 아랫면, 실내 평면 맵은 천장 높이

@@ -67,6 +67,8 @@ export class CameraRig {
   private needSnap = true;
   /** 추적 카메라 가림 보정에 쓰는 충돌체 (맵 로드 시 설정) */
   colliders: readonly Collider[] = [];
+  /** 카메라 가림 전용 물체(충돌체 아님): 기계식 셔터 위 상인방/LED 안내판 등 차량이 닿지 않는 높이의 구조물 (v0.6.0) */
+  cameraOccluders: readonly Collider[] = [];
   /** 다층: (x,z,y) 위쪽 천장 아랫면 높이 (없으면 Infinity). 추적 카메라가 천장을 뚫지 않게 한다 */
   ceilingFn: ((x: number, z: number, y: number) => number) | null = null;
   /** 마지막 추적 카메라 가림 보정 비율 (1 = 보정 없음) — 테스트/디버그용 */
@@ -275,7 +277,9 @@ export class CameraRig {
           const dx = Math.sin(pose.heading + yaw);
           const dz = Math.cos(pose.heading + yaw);
           const pos = new THREE.Vector3(pose.x - dx * d * back, Math.min(gy + this.chaseHeight * hm, ceil - 0.25), pose.z - dz * d * back);
-          return { pos, free: freeFraction({ x: pose.x, y: gy + 1.2, z: pose.z }, pos, this.colliders, 0.6, 0.05) };
+          const from = { x: pose.x, y: gy + 1.2, z: pose.z };
+          const free = freeFraction(from, pos, this.colliders, 0.6, 0.05);
+          return { pos, free: this.cameraOccluders.length ? Math.min(free, freeFraction(from, pos, this.cameraOccluders, 0.3, 0.05)) : free };
         };
         // [좌우 회전(rad), 높이 배율, 뒤쪽 거리 배율] — 마지막은 차 바로 위쪽에서 내려다보는 최후 후보
         const CAND: [number, number, number][] = [[0, 1, 1], [0.5, 1, 1], [-0.5, 1, 1], [0, 1.7, 1], [0.8, 1.35, 1], [-0.8, 1.35, 1], [0, 2.3, 1], [0, 2.1, 0.3]];
