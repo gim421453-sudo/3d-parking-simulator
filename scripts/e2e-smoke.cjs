@@ -102,7 +102,7 @@ async function waitServer(url, tries = 50) {
   await shot('03-vehicles');
   await page.click('#back');
   await page.click('#m-map');
-  { const names = await page.locator('#maps .option').allTextContents(); check('맵 선택 화면 (기존 10개 + v0.5.4 정비소·골목길·도시형 검증 구역 = 13개, 기존 맵은 모두 남아 있음)', names.length === 13 && ['기본 주차 연습장', '지하 주차장', '야외 주차장', '다층 주차타워', '5층 지그재그', '3층 순환형', '모듈형 연습', '나선형 경사로', '기계식 주차타워', '통합 주차', '정비소', '골목길', '도시형 검증'].every((n) => names.some((t) => t.includes(n))), names.map((t) => t.slice(0, 12)).join(' | ')); }
+  { const names = await page.locator('#maps .option').allTextContents(); check('맵 선택 화면 (기존 10개 + v0.5.4 정비소·골목길·도시형 검증 구역 + v0.6.0 괴정동 실제 지도 = 14개, 기존 맵은 모두 남아 있음)', names.length === 14 && ['기본 주차 연습장', '지하 주차장', '야외 주차장', '다층 주차타워', '5층 지그재그', '3층 순환형', '모듈형 연습', '나선형 경사로', '기계식 주차타워', '통합 주차', '정비소', '골목길', '도시형 검증', '괴정동'].every((n) => names.some((t) => t.includes(n))), names.map((t) => t.slice(0, 12)).join(' | ')); }
   await sleep(400);
   await shot('04-maps');
   await page.click('#back');
