@@ -644,3 +644,19 @@ describe('v0.5.3 시동 OFF 조건 (입고/하차 전 시동을 꺼야 한다)',
     expect(startStore(sedan, { ...ideal(), engineOn: false }, m, '02A')).toBe(true);
   });
 });
+
+import { stepMachine as stepM, newMachine as newM } from '../src/mech/machine';
+describe('v0.6.0 빈 캐리지 복귀가 멈추지 않는다 (판정 기준 통일)', () => {
+  for (const z0 of [1e-12, -3e-10, Number.NaN]) {
+    it(`복귀 중 수평 위치 z=${z0} 가 남아 있어도 1F 로 내려와 다음 단계(재정렬)로 넘어간다`, () => {
+      const m = newM();
+      m.phase = 'returning';
+      m.carriage.y = 6;
+      m.carriage.z = z0;
+      for (let i = 0; i < 60 * 30 && m.phase === 'returning'; i++) stepM(m, 1 / 60, true);
+      expect(m.phase).not.toBe('returning');
+      expect(m.carriage.z).toBe(0);
+      expect(m.carriage.y).toBe(0);
+    });
+  }
+});

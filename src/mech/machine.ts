@@ -452,7 +452,9 @@ export function stepMachine(m: MachineState, dt: number, doorClear: boolean): vo
     }
     case 'returning': {
       // 빈 캐리지: 먼저 수평 복귀, 그다음 하강
-      if (Math.abs(m.carriage.z) > 1e-9) m.carriage.z = moveTo(m.carriage.z, 0, SLOT_Z / TIMES.retract, dt);
+      // v0.6.0: 이동 판정(|z| > 1e-9)과 완료 판정(z === 0)이 달라 z 에 아주 작은 값(또는 비정상 값)이 남으면 영구히 멈출 수 있었다 → 같은 기준으로 정렬
+      if (!Number.isFinite(m.carriage.z) || Math.abs(m.carriage.z) <= 1e-9) m.carriage.z = 0;
+      if (m.carriage.z !== 0) m.carriage.z = moveTo(m.carriage.z, 0, SLOT_Z / TIMES.retract, dt);
       else m.carriage.y = moveTo(m.carriage.y, 0, TIMES.liftSpeed, dt);
       if (m.carriage.z === 0 && m.carriage.y === 0) {
         m.phase = 'restocking';
