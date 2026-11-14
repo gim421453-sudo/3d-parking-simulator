@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.5.5-dev (`feature/v055-controls`, 아래 v0.5.5 섹션) · 이전 v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.6.0-dev (`feature/v060-damage-city`, 아래 v0.6.0 섹션) · 이전 v0.5.5-dev (`feature/v055-controls`) · v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,15 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.6.0 진행 상황 (충돌 파손 물리 · 자동 주차 브레이크 · 괴정동 실제 지도) — 브랜치 `feature/v060-damage-city`
+
+상세/검증: `docs/V060.md`. 단위 1093/1093, E2E v0.6.0 16/16. v0.5.5 브랜치에서 이어서 만들었다(병합 안 함).
+- 한 일: P 변속 시 주차 브레이크 자동 체결·D/R 가속 시 자동 해제(`vehicle/epb.ts`), 추적 카메라가 셔터 위 LED 안내판에 가리던 문제(카메라 전용 가림 물체), **충돌 파손**(`physics/impact.ts` 순수 로직 + `fx/damageWorld.ts`: 콘/드럼/주차차량 밀림, 방호벽/화분 부서짐, 가로등/나무/볼라드 넘어짐, 벽 구멍, 건물/기둥 균열, 파편/연기, 내 차 부위별 손상·출력 저하·운행 불가, 재시작 시 복원), **괴정동 실제 지도**(괴정역 중심 1km, OSM/ODbL, 실제 도로망 내비, 기계식 타워 1기).
+- 남은 일(사용자): 배포 방식 결정(`github-pages` 환경 브랜치 규칙), 파손 강도/차량 손상 수치 체감 확인, 괴정동 중심/범위 확인(법정동 중심 대신 괴정역 중심으로 정함), 팔레트 안 보임(v0.5.5 #4) 재현 조건.
+- 알려진 제한: 외부 물리 엔진 미사용(이유는 V060.md), 건물은 사라지지 않음, 파편은 시각 전용, 괴정동은 평면(고도 없음)·건물 대부분 절차 생성(OSM 미등록 블록)·주차칸/시설 임시 배치.
+- 버그 기록: [팔레트 위 차량을 비추는 추적 카메라가 LED 안내판에 가림] 원인 = 안내판/상인방은 충돌체가 아니라 카메라 가림 보정이 몰랐다 · 수정 = `facilityCameraOccluders` → `CameraRig.cameraOccluders` · 재발 방지 = `tests/facility.test.ts`.
+- 재발 방지/규칙: 충돌 반응은 `worldStep` 의 `impact` 콜백으로만(Game 에 따로 충돌 로직 금지), 파손으로 충돌체를 바꿀 때는 `Game.colliders` 를 **제자리 splice/push**(공간 인덱스가 길이 변화로 재생성), 그리지 못하는 물체는 제거하지 않기(`built.canExtract`), 내 차 외형 변형은 시각만(충돌 상자/센서 불변), 실제 지도는 `scripts/osm-import.ts` 로만 만들고 출처(ODbL) 표시 유지.
 
 ## v0.5.5 진행 상황 (조작·표시 개선 · 4주식 리프트 · 모든 맵 기계식 · 엔진음/계기판) — 브랜치 `feature/v055-controls`
 
