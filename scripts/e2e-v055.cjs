@@ -46,35 +46,43 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   if (!sig.l && !sig.r) { await Y(() => window.__game.onAction('signalLeft')); sig = await Y(() => ({ l: window.__game.sigLeft, r: window.__game.sigRight })); }
   const leftOn = sig.l;
   const deg = () => Y(() => { const G = window.__game; return (G.car.steer / G.spec.maxSteer) * 540; });
-  // 왼쪽 깜빡이: 90°만 돌렸다 풀면 유지
-  await input({ throttle: 0, brake: 1, steerInput: 0.25 });
-  await until(() => { const G = window.__game; return (G.car.steer / G.spec.maxSteer) * 540 > 100; }, undefined, 20000);
-  await input({ throttle: 0, brake: 1, steerInput: 0 });
-  await Y(() => { window.__game.car.steer = 0; });
-  await sleep(500);
-  const keep = await Y(() => window.__game.sigLeft);
-  // 200° 이상 돌렸다가 풀면 해제
-  const c0 = await Y(() => window.__game.sigAutoCancels);
-  await Y(() => { const G = window.__game; G.car.steer = G.spec.maxSteer * (220 / 540); });
+  // 실제 조향 입력으로 핸들을 돌린다(정차 중에는 놓아도 각도가 유지되므로 반대로 돌려서 푼다)
+  const turnTo = async (target) => {
+    const cur = await deg();
+    const dir = target > cur ? 1 : -1;
+    await input({ throttle: 0, brake: 1, steerInput: dir });
+    const ok = await until(([t, d]) => { const G = window.__game; const w = (G.car.steer / G.spec.maxSteer) * 540; return d > 0 ? w >= t : w <= t; }, [target, dir], 30000);
+    await input({ throttle: 0, brake: 1, steerInput: 0 });
+    await sleep(250);
+    return ok;
+  };
+  // 왼쪽 깜빡이: 100° 만 돌렸다 풀면 유지
+  await turnTo(100);
+  await turnTo(5);
   await sleep(400);
+  const keep = await Y(() => window.__game.sigLeft);
+  // 220° 까지 돌린 동안은 유지, 풀리면 해제
+  const c0 = await Y(() => window.__game.sigAutoCancels);
+  await turnTo(220);
   const armed = await Y(() => window.__game.sigLeft);
   const dmax = await deg();
-  await Y(() => { window.__game.car.steer = 0; });
+  await turnTo(5);
   const cancelled = await until(() => !window.__game.sigLeft, undefined, 10000);
   const c1 = await Y(() => window.__game.sigAutoCancels);
   check('방향지시등: 왼쪽 켜짐 → 핸들 100° 만 돌렸다 풀면 유지', leftOn && keep, JSON.stringify({ leftOn, keep }));
   check('방향지시등: 같은 방향으로 180° 이상(220°) 돌린 동안은 유지, 풀리면 자동 해제(해제 횟수 +1)', armed && dmax > 180 && cancelled && c1 === c0 + 1, JSON.stringify({ armed, dmax: Math.round(dmax), cancelled, c0, c1 }));
   // 반대 방향으로 돌렸다 풀면 해제되지 않는다
-  await Y(() => window.__game.onAction('signalLeft'));
-  await Y(() => { const G = window.__game; G.car.steer = -G.spec.maxSteer * (300 / 540); });
-  await sleep(400);
-  await Y(() => { window.__game.car.steer = 0; });
-  await sleep(600);
-  check('방향지시등: 반대 방향(오른쪽 300°)으로 돌렸다 풀어도 왼쪽 깜빡이는 유지', await Y(() => window.__game.sigLeft));
+  await Y(() => { const G = window.__game; if (!G.sigLeft) G.onAction('signalLeft'); });
+  await turnTo(-300);
+  await turnTo(-5);
+  await sleep(500);
+  const st3 = await Y(() => ({ l: window.__game.sigLeft, n: window.__game.sigAutoCancels }));
+  check('방향지시등: 반대 방향(오른쪽 300°)으로 돌렸다 풀어도 왼쪽 깜빡이는 유지', st3.l && st3.n === c1, JSON.stringify(st3));
   await Y(() => { if (window.__game.sigLeft) window.__game.onAction('signalLeft'); });
   await input(null);
 
   // ================= 2. 제동등 =================
+  await Y(() => { window.__game.car.handbrake = false; }); // 주차 브레이크가 걸려 있으면 제동등이 계속 켜진다(기존 동작)
   await input({ throttle: 0, brake: 1, steerInput: 0 });
   await until(() => window.__game.brake > 0.4, undefined, 10000);
   await sleep(300);
@@ -97,6 +105,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   // D 단 정차 상태에서 시동 끄기 → 허용 + P 자동 변속
   await pg.keyboard.press('KeyO');
   const offOk = await until(() => window.__game.engine.state === 'OFF', undefined, 20000);
+  await until(() => window.__game.lastClusterData === null, undefined, 10000);
   const g1 = await Y(() => ({ gear: window.__game.car.gear, screens: window.__game.screensOn, cd: window.__game.lastClusterData }));
   check('시동 끄기(조건 완화): D 단 정차 상태에서도 꺼지고 P 단으로 자동 변속', offOk && g1.gear === 'P', JSON.stringify({ offOk, gear: g1.gear }));
   await sleep(600);
