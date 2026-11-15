@@ -195,6 +195,17 @@ export class Game {
   private outAcc = 0;
   private nearOut = false;
   private sideBlocked = { left: false, right: false };
+  private framingCache: { src: Collider[]; n: number; occ: readonly Collider[]; out: Collider[] } | null = null;
+  /** v0.6.1 주차보조 카메라 구도(측면/집중 탑뷰) 가림 검사: 충돌체 + 카메라 전용 가림 물체(셔터 위 상인방·안내판·승강탑 기둥 윗부분) */
+  private framingColliders(): Collider[] {
+    const occ = this.rig.cameraOccluders;
+    if (!occ.length) return this.colliders;
+    const c = this.framingCache;
+    if (c && c.src === this.colliders && c.n === this.colliders.length && c.occ === occ) return c.out;
+    const out = [...this.colliders, ...occ];
+    this.framingCache = { src: this.colliders, n: this.colliders.length, occ, out };
+    return out;
+  }
   /** v0.6.1 장애물별 위험 순위(디버그/테스트: 근거 로그) */
   readonly ranker = new RiskRanker();
   rankOut: RiskCandidate[] = [];
@@ -1752,7 +1763,7 @@ export class Game {
       const pose = this.poseNow();
       for (const side of ['left', 'right'] as const) {
         if (this.riskOut.groups[side].threat || this.viewOut.view === side) {
-          const f = frameView({ view: side, pose, spec: this.spec, hits: this.sideFrameHits(side, pose), colliders: this.colliders, aspect: 16 / 9 });
+          const f = frameView({ view: side, pose, spec: this.spec, hits: this.sideFrameHits(side, pose), colliders: this.framingColliders(), aspect: 16 / 9 });
           this.sideBlocked[side] = !f.visible;
         } else this.sideBlocked[side] = false;
       }
@@ -1873,7 +1884,7 @@ export class Game {
       if (!this.latch || this.latch.view !== view || relatch) {
         const g = this.riskOut?.groups;
         const focusSide = g ? (g.left.veryClose || g.left.pillar ? 'left' : g.right.veryClose || g.right.pillar ? 'right' : g.left.threat ? 'left' : g.right.threat ? 'right' : null) : null;
-        const f = frameView({ view, pose, spec: this.spec, hits: view === 'left' || view === 'right' ? this.sideFrameHits(view, pose) : this.frameHits(), colliders: this.colliders, aspect: ASSIST_CAM_W / ASSIST_CAM_H, focusSide });
+        const f = frameView({ view, pose, spec: this.spec, hits: view === 'left' || view === 'right' ? this.sideFrameHits(view, pose) : this.frameHits(), colliders: this.framingColliders(), aspect: ASSIST_CAM_W / ASSIST_CAM_H, focusSide });
         this.latch = toLocalFrame(view, f, pose);
         this.relatchGate.reset();
         this.rig.beginTransition();

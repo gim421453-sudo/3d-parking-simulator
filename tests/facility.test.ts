@@ -167,8 +167,8 @@ describe('추적 카메라 가림: 셔터 위 상인방/LED 안내판 (v0.6.0)',
     it(`회전 ${Math.round((rot * 180) / Math.PI)}°: 팔레트 위 차량 → 기본 추적 위치(뒤 6m·높이 3.1m) 시선은 안내판에 막히고, 높인 위치(5.3m)는 트인다`, () => {
       const cfg = { x: 10, z: -4, rotationY: rot };
       const occ = facilityCameraOccluders(cfg);
-      expect(occ.length).toBe(1);
-      expect(occ[0].tag).toBe('camera-only');
+      expect(occ.length).toBe(5); // v0.6.1: 상인방/안내판 1 + 승강탑 기둥 윗부분 4
+      expect(occ.every((o) => o.tag === 'camera-only')).toBe(true);
       const f = frameOf(cfg);
       const car = toWorldXZ(f, STATION.palletX, 0);
       const back = toWorldXZ(f, STATION.palletX - 6.2, 0);
@@ -178,5 +178,16 @@ describe('추적 카메라 가림: 셔터 위 상인방/LED 안내판 (v0.6.0)',
   }
   it('카메라 전용 물체는 맵 충돌체에 들어가지 않는다(차량/센서에 영향 없음)', () => {
     for (const m of MAPS) expect(mapColliders(m).some((c) => c.tag === 'camera-only'), m.id).toBe(false);
+  });
+});
+
+describe('승강탑 모서리 기둥 = 실제 충돌체 (v0.6.1: 시각 모델에만 있던 기둥)', () => {
+  it('모든 시설에 기둥 충돌체 4개가 mechBuilder 위치(팔레트 양끝 바깥, z ±2.15)에 있다', () => {
+    for (const m of MAPS.filter((q) => q.mechFacilities?.length)) {
+      for (const f of m.mechFacilities!) {
+        const cols = mapColliders(m).filter((c) => /ms-col-\d$/.test(c.id) && (c.id.startsWith(`${f.id}:`) || !c.id.includes(':')));
+        expect(cols.length, `${m.id}/${f.id}`).toBeGreaterThanOrEqual(4);
+      }
+    }
   });
 });

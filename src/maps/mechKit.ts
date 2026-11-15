@@ -29,6 +29,9 @@ export const BOLLARDS = [
   { id: 'bol-2s', x: -13.0, z: -BOLLARD_Z },
 ];
 
+/** 승강탑 모서리 기둥(로컬): 팔레트 길이 양끝 바깥 0.75m, z ±2.15 — mechBuilder 의 colX/colZ 와 같은 값 */
+export const COLUMN_POS = [STATION.palletX - MECH_LIMITS.palletLength / 2 - 0.75, STATION.palletX + MECH_LIMITS.palletLength / 2 + 0.75].flatMap((x) => [-2.15, 2.15].map((z) => ({ x, z })));
+
 /** 시설 풋프린트(구조물 + 진입로) — 로컬 직사각형. 배치 검증/사이트 탐색에 쓴다 */
 export const FACILITY_FOOTPRINT = { minX: -19, maxX: 3, minZ: -8, maxZ: 8 } as const;
 /** 구조물만(벽/기계실/기둥): 진입로 제외 */
@@ -58,6 +61,8 @@ function localObstacles(): ObstacleDef[] {
     // 팔레트 사이드 가이드: 낮은 레일(h 0.12 < 지상고 0.2m) — 차체는 위로 지나가고 타이어가 타고 넘으면 mech.guideDrag 가 저항/경고. 센서 높이(0.55m) 아래라 PDC 미감지가 정상
     { id: 'pal-guide-n', tag: 'guide', shape: 'box', x: px, z: guideIn + GT / 2, w: MECH_LIMITS.palletLength, d: GT, h: GUIDE_H, color: YELLOW },
     { id: 'pal-guide-s', tag: 'guide', shape: 'box', x: px, z: -(guideIn + GT / 2), w: MECH_LIMITS.palletLength, d: GT, h: GUIDE_H, color: YELLOW },
+    // v0.6.1: 승강탑 모서리 기둥 4개(mechBuilder 와 같은 위치/크기 0.32m 각). 이전에는 시각 모델에만 있어 차량이 통과하고 센서·카메라도 몰랐다
+    ...COLUMN_POS.map((c, i) => ({ id: `ms-col-${i}`, tag: 'pillar' as const, shape: 'box' as const, x: c.x, z: c.z, w: 0.32, d: 0.32, h: 6, color: 0x3a3f45 })),
     // 입구 금속 볼라드(강철 원통 기둥, 실제 충돌체 + PDC 감지): 진입로 좌우
     ...BOLLARDS.map((b) => ({ id: b.id, tag: 'bollard' as const, shape: 'cyl' as const, x: b.x, z: b.z, r: BOLLARD_R, h: BOLLARD_H })),
   ];
@@ -128,5 +133,9 @@ export function facilityCameraOccluders(cfg: Pick<MechFacilityConfig, 'x' | 'z' 
   const swap = Math.abs(Math.sin(f.yaw)) > 0.5;
   const w = 0.6; // 로컬 x 두께 (상인방 0.3 + 안내판 뒷판 사이 포함)
   const d = MECH_LIMITS.doorWidth + 1.2; // 로컬 z 폭 (안내판 3.5m 보다 약간 넓게)
-  return [{ kind: 'box', id: `${idPrefix}cam-occ-door-header`, tag: 'camera-only', x: c.x, z: c.z, w: swap ? d : w, d: swap ? w : d, rot: 0, y0: dh, h: 1.45 }];
+  const cols: Collider[] = COLUMN_POS.map((q, i) => {
+    const p = toWorldXZ(f, q.x, q.z);
+    return { kind: 'box', id: `${idPrefix}cam-occ-col-${i}`, tag: 'camera-only', x: p.x, z: p.z, w: 0.32, d: 0.32, rot: 0, y0: 6, h: 40 }; // 충돌체(0~6m) 위쪽 탑 부분
+  });
+  return [{ kind: 'box', id: `${idPrefix}cam-occ-door-header`, tag: 'camera-only', x: c.x, z: c.z, w: swap ? d : w, d: swap ? w : d, rot: 0, y0: dh, h: 1.45 }, ...cols];
 }
