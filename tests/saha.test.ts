@@ -200,6 +200,21 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
       }
     expect(worst).toBeGreaterThan(0);
   });
+  it('횡단보도·신호 정지선: 실제 OSM 노드 위치이고 모두 도로 중심선 위(도로 폭 안)에 있다', async () => {
+    const q = base.manifest.quality as { crosswalks: number; trafficSignals: number };
+    expect(q.crosswalks).toBeGreaterThan(50);
+    expect(q.trafficSignals).toBeGreaterThan(50);
+    let n = 0;
+    for (const k of base.manifest.tiles.slice(0, 600)) {
+      const t = await src.json<SahaTile>(`tiles/${k}.json`);
+      for (const m of t.marks ?? []) {
+        n++;
+        const on = t.roads.some((r) => r.p.some((p) => Math.hypot(p[0] - m.x, p[1] - m.z) < 0.2));
+        expect(on, `${k} ${m.k} ${m.x},${m.z}`).toBe(true);
+      }
+    }
+    expect(n).toBe(q.crosswalks + q.trafficSignals);
+  });
   it('타일 범위 계산: 반경 안 타일만', () => {
     const k = tilesWithin(base.manifest, 0, 0, 300);
     expect(k).toContain('0_0');

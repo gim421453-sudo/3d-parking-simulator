@@ -56,6 +56,8 @@ interface Rel {
   tags: Record<string, string>;
 }
 const nodeLL = new Map<string, [number, number]>();
+/** 도로 표시용 노드 태그(횡단보도/신호) */
+const nodeMark = new Map<string, 'cw' | 'sig'>();
 const ways = new Map<string, Way>();
 const rels = new Map<string, Rel>();
 let osmBase: string | null = null;
@@ -67,6 +69,13 @@ function parseFile(f: string): void {
     const lat = attr(m[0], 'lat');
     const lon = attr(m[0], 'lon');
     if (id && lat && lon) nodeLL.set(id, [Number(lat), Number(lon)]);
+  }
+  for (const m of xml.matchAll(/<node\s([^>]*)>([\s\S]*?)<\/node>/g)) {
+    const id = attr(' ' + m[1], 'id');
+    if (!id) continue;
+    const t = tagsOf(m[2]);
+    if (t.highway === 'traffic_signals' || t.crossing === 'traffic_signals') nodeMark.set(id, t.highway === 'traffic_signals' ? 'sig' : 'cw');
+    if (t.highway === 'crossing' && t.crossing !== 'unmarked' && t.crossing !== 'no') nodeMark.set(id, 'cw');
   }
   for (const m of xml.matchAll(/<way\s([^>]*)>([\s\S]*?)<\/way>/g)) {
     const id = attr(' ' + m[1], 'id')!;
@@ -720,11 +729,12 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     roads: unknown[];
     buildings: unknown[];
     lots: unknown[];
+    marks: unknown[];
   }
   const tiles = new Map<string, TileData>();
   const tileOf = (k: string): TileData => {
     let t = tiles.get(k);
-    if (!t) tiles.set(k, (t = { roads: [], buildings: [], lots: [] }));
+    if (!t) tiles.set(k, (t = { roads: [], buildings: [], lots: [], marks: [] }));
     return t;
   };
   for (const r of roads) {
@@ -765,6 +775,24 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
       }
     }
     emit(start, r.pts.length - 1, curK, piece);
+  }
+  // 횡단보도/신호 정지선: 실제 OSM 노드 위치(도로 위). 방향 = 그 점의 도로 진행 방향, 폭 = 도로 폭
+  const markSeen = new Set<string>();
+  const mst = { cw: 0, sig: 0 };
+  for (const r of roads) {
+    if (r.tunnel || r.cls >= 8) continue;
+    r.refs.forEach((ref, q) => {
+      const kind = nodeMark.get(ref);
+      if (!kind || markSeen.has(ref)) return;
+      markSeen.add(ref);
+      const i = r.nodeIdx[q];
+      const a = r.pts[Math.max(0, i - 1)];
+      const b = r.pts[Math.min(r.pts.length - 1, i + 1)];
+      const h = Math.atan2(b[0] - a[0], b[1] - a[1]);
+      const p = r.pts[i];
+      mst[kind]++;
+      tileOf(tkey(p[0], p[1])).marks.push({ k: kind, x: p[0], z: p[1], h: Math.round(h * 1000) / 1000, w: r.w, o: r.oneway, l: [r.fwd, r.bwd] });
+    });
   }
   for (const b of uniq) {
     const c = cen(b);
@@ -852,6 +880,8 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     lanesOsmRatioByWay: r2(st.lanesOsm / Math.max(1, st.ways)),
     lanesOsmRatioByLength: r2(st.lenLanesOsm / Math.max(1, st.lenTotal)),
     turnLanesWays: st.turnLanes,
+    crosswalks: mst.cw,
+    trafficSignals: mst.sig,
     maxspeedWays: st.maxspeed,
     bridges: st.bridges,
     tunnels: st.tunnels,

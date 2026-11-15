@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import type { Collider } from '../core/geometry';
 import { fieldHeight } from '../maps/terrain';
 import { disposeObject } from '../core/dispose';
-import { buildingColliders, tilesWithin, type SahaBase, type SahaBuilding, type SahaRoad, type SahaSource, type SahaTile } from '../maps/saha/data';
+import { buildingColliders, tilesWithin, type SahaMark, type SahaBase, type SahaBuilding, type SahaRoad, type SahaSource, type SahaTile } from '../maps/saha/data';
 import type { MapSlot } from '../maps/types';
 
 export interface SahaStreamOpts {
@@ -216,7 +216,7 @@ export class SahaStream {
     add(this.terrainPatch(ix, iz), this.mats.terrain, 'terrain');
     const roads = tile.roads;
     add(this.roadGeo(roads), this.mats.road, 'roads');
-    if (this.opts.lanes) add(this.paintGeo(roads, ix, iz), this.mats.paint, 'lanes');
+    if (this.opts.lanes) add(this.paintGeo(roads, ix, iz, tile.marks ?? []), this.mats.paint, 'lanes');
     add(this.lotGeo(tile), this.mats.lot, 'lots');
     add(this.structGeo(roads), this.mats.struct, 'bridges-tunnels', true);
     const bg = this.buildingGeo(tile.buildings);
@@ -364,10 +364,11 @@ export class SahaStream {
   }
 
   /** 차선: 중앙선(황색), 차로 경계(백색 점선), 바깥선 — 차로 수는 OSM 태그(ls=1) 또는 등급 추정(ls=0) */
-  private paintGeo(roads: SahaRoad[], ix: number, iz: number): THREE.BufferGeometry | null {
+  private paintGeo(roads: SahaRoad[], ix: number, iz: number, marks: SahaMark[]): THREE.BufferGeometry | null {
     const pos: number[] = [];
     const col: number[] = [];
     this.slotPaint(ix, iz, pos, col);
+    this.markPaint(marks, pos, col);
     const Y = new THREE.Color(0xf2c200);
     const Wt = new THREE.Color(0xf4f4f4);
     for (const r of roads) {
@@ -411,6 +412,33 @@ export class SahaStream {
         }
     }
     return this.geo(pos);
+  }
+
+  /**
+   * 횡단보도(지브라: 진행 방향과 나란한 흰 막대 0.45m, 간격 0.45m, 길이 3m)와 신호 교차 정지선(노드 8m 앞, 진행 차로 쪽 절반).
+   * 위치는 실제 OSM 노드(횡단보도/신호), 모양·간격은 일반 규격 근사.
+   */
+  private markPaint(marks: SahaMark[], pos: number[], col: number[]): void {
+    const W = new THREE.Color(0xf4f4f4);
+    for (const m of marks) {
+      const fx = Math.sin(m.h);
+      const fz = Math.cos(m.h);
+      const along = (d: number, len: number): [number, number, number][] => [
+        [m.x + fx * (d - len / 2), m.z + fz * (d - len / 2), 0],
+        [m.x + fx * (d + len / 2), m.z + fz * (d + len / 2), 0],
+      ];
+      const half = m.w / 2 - 0.3;
+      if (m.k === 'cw') {
+        for (let o = -half + 0.225; o <= half - 0.225; o += 0.9) this.strip(along(0, 3), o - 0.225, o + 0.225, 0.07, pos, undefined, col, W, true);
+      } else {
+        const [fw, bw] = m.l;
+        const tot = Math.max(1, fw + bw);
+        const center = m.o ? -half : ((bw - fw) / tot) * half; // 정/역 차로 경계(왼쪽 +)
+        // 정방향 접근: 노드 8m 앞, 오른쪽(음수 오프셋) 차로
+        this.strip(along(-8, 0.45), m.o ? -half : -half, m.o ? half : center, 0.07, pos, undefined, col, W, true);
+        if (!m.o) this.strip(along(8, 0.45), center, half, 0.07, pos, undefined, col, W, true);
+      }
+    }
   }
 
   /** 미션 주차칸 U자 도색(자동 배치 — 실제 칸 배치 아님). 칸 바닥 높이(slot.y) 기준 */

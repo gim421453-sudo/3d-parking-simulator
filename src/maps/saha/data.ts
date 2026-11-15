@@ -82,10 +82,23 @@ export interface SahaLot {
   p: [number, number][];
   y: number;
 }
+/** 도로 표시(실제 OSM 노드 위치): cw 횡단보도, sig 신호 교차(정지선) */
+export interface SahaMark {
+  k: 'cw' | 'sig';
+  x: number;
+  z: number;
+  /** 그 점의 도로 진행 방향(heading 규칙) */
+  h: number;
+  w: number;
+  o: 0 | 1;
+  /** [정방향, 역방향] 차로 */
+  l: [number, number];
+}
 export interface SahaTile {
   roads: SahaRoad[];
   buildings: SahaBuilding[];
   lots: SahaLot[];
+  marks?: SahaMark[];
 }
 export interface SahaRoadNet {
   nodes: [number, number, number][];
