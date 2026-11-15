@@ -113,7 +113,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   await Y(() => { const G = window.__game; for (let i = 0; i < 8 && G.rig.mode !== 'chase'; i++) G.onAction('camera'); const c = G.car; c.x = -0.65 - G.spec.wheelbase; c.z = 0; c.heading = Math.PI / 2; c.v = 0; c.gear = 'P'; c.handbrake = true; G.rig.snap(); });
   await sleep(2500);
   const cam = await Y(() => ({ occ: window.__game.rig.cameraOccluders.length, cand: window.__game.rig.chaseCand, free: window.__game.rig.chaseFree, y: window.__game.rig.camera.position.y }));
-  check('추적 카메라: 셔터 위 LED 안내판(카메라 전용 가림)을 피해 높은 위치로 — 차량이 가리지 않는다', cam.occ === 1 && cam.cand !== 0 && cam.free > 0.99 && cam.y > 4.5, JSON.stringify(cam));
+  check('추적 카메라: 셔터 위 LED 안내판(카메라 전용 가림)을 피해 높은 위치로 — 차량이 가리지 않는다', cam.occ === 5 /* v0.6.1: LED 안내판 1 + 승강탑 기둥 윗부분 4 */ && cam.cand !== 0 && cam.free > 0.99 && cam.y > 4.5, JSON.stringify(cam));
   await pg.screenshot({ path: path.join(OUT, 'e2e-03-chase-pallet.png') });
 
   // ================= 4. 괴정동 실제 지도 =================

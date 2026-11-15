@@ -128,7 +128,8 @@ export function buildSurfaceWarnings(snap: SensorSnapshot | null, spec: VehicleS
       const a0 = Math.max(-Math.PI / 2, Math.min(...angs) - padA);
       const a1 = Math.min(Math.PI / 2, Math.max(...angs) + padA);
       const rr = c.r + SURF_EPS;
-      const n = Math.max(1, Math.ceil(((a1 - a0) * rr) / ARC_SEG));
+      // 분할 수는 현(chord) 길이 기준 — 작은 기둥(반지름 0.15m)이 원호 길이 때문에 3조각 이상으로 쪼개지지 않게
+      const n = Math.max(1, Math.ceil((2 * rr * Math.sin((a1 - a0) / 2)) / ARC_SEG));
       const gap = Math.min(...hs.map((q) => q.gap));
       const level = proximityLevel(gap, o.range, o.critical);
       if (level === 'none') continue;

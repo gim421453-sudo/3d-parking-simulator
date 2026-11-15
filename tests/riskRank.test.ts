@@ -129,6 +129,20 @@ describe('1순위 위험 → 시점 선택 (v0.6.1)', () => {
     expect(run({ group: 'left', place: 'left', cls: 5, swing: false, id: 'w' }, 'front', undefined, 1.5)).toBe('front');
     expect(run(null, 'rear', undefined, 1.5)).toBe('rear');
   });
+  it('회귀(스모크): 1순위가 5등급이어도 측면 위협(risk.ts)이 있으면 그 쪽 측면뷰 — 이전 측면 자동 시점 유지', () => {
+    const p = new ViewPolicy();
+    const risk = { ...base({ group: 'left', place: 'left', cls: 5, swing: false, id: 'w' }), threat: { front: false, rear: false, left: true, right: false } };
+    let d = p.update(0.05, 'front', null, { risk, level: { front: 'none', rear: 'none', left: 'none', right: 'none' }, hits: { front: 0, rear: 0, left: 0, right: 0 } }, true);
+    for (let t = 0; t < 1.5; t += 0.05) d = p.update(0.05, 'front', null, { risk, level: { front: 'none', rear: 'none', left: 'none', right: 'none' }, hits: { front: 0, rear: 0, left: 0, right: 0 } }, true);
+    expect(d.view).toBe('left');
+  });
+  it('회귀(스모크 12a): 진행 방향 3등급이라도 risk.ts 매우 근접이면 그 방향 집중 탑뷰', () => {
+    const p = new ViewPolicy();
+    const risk = { ...base({ group: 'front', place: 'front', cls: 3, swing: false, id: 'w' }), veryClose: { front: true, rear: false, left: false, right: false } };
+    let d = p.update(0.05, 'front', null, { risk, level: { front: 'none', rear: 'none', left: 'none', right: 'none' }, hits: { front: 0, rear: 0, left: 0, right: 0 } }, true);
+    for (let t = 0; t < 1.5; t += 0.05) d = p.update(0.05, 'front', null, { risk, level: { front: 'none', rear: 'none', left: 'none', right: 'none' }, hits: { front: 0, rear: 0, left: 0, right: 0 } }, true);
+    expect(d.view).toBe('topFront');
+  });
   it('수동 카메라 선택은 항상 우선', () => {
     const p = new ViewPolicy();
     const d = p.update(0.05, 'front', 'rear', { risk: base({ group: 'left', place: 'left', cls: 1, swing: false, id: 'x' }), level: { front: 'none', rear: 'none', left: 'none', right: 'none' }, hits: { front: 0, rear: 0, left: 0, right: 0 } }, true);

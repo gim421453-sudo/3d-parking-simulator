@@ -1047,10 +1047,11 @@ async function waitServer(url, tries = 50) {
   await startAt('R');
   await addBox('rw', SX, SZ - Ls / 2 - 1.3 - 0.25, 0.7, 0.5);
   await until(() => window.__game.viewOut.view === 'rear' && window.__game.infoOut.content === 'parking', undefined, 30000);
-  await until(() => { const k = [...window.__game.assistPanel.zoneAnim.keys()]; return k.length > 0 && k.every((x) => x.startsWith('tile-')); }, undefined, 30000);
+  // v0.6.1: 경고 판은 차량 축 고정 칸(tile-rear-*)이 아니라 센서가 맞춘 충돌체 면 위 판(surf-<충돌체>-<면>) — docs/V061.md
+  await until(() => window.__game.dbgZones.length > 0 && window.__game.dbgZones.every((z) => z.group === 'rear'), undefined, 30000);
   await sleep(500);
-  const tiles = await g(() => [...window.__game.assistPanel.zoneAnim.keys()]);
-  check('후방카메라 경고 타일: 좁은 장애물은 일부 칸(1~4)만 점등, 이름은 tile-rear-*', tiles.length >= 1 && tiles.length <= 4 && tiles.every((k) => k.startsWith('tile-rear-')), JSON.stringify(tiles));
+  const tiles = await g(() => window.__game.dbgZones.map((z) => ({ id: z.sensorId, cols: z.colliderIds, w: Math.hypot(z.corners[2].x - z.corners[3].x, z.corners[2].z - z.corners[3].z) })));
+  check('후방카메라 경고 판: 좁은 장애물(0.7m)은 판 1~4개, 모두 그 장애물 면 위(surf-*), 폭은 장애물 폭 이내', tiles.length >= 1 && tiles.length <= 4 && tiles.every((k) => k.id.startsWith('surf-') && k.cols.some((c) => c.endsWith('rw')) && k.w <= 0.7 + 0.1), JSON.stringify(tiles));
   await clearTest();
   // 추적 카메라 가림 보정 (기둥이 카메라와 차 사이)
   await startAt('N');

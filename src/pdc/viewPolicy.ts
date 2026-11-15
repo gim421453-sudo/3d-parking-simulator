@@ -108,16 +108,18 @@ export class ViewPolicy {
    */
   /**
    * v0.6.1: 1순위 위험(장애물 단위)으로 시점 선택. 거리만이 아니라 등급(접촉/근접/경로 교차/스윙)을 쓴다.
-   *  - 5·6등급(일반 근접·먼 장애물): 기본 카메라 유지
-   *  - 진행 방향 정면: 1·2등급이면 그 방향 집중 탑뷰, 3등급(경로 교차)은 기본 카메라가 이미 보여 준다
+   *  - 5·6등급(일반 근접·먼 장애물): 그룹 규칙(wantGroups) — 측면 위협이면 측면뷰, 아니면 기본 카메라
+   *  - 진행 방향 정면: 1·2등급이면 그 방향 집중 탑뷰, 3등급(경로 교차)은 그룹 규칙(매우 근접이면 집중 탑뷰, 아니면 기본 카메라)
    *  - 반대 방향 정면: 1등급(접촉 직전)만 그 방향 집중 탑뷰
    *  - 측면/모서리: 그 쪽 측면뷰. 가려졌거나, 진행 반대쪽 모서리의 스윙이면 모서리가 보이는 집중 탑뷰
    */
   private wantTop(t: NonNullable<ViewRisk['top']>, r: ViewRisk, base: AssistView): AssistView | null {
     const dir: 'front' | 'rear' = base === 'rear' ? 'rear' : 'front';
-    if (t.cls >= 5) return null;
+    // 5·6등급이거나 진행 방향 경로 교차(3등급)이면 이전(v0.4.x~0.6.0) 그룹 규칙을 그대로 쓴다:
+    // 측면 위협 → 측면뷰, 진행 방향 매우 근접(risk.ts veryClose) → 집중 탑뷰. 순위는 1~4등급의 "더 급한" 경우에만 우선한다.
+    if (t.cls >= 5) return this.wantGroups(r, base);
     const topOf = (d: 'front' | 'rear'): AssistView => (d === 'front' ? 'topFront' : 'topRear');
-    if (t.group === dir) return t.cls <= 2 ? topOf(dir) : null;
+    if (t.group === dir) return t.cls <= 2 ? topOf(dir) : this.wantGroups(r, base);
     if (t.group === 'front' || t.group === 'rear') return t.cls === 1 ? topOf(t.group) : null;
     const corner = t.place.startsWith('front') ? 'front' : t.place.startsWith('rear') ? 'rear' : null;
     if (t.swing && corner && corner !== dir) return topOf(corner);
@@ -127,7 +129,12 @@ export class ViewPolicy {
   }
 
   private wantRisk(r: ViewRisk, base: AssistView): AssistView | null {
-    if (r.top !== undefined) return r.top ? this.wantTop(r.top, r, base) : null;
+    if (r.top) return this.wantTop(r.top, r, base);
+    return this.wantGroups(r, base);
+  }
+
+  /** 그룹(전/후/좌/우) 위협 기반 규칙 — 1순위가 급하지 않을 때와 순위 정보가 없을 때 */
+  private wantGroups(r: ViewRisk, base: AssistView): AssistView | null {
     const dir: 'front' | 'rear' = base === 'rear' ? 'rear' : 'front';
     if (r.threat[dir]) return r.veryClose[dir] ? (dir === 'front' ? 'topFront' : 'topRear') : null;
     const cands = (['left', 'right'] as const).filter((sd) => r.threat[sd] && !r.sideBlocked[sd]);

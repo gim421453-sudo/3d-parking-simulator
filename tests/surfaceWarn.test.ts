@@ -93,4 +93,10 @@ describe('PDC 경고가 실제 표면에 붙는다 (v0.6.1, 스크린샷 S1~S7 �
     for (const v of z[0].corners) expect(pointToObbGap(v.x, v.z, body)).toBeGreaterThan(0);
     expect(findVehicleCollision(body, [c])).toBeNull();
   });
+  it('회귀(스모크 v0.4.8): 작은 기둥(반지름 0.15m)은 판 2개 이하 — 원호 길이 때문에 잘게 쪼개지지 않는다', () => {
+    const c: CylCollider = { kind: 'cyl', id: 'pil', tag: 'pillar', x: 0, z: body.hl + 1.0 + 0.15, r: 0.15, y0: 0, h: 3 };
+    const z = buildSurfaceWarnings(snapOf([c]), spec, body, { dir: 'front', range: 2.5, critical: 0.3, colliderOf: byId([c]) });
+    expect(z.length).toBeGreaterThanOrEqual(1);
+    expect(z.length).toBeLessThanOrEqual(2);
+  });
 });
