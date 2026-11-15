@@ -2856,7 +2856,8 @@ async function waitServer(url, tries = 50) {
       await Y(() => window.__game.startRun());
       await yuntil(() => window.__game.state === 'playing' && window.__game.damage && window.__game.damage.stats.impacts === 0, undefined, 30000);
       await Y(() => { const G = window.__game; const c = G.car; c.x = -11.2; c.z = -8 - (G.spec.length / 2 - G.spec.rearOverhang); c.heading = 0; c.v = 38; c.gear = 'D'; c.handbrake = false; c.steer = 0; G.debugInput = { throttle: 1, brake: 0, steerInput: 0 }; });
-      const hitP = await yuntil(() => Math.abs(window.__game.car.v) < 0.5 && window.__game.damage.stats.impacts > 0, undefined, 60000);
+      // 충돌 후 반발로 뒤로 굴러가(시동 꺼짐) 멈추기까지 게임 시간 약 16초 — 느린 소프트웨어 WebGL 에서 60초로 모자랄 때가 있어 상한만 120초(조건 동일)
+      const hitP = await yuntil(() => Math.abs(window.__game.car.v) < 0.5 && window.__game.damage.stats.impacts > 0, undefined, 120000);
       const rp = await Y(() => { const G = window.__game; const off = G.spec.length / 2 - G.spec.rearOverhang; const cz = G.car.z + off; return { front: cz + G.spec.length / 2, last: G.damage.log.filter((l) => l.kmh > 1).slice(-1)[0], pillar: G.colliders.some((c) => c.id === 'pil-1') }; });
       check('v0.6.0 137km/h 로 부서지지 않는 얇은 기둥(0.55m)에 충돌: 관통하지 않고 기둥 앞에서 멈춘다(앞범퍼 < 16.93m, 기둥 유지)', hitP && rp.front <= 16.93 && rp.pillar && rp.last && rp.last.id === 'pil-1', JSON.stringify(rp));
       await Y(() => window.__game.startRun());
