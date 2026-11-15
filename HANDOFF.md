@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.6.0-dev (`feature/v060-damage-city`, 아래 v0.6.0 섹션) · 이전 v0.5.5-dev (`feature/v055-controls`) · v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.6.1-dev (`feature/v061-pdc-recovery`, 아래 v0.6.1 섹션) · 이전 v0.6.0-dev (`feature/v060-damage-city`, **Pages 배포됨: `feature/pdc-display-v2` = `04b6830`, run #14**) · 이전 v0.5.5-dev (`feature/v055-controls`) · v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,14 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.6.1 진행 상황 (정밀 PDC · 위험 순위 · 4륜 이동선 · 기계식 비상 수동복구) — 브랜치 `feature/v061-pdc-recovery`
+
+상세: `docs/V061.md`. v0.6.0 은 `feature/pdc-display-v2`(`04b6830`)로 Pages 배포 완료(run #14, 스모크 483/483). v0.6.1 은 **배포 안 함(별도 승인 필요)**, 병합 안 함.
+- 한 일: PDC 경고 판을 센서가 맞춘 충돌체의 실제 면에 붙임(`pdc/surfaceWarn.ts` — 이전 `buildCameraTiles` 의 차량 축 고정 0.3m 칸 판이 원인), 장애물별 위험 순위(`pdc/riskRank.ts`)로 시점 선택·정지 중 조향 반응, 서라운드 4륜 예상 이동선(설정 기본/상세), 기계식 비상 수동복구(`mech/recovery.ts` + 제어반), 승강탑 기둥 충돌체 누락 수정, 주차보조 카메라 구도 가림에 카메라 전용 물체 반영.
+- 남은 일(사용자): v0.6.1 배포 승인 여부, BMW 모델 파일(외부 차단 — `docs/BMW_ASSET_REQUEST.md`), 스크린샷 9장 중 S2(연석)·S4(조향 중 승강장) 장면은 E2E 재현 없이 단위 테스트로만 확인.
+- 알려진 제한: 카메라 투영 좌표 기록은 생략, 위험 순위의 TTC 는 이동 중에만, 기계식 수동복구의 "팔레트 수동 안착/빈 팔레트 회수"는 게임 단순화 동작, 서라운드 상세 이동선은 기본값(설정에서 기본 2선으로).
+- 버그 기록: [승강탑 모서리 기둥을 차량이 통과] 원인 = 기둥이 시각 모델에만 있었다 · 수정 = facilityKit `ms-col-0~3` 충돌체 + 카메라 전용 윗부분 · 재발 방지 = `tests/facility.test.ts`. [PDC 판이 공중에 뜨고 계단처럼 겹침] 원인 = 차량 축 고정 칸 판 · 수정 = 표면 판 · 재발 방지 = `tests/surfaceWarn.test.ts`, `scripts/e2e-v061.cjs` 밑변-표면 검사.
 
 ## v0.6.0 진행 상황 (충돌 파손 물리 · 자동 주차 브레이크 · 괴정동 실제 지도) — 브랜치 `feature/v060-damage-city`
 
