@@ -784,6 +784,13 @@ export class Game {
       return;
     }
     if (this.state !== 'playing') return;
+    // v0.6.1 비상 수동복구 개별 명령(제어반 버튼): 같은 Action 경로 → 활성 시설 컨트롤러
+    if (typeof a === 'string' && a.startsWith('mr:')) {
+      if (!this.map.mech) return;
+      const r = this.mech.onAction(a, this.spec, this.car);
+      if (r) this.hud.toast(r.msg, r.kind);
+      return;
+    }
     switch (a) {
       case 'gearD':
       case 'gearR':
@@ -812,7 +819,9 @@ export class Game {
       case 'mechExit':
       case 'mechStart':
       case 'mechRetrieve':
-      case 'mechEstop': {
+      case 'mechEstop':
+      case 'mechManual':
+      case 'mechRecoverDone': {
         if (!this.map.mech) break;
         if (a === 'mechExit' && this.playerStoredSlot) {
           this.hud.toast('차량이 보관되어 있습니다 — 새 차량은 \'새 차\' 버튼(I)으로 시작하세요', 'warn'); // 하차/탑승과 새 차량 생성은 별개 기능

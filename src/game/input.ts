@@ -1,3 +1,4 @@
+import type { ManualCmd } from '../mech/recovery';
 export type HeldKey = 'throttle' | 'brake' | 'left' | 'right';
 
 export type Action =
@@ -37,7 +38,11 @@ export type Action =
   | 'engineToggle'
   | 'liftUp'
   | 'liftDown'
-  | 'liftStop';
+  | 'liftStop'
+  /** v0.6.1 기계식 비상 수동복구: 진입 / 복구 완료 / 개별 수동 명령 */
+  | 'mechManual'
+  | 'mechRecoverDone'
+  | `mr:${ManualCmd}`;
 
 const HELD: Record<string, HeldKey> = {
   KeyW: 'throttle',

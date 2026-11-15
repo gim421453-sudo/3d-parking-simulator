@@ -1,3 +1,4 @@
+import { stepManual, type ManualState } from './recovery';
 import { DEG, angleDiff, localToWorld, worldToLocal } from '../core/math';
 import type { VehicleSpec } from '../vehicle/spec';
 import { MECH_LIMITS, checkVehicleLimits } from './limits';
@@ -159,7 +160,8 @@ export type Phase =
   | 'rotating' // 출고: 턴테이블 180° (전진 입고 차량만)
   | 'opening'
   | 'exit'
-  | 'estop';
+  | 'estop'
+  | 'manual'; // v0.6.1 비상 수동복구 (mech/recovery.ts)
 
 export const TIMES = { door: 2.5, liftSpeed: 3.0, liftMin: 1.2, transfer: 3.0, retract: 2.2, restock: 1.5, rotate: 4.0 };
 
@@ -223,6 +225,8 @@ export interface MachineState {
   events: MachineEvent[];
   /** 누적 시간 */
   clock: number;
+  /** v0.6.1 비상 수동복구 상태(phase === 'manual' 일 때만) */
+  manual?: ManualState | null;
 }
 
 /** floors: 시설 층수(2~12). 기본 12층 타워 */
@@ -396,6 +400,10 @@ const moveTo = (cur: number, target: number, speed: number, dt: number): number 
 export function stepMachine(m: MachineState, dt: number, doorClear: boolean): void {
   m.clock += dt;
   if (m.phase === 'estop') return;
+  if (m.phase === 'manual') {
+    stepManual(m, dt, doorClear);
+    return;
+  }
   m.doorBlocked = !doorClear && (m.phase === 'waiting' || m.phase === 'closing');
   const rate = dt / TIMES.door;
   const op = m.op;
@@ -655,6 +663,8 @@ export function statusBoard(m: MachineState): { kind: StatusKind; text: string }
       return { kind: 'retrieving', text: '셔터 개방 중' };
     case 'exit':
       return { kind: 'ready', text: '출고 완료' };
+    case 'manual':
+      return { kind: 'blocked', text: '비상 수동복구 중' };
   }
 }
 

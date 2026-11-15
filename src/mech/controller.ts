@@ -1,3 +1,4 @@
+import { enterManual, finishRecovery, manualCommand, type ManualCmd } from './recovery';
 import { angleDiff, clamp, localToWorld, worldToLocal } from '../core/math';
 import { centerOf } from '../vehicle/physics';
 import type { VehicleState } from '../vehicle/physics';
@@ -294,9 +295,22 @@ export class MechController {
         return cancelOp(m) ? { msg: '작업을 취소했습니다', kind: 'good' } : { msg: m.message, kind: 'warn' };
       case 'mechEstop':
         if (m.phase === 'estop') emergencyRelease(m);
+        else if (m.phase === 'manual') return { msg: '수동복구 중 — 복구 완료로 끝내세요', kind: 'warn' };
         else emergencyStop(m);
         return { msg: m.message, kind: m.phase === 'estop' ? 'bad' : 'good' };
+      case 'mechManual': {
+        const r = enterManual(m);
+        return { msg: r.reason, kind: r.ok ? 'warn' : 'bad' };
+      }
+      case 'mechRecoverDone': {
+        const r = finishRecovery(m);
+        return { msg: m.message, kind: r.ok ? 'good' : 'bad' };
+      }
       default:
+        if (typeof a === 'string' && a.startsWith('mr:')) {
+          const r = manualCommand(m, a.slice(3) as ManualCmd, this.doorClear);
+          return { msg: r.reason, kind: r.ok ? 'good' : 'warn' };
+        }
         return null;
     }
   }
