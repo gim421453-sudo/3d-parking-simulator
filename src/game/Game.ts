@@ -198,6 +198,7 @@ export class Game {
   /** v0.6.1 장애물별 위험 순위(디버그/테스트: 근거 로그) */
   readonly ranker = new RiskRanker();
   rankOut: RiskCandidate[] = [];
+  dbgZones: import('../pdc/overlay').ObstacleZone[] = [];
   private gateSteer0 = 0;
   private blockedAcc = 99;
   private lastHits: { x: number; z: number }[] = [];
@@ -1965,6 +1966,7 @@ export class Game {
         return !segmentBlocked({ x: camPos.x, y: camPos.y, z: camPos.z }, { x: cx, y: (pose.y ?? 0) + Math.min(0.3, (z.panelHeight ?? 0.4) / 2), z: cz }, this.colliders, null, { ignoreIds: new Set(z.colliderIds), endMargin: 0.25, step: 0.2 });
       });
     }
+    this.dbgZones = zones; // 테스트/디버그: 이번 프레임 카메라 경고 구역(표면 부착 판)
     this.assistPanel.drawOverlay({
       camera: cam,
       pose,
