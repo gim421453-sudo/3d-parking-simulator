@@ -1,6 +1,7 @@
 import { clamp, forwardOf, localToWorld, normAngle } from '../core/math';
 import type { Obb } from '../core/geometry';
 import type { VehicleSpec } from './spec';
+import { dynBlend, dynStep, handlingOf } from './handling';
 
 export type Gear = 'P' | 'R' | 'N' | 'D';
 
@@ -23,6 +24,13 @@ export interface VehicleState {
   pitch: number;
   /** sin(pitch): 경사로에서 중력 성분 (평면 0) */
   slope: number;
+  /** v0.6.2 무게중심 횡속도(m/s, 왼쪽 +) — 고속 동역학 모델. 저속에서는 기구학 값(r·b) */
+  vy?: number;
+  /** v0.6.2 요 레이트(rad/s, 왼쪽 회전 +) */
+  yawRate?: number;
+  /** v0.6.2 횡가속도(m/s²)·타이어 접지 사용률(0~1) — 표시/디버그 */
+  ay?: number;
+  grip?: number;
 }
 
 export interface VehicleInput {
@@ -31,6 +39,8 @@ export interface VehicleInput {
   steerInput: number; // -1..1, 왼쪽 +
   /** 엔진 시동 상태(생략 = 켜짐). 꺼져 있으면 가속/크리프/엔진 브레이크가 없고 마찰로만 감속한다 */
   engineOn?: boolean;
+  /** v0.6.2 노면·타이어 마찰 배율(생략 = 1, 건조 아스팔트). 젖은 노면/비포장/타이어 손상 */
+  mu?: number;
 }
 
 export const CREEP_SPEED = 0.9; // m/s (D/R에서 페달을 밟지 않을 때 서행)
@@ -40,7 +50,7 @@ export const PARK_SPEED_LIMIT = 0.3; // m/s ≈ 1 km/h
 export function createVehicleState(spec: VehicleSpec, cx: number, cz: number, heading: number): VehicleState {
   const half = spec.length / 2 - spec.rearOverhang;
   const rear = localToWorld(cx, cz, heading, 0, -half);
-  return { x: rear.x, z: rear.z, heading, v: 0, steer: 0, gear: 'P', handbrake: false, wheelRoll: 0, y: 0, pitch: 0, slope: 0 };
+  return { x: rear.x, z: rear.z, heading, v: 0, steer: 0, gear: 'P', handbrake: false, wheelRoll: 0, y: 0, pitch: 0, slope: 0, vy: 0, yawRate: 0, ay: 0, grip: 0 };
 }
 
 /** 차체 중심(충돌 OBB의 중심) */
@@ -129,6 +139,7 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
   s.steer = clamp(s.steer, -lim, lim);
 
   // ---- 종방향 ----
+  const prevV = s.v;
   const dirSign = s.gear === 'D' ? 1 : s.gear === 'R' ? -1 : 0;
   const eng = input.engineOn !== false;
   let a = 0;
@@ -145,6 +156,10 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
         const ratio = Math.sign(s.v) === dirSign ? Math.abs(s.v) / vmax : 0;
         const room = clamp(1 - ratio * ratio * ratio, 0, 1); // 최고속도 근처에서만 가속이 줄어든다
         a += dirSign * spec.accel * input.throttle * room;
+        // v0.6.2 오르막 저속 구동력 증배(1단·토크컨버터 근사): 진행 방향 오르막 부하일 때만, 10m/s 아래에서.
+        // 평지·내리막은 0 이라 주차 가감속 감각은 이전과 같다. 30% 경사까지 출발 가능(tests/handling.test.ts)
+        const up = dirSign * s.slope; // 진행 방향 오르막 sin(경사)
+        if (up > 0) a += dirSign * spec.accel * input.throttle * 1.1 * Math.min(1, up / 0.2) * Math.max(0, 1 - Math.abs(s.v) / 10);
       } else if (input.brake === 0 && Math.abs(s.v) < CREEP_SPEED && (s.v === 0 || Math.sign(s.v) === dirSign)) {
         a += dirSign * 0.9; // 크리프
       } else if (input.brake === 0 && Math.sign(s.v) === dirSign) {
@@ -159,11 +174,12 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
       const av = Math.abs(s.v);
       a -= Math.sign(s.v) * (0.22 + 0.012 * Math.min(av, 5) ** 2 + 0.0004 * av * av);
     }
-    // 풋 브레이크
+    // 풋 브레이크 (v0.6.2: 감속은 노면 마찰 한계 μ·g 를 넘지 않는다 — 건조 노면 7.5m/s² 는 그대로)
+    const mu = input.mu ?? 1;
     const prev = s.v;
     s.v += a * dt;
     if (input.brake > 0 && s.v !== 0) {
-      const dec = 7.5 * input.brake * dt;
+      const dec = Math.min(7.5 * input.brake, mu * 9.81 * 0.95) * dt;
       s.v = Math.abs(s.v) <= dec ? 0 : s.v - Math.sign(s.v) * dec;
     }
     // 저항으로 부호가 뒤집히는 것 방지
@@ -171,12 +187,48 @@ export function stepVehicle(s: VehicleState, input: VehicleInput, spec: VehicleS
     s.v = clamp(s.v, -spec.maxSpeedRev, spec.maxSpeedFwd);
   }
 
-  // ---- 기구학 (뒷축 기준 자전거 모델) ----
-  const dh = (s.v / spec.wheelbase) * Math.tan(s.steer) * dt;
-  const hMid = s.heading + dh / 2;
-  s.x += Math.sin(hMid) * s.v * dt;
-  s.z += Math.cos(hMid) * s.v * dt;
-  s.heading = normAngle(s.heading + dh);
+  // ---- 횡방향/요 ----
+  // 저속(≤3m/s): 뒷축 기준 기구학 자전거 모델(이전과 동일). 고속(≥6m/s): 동역학 모델(handling.ts). 사이는 섞는다.
+  const rKin = (s.v / spec.wheelbase) * Math.tan(s.steer);
+  const w = s.v > 0 ? dynBlend(s.v) : 0; // 후진은 저속 전용(기구학)
+  if (w <= 0) {
+    const dh = rKin * dt;
+    const hMid = s.heading + dh / 2;
+    s.x += Math.sin(hMid) * s.v * dt;
+    s.z += Math.cos(hMid) * s.v * dt;
+    s.heading = normAngle(s.heading + dh);
+    const H = handlingOf(spec);
+    s.yawRate = rKin;
+    s.vy = rKin * spec.wheelbase * H.frontWeight; // 뒷축 횡미끄럼 0 일 때 무게중심 횡속도 = r·b
+    s.ay = s.v * rKin;
+    s.grip = 0;
+  } else {
+    const H = handlingOf(spec);
+    const b = spec.wheelbase * H.frontWeight;
+    const vyK = rKin * b;
+    // 동역학 상태가 없거나 막 저속에서 넘어왔으면 기구학 값에서 시작(연속)
+    const st = { vy: s.vy ?? vyK, r: s.yawRate ?? rKin };
+    const ax = (s.v - prevV) / Math.max(1e-6, dt);
+    const o = dynStep(H, spec.wheelbase, st, Math.max(0.5, s.v), s.steer, ax, input.mu ?? 1, dt);
+    const r = (1 - w) * rKin + w * o.r;
+    const vy = (1 - w) * vyK + w * o.vy;
+    s.yawRate = r;
+    s.vy = vy;
+    s.ay = (1 - w) * s.v * rKin + w * o.ay;
+    s.grip = w * o.usage;
+    // 미끄러지면(횡력의 종방향 성분 + vy·r) 속도를 잃는다 — 전진 방향 부호를 넘어 뒤집히지는 않는다
+    s.v = Math.max(0, s.v + w * o.dvx * dt);
+    // 뒷축(상태 기준점)의 속도: 앞 = v, 왼쪽 = vy − b·r (기구학이면 0)
+    const lat = vy - b * r;
+    const dh = r * dt;
+    const hMid = s.heading + dh / 2;
+    const fx = Math.sin(hMid);
+    const fz = Math.cos(hMid);
+    // 왼쪽 단위 벡터 = (cos h, −sin h)
+    s.x += (fx * s.v + Math.cos(hMid) * lat) * dt;
+    s.z += (fz * s.v - Math.sin(hMid) * lat) * dt;
+    s.heading = normAngle(s.heading + dh);
+  }
   s.wheelRoll += (s.v / spec.wheelRadius) * dt;
 }
 

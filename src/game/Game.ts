@@ -1196,6 +1196,7 @@ export class Game {
       vin.throttle *= dfx.power;
       if (Math.abs(this.car.v) > this.spec.maxSpeedFwd * dfx.topSpeed) vin.throttle = 0;
       if (Math.abs(this.car.v) > 1) vin.steerInput = Math.max(-1, Math.min(1, vin.steerInput + dfx.steerPull / this.spec.maxSteer));
+      vin.mu = (vin.mu ?? 1) * dfx.grip; // v0.6.2 타이어/휠 손상 → 접지 한계 감소(핸들링 동역학 모델)
       if (dfx.disabled && this.engine.state !== 'OFF') {
         this.engine.state = 'OFF';
         this.engine.rpm = 0;

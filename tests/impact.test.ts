@@ -210,6 +210,13 @@ describe('차량 손상', () => {
     d.right = 0.6;
     expect(carDamageEffects(d).steerPull).toBeLessThan(0);
   });
+  it('v0.6.2 손상 → 접지(grip): 경미한 손상은 1, 옆면 심한 손상은 줄어들고 0.6 아래로는 내려가지 않는다', () => {
+    const base = { front: 0, rear: 0, left: 0, right: 0 };
+    expect(carDamageEffects({ ...base, left: 0.2 }).grip).toBe(1);
+    const g = carDamageEffects({ ...base, left: 0.8 }).grip;
+    expect(g).toBeLessThan(0.8);
+    expect(carDamageEffects({ ...base, left: 1, right: 1, front: 1 }).grip).toBeGreaterThanOrEqual(0.6);
+  });
 });
 
 void BOUNCE_MIN_VN;

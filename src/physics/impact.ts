@@ -272,6 +272,8 @@ export interface CarDamageEffects {
   topSpeed: number;
   /** 조향 쏠림(rad, 왼쪽 +): 측면이 찌그러지면 그쪽으로 당긴다 */
   steerPull: number;
+  /** v0.6.2 타이어/휠·현가 손상에 따른 접지 배율(0.6~1): 옆·앞 부위 40% 이상 손상부터 줄어든다 → 핸들링 모델 μ 에 곱한다 */
+  grip: number;
   /** 전조등 파손(앞 부위 40% 이상) */
   headlightsBroken: boolean;
   /** 연기(심한 손상) */
@@ -290,6 +292,7 @@ export function carDamageEffects(d: CarDamage): CarDamageEffects {
     power: disabled ? 0 : 1 - 0.6 * k,
     topSpeed: disabled ? 0 : 1 - 0.65 * k,
     steerPull: (d.left - d.right) * 0.035 * (d.left > 0.4 || d.right > 0.4 ? 1 : 0),
+    grip: 1 - 0.4 * Math.min(1, Math.max(0, Math.max(d.left, d.right, d.front * 0.7) - 0.4) / 0.6),
     headlightsBroken: d.front >= 0.4,
     smoke: s >= 0.55,
     disabled,
