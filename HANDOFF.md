@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.6.1-dev (`feature/v061-pdc-recovery`, 아래 v0.6.1 섹션) · 이전 v0.6.0-dev (`feature/v060-damage-city`, **Pages 배포됨: `feature/pdc-display-v2` = `04b6830`, run #14**) · 이전 v0.5.5-dev (`feature/v055-controls`) · v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.6.2-dev (`feature/v062-saha-city-handling`, 아래 v0.6.2 섹션, **배포 안 함**) · 이전 v0.6.1-dev (`feature/v061-pdc-recovery`, **Pages 배포됨: `feature/pdc-display-v2` = `5644686`, run #15**) · 이전 v0.6.0-dev (`feature/v060-damage-city`, **Pages 배포됨: `feature/pdc-display-v2` = `04b6830`, run #14**) · 이전 v0.5.5-dev (`feature/v055-controls`) · v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,15 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.6.2 진행 상황 (부산 사하구 전체 실제 지도 · 핸들링 고도화) — 브랜치 `feature/v062-saha-city-handling`
+
+상세: `docs/V062.md`. v0.6.1 배포 커밋 `5644686` 에서 분기, **병합·배포 안 함(사용자 승인 필요)**, APK/ADB 보류.
+- 한 일: 사하구 법정동 8개(41.4km²) 경계·도로 407.8km·건물 5,155동(OSM)·지형(Copernicus DEM, 추정 지표면)을 `scripts/saha/` 로 전처리해 `public/maps/saha/` 타일(600개, gzip 1.16MB)로, 게임은 반경 안 타일만 스트리밍(`world/sahaStream.ts`) + 지형 높이장(`terrain.HeightField`) + 교량/터널 상판(ramp) + 실제 도로망 내비(회전 제한) + 노면 마찰. 핸들링: 저속 기구학 그대로 + 고속 동역학 자전거 모델(언더스티어/ESC 근사/마찰원/손상 접지).
+- 남은 일(사용자): 배포 승인 여부, 국토부 건물정보·정밀도로지도 인증키(외부 차단), 모바일 실측(APK 보류).
+- 남은 일(개발): 차로 수준 내비, 정지선·횡단보도·화살표, 교량 실제 종단·터널 입구, 손상/핸들링 질량 통일.
+- 알려진 제한: 차로 수 96% 추정, 건물 높이 82% 추정, OSM 건물 누락 블록은 비어 있음(생성 건물 없음), DSM 가공 지형이라 숲 서비스 도로 경사 과대, 시작 높이 기준 y=0 = 괴정역 시설 자리(해수면 y=−45).
+- 버그 기록: [y=0 아래 물체 통과 — 사하구 저지대 건물·통합 맵 B1 기둥/방호벽/차량(v0.5.4~)] 원인 = `findVehicleCollision` 의 절대 높이 0.2m 낮은 물체 필터 · 수정 = 높이 정보가 있으면 차량 기준만, levelGraph 도 층 기준 · 재발 방지 = `tests/geometry.test.ts`. [고속 풀조향 스핀] 원인 = 앞·뒤 접지 동시 포화 시 요 모멘트 0 · 수정 = 앞 접지 0.9 + 미끄러짐 감속 + ESC 근사 · 재발 방지 = `tests/handling.test.ts`. [경사지 건물 밑 통과] 원인 = 바닥 = 꼭짓점 최저 지면 · 수정 = 기초 6m · 재발 방지 = `tests/saha.test.ts`. [DEM 이음매 0m] 원인 = 타일 사이 픽셀 중심 빈 값 · 수정 = 가장자리 고정 · 재발 방지 = 품질 보고 missingCells 0.
 
 ## v0.6.1 진행 상황 (정밀 PDC · 위험 순위 · 4륜 이동선 · 기계식 비상 수동복구) — 브랜치 `feature/v061-pdc-recovery`
 

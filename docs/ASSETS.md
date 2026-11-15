@@ -25,8 +25,5 @@
 | public/models/concept-coupe.glb | Car Concept (컨셉 스포츠 쿠페) | Khronos Group (기반 모델 "Free Concept Car 004": Unity Fan, CC0) | https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept | **CC-BY-4.0** (원본 CC0 기반, 로고/상표 제외) | **필요** (앱 크레딧·이 표·`public/models/LICENSE-concept-coupe.md`) | 있음 — 실내 제거·바퀴 재구성·램프 재질 개명·단순화(`scripts/prepare-car-glb.mjs`) | v0.5.0 |
 
 | src/maps/data/goejeong.json | 괴정동(부산 사하구) 괴정역 중심 1km 도로·건물·주차장·녹지·도로망 | **OpenStreetMap contributors** | https://www.openstreetmap.org/copyright (API `map?bbox=128.985881,35.095079,128.997299,35.104421`, 2026-11-14) | **ODbL 1.0** (파생 데이터베이스 — 같은 라이선스로 공유) | **필요** — 맵 설명·미니맵에 "© OpenStreetMap contributors" 표시, `src/maps/data/LICENSE-OSM.md` | 있음 — 투영(미터)·잘라내기·차량 도로 등급만 추출(`scripts/osm-import.ts`), `gen:1` 건물은 절차 생성(실제 아님) | v0.6.0 |
-
-- CC-BY 계열은 저작자 표시를 앱 내 "크레딧" 또는 이 문서에 남겨야 합니다.
-- "개인/비상업적 사용만 허용"·"재배포 금지" 에셋은 GitHub Pages/APK 배포에 쓸 수 없습니다.
-- 에셋 파일은 `public/models/` 에 넣고(앱에 포함되어 오프라인 동작), 위 표에 한 줄 추가하세요.
-- GLB 차량 교체 방법: [CAR_MODEL_GUIDE.md](CAR_MODEL_GUIDE.md)
+| public/maps/saha/ (tiles, roadnet.json, manifest.json) | 부산 사하구 전체(법정동 8개) 도로·차로 태그·건물(구멍)·주차장·경계·토지피복·회전 제한 | **OpenStreetMap contributors** | https://www.openstreetmap.org/copyright (API `/map` 0.02° 격자 40회 + relation/full, 2026-11-15) | **ODbL 1.0** (파생 데이터베이스 — 같은 라이선스로 공유) | **필요** — 맵 설명·미니맵에 출처 표시, `public/maps/saha/LICENSE.md` | 있음 — EPSG:5186 투영·경계 클리핑·조밀화·차로 추정(플래그)·타일 분할(`scripts/saha/build.ts`), 생성 건물 없음 | v0.6.2 |
+| public/maps/saha/field.bin | 사하구 지형 높이(20m 격자)·토지피복 | **Copernicus DEM GLO-30** (© DLR e.V. 2010-2014, © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the EU and ESA) | https://copernicus-dem-30m.s3.amazonaws.com (N34/N35 E128/E129) | Copernicus DEM 라이선스(무료·재배포 허용·출처 표기) | **필요** — 맵 설명·미니맵, `LICENSE.md` | 있음 — DSM → 열림(100m)·평활로 **추정 지표면**, 기준고 이동, 바다 낮춤 | v0.6.2 |
