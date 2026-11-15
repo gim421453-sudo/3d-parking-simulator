@@ -9,6 +9,8 @@ export interface RoadNet {
   nodes: [number, number][];
   /** [a, b, 일방통행(a→b 만)] */
   edges: [number, number, 0 | 1][];
+  /** v0.6.2 회전 제한(OSM restriction): [u, v, w, only] — only=0 이면 u→v→w 금지, 1 이면 u→v 다음은 w 만 허용 */
+  restrictions?: [number, number, number, 0 | 1][];
 }
 export interface NetEdge {
   to: number;
@@ -18,7 +20,15 @@ export interface RoadNetGraph {
   nodes: [number, number][];
   adj: NetEdge[][];
   edges: [number, number, 0 | 1][];
+  /** 금지 전이 "u,v,w" */
+  banned?: Set<string>;
+  /** "u,v" → 허용되는 다음 노드(only_*) */
+  only?: Map<string, number>;
+  /** 간선 격자 색인(셀 64m) — 대형 도로망에서 nearestEdge 를 빠르게 */
+  grid?: Map<number, number[]>;
 }
+const GRID = 64;
+const gkey = (ix: number, iz: number): number => (ix + 32768) * 65536 + (iz + 32768);
 
 export function buildRoadNetGraph(net: RoadNet): RoadNetGraph {
   const adj: NetEdge[][] = net.nodes.map(() => []);
@@ -27,7 +37,37 @@ export function buildRoadNetGraph(net: RoadNet): RoadNetGraph {
     adj[a].push({ to: b, w });
     if (!one) adj[b].push({ to: a, w });
   }
-  return { nodes: net.nodes, adj, edges: net.edges };
+  const g: RoadNetGraph = { nodes: net.nodes, adj, edges: net.edges };
+  if (net.restrictions?.length) {
+    g.banned = new Set();
+    g.only = new Map();
+    for (const [u, v, w, only] of net.restrictions) {
+      if (only) g.only.set(`${u},${v}`, w);
+      else g.banned.add(`${u},${v},${w}`);
+    }
+  }
+  if (net.edges.length > 2000) {
+    g.grid = new Map();
+    net.edges.forEach(([a, b], e) => {
+      const [ax, az] = net.nodes[a];
+      const [bx, bz] = net.nodes[b];
+      for (let ix = Math.floor(Math.min(ax, bx) / GRID); ix <= Math.floor(Math.max(ax, bx) / GRID); ix++)
+        for (let iz = Math.floor(Math.min(az, bz) / GRID); iz <= Math.floor(Math.max(az, bz) / GRID); iz++) {
+          const k = gkey(ix, iz);
+          const l = g.grid!.get(k);
+          if (l) l.push(e);
+          else g.grid!.set(k, [e]);
+        }
+    });
+  }
+  return g;
+}
+/** u→v 다음 w 로 가도 되는가(회전 제한) */
+export function turnAllowed(g: RoadNetGraph, u: number, v: number, w: number): boolean {
+  if (u < 0) return true;
+  if (g.banned?.has(`${u},${v},${w}`)) return false;
+  const o = g.only?.get(`${u},${v}`);
+  return o === undefined || o === w;
 }
 
 export interface EdgeHit {
@@ -42,7 +82,24 @@ export interface EdgeHit {
 
 export function nearestEdge(g: RoadNetGraph, x: number, z: number): EdgeHit | null {
   let best: EdgeHit | null = null;
-  g.edges.forEach(([a, b], e) => {
+  // 색인이 있으면 주변 셀부터(반경을 넓혀 가며) — 없으면 전체
+  let cand: Iterable<number> = g.edges.keys();
+  if (g.grid) {
+    const ix = Math.floor(x / GRID);
+    const iz = Math.floor(z / GRID);
+    const ring = (r: number): Set<number> => {
+      const set = new Set<number>();
+      for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) for (const e of g.grid!.get(gkey(ix + a, iz + b)) ?? []) set.add(e);
+      return set;
+    };
+    for (let r = 1; r <= 8; r++)
+      if (ring(r).size) {
+        cand = ring(r + 1); // 한 칸 더 넓혀 경계 근처의 더 가까운 간선을 놓치지 않는다
+        break;
+      }
+  }
+  for (const e of cand) {
+    const [a, b] = g.edges[e];
     const [ax, az] = g.nodes[a];
     const [bx, bz] = g.nodes[b];
     const dx = bx - ax;
@@ -53,7 +110,7 @@ export function nearestEdge(g: RoadNetGraph, x: number, z: number): EdgeHit | nu
     const pz = az + dz * t;
     const d = Math.hypot(x - px, z - pz);
     if (!best || d < best.d) best = { e, a, b, t, x: px, z: pz, d };
-  });
+  }
   return best;
 }
 
@@ -146,6 +203,8 @@ export function findRoadNetRoute(g: RoadNetGraph, from: { x: number; z: number }
       bestNode = u;
     }
     for (const e of g.adj[u]) {
+      // 회전 제한(근사: 노드마다 가장 좋은 직전 노드 하나만 기억하는 A* — 제한이 적은 실제 도로망에서 충분)
+      if ((g.banned || g.only) && !turnAllowed(g, prev[u], u, e.to)) continue;
       const c = G[u] + e.w;
       if (c < G[e.to]) {
         G[e.to] = c;

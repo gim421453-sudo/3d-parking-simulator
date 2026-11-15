@@ -111,7 +111,8 @@ export function buildMap(map: MapData, q: QualityOptions): BuiltMap {
     g.rotateX(-Math.PI / 2);
     return g;
   };
-  if (!indoor) {
+  if (!indoor && !map.stream) {
+    // (v0.6.2 스트리밍 지도는 실제 지형 메시가 지면이다 — 평면을 깔면 언덕과 겹친다)
     const og = Math.max(600, 2 * Math.max(Math.abs(b.minX), Math.abs(b.maxX), Math.abs(b.minZ), Math.abs(b.maxZ)) + 300);
     const g = track(holedPlane(0, 0, og, og, 4));
     const outer = new THREE.Mesh(g, mats.grass);

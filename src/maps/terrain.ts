@@ -70,7 +70,38 @@ export interface CeilingRect {
   rect: Rect2;
   y: number;
 }
+/**
+ * v0.6.2 격자 높이장(실제 지형 DEM): 격자 (x0 + i·cell, z0 + j·cell) 의 높이. 칸마다 대각선 (i,j)–(i+1,j+1) 로 나눈
+ * 두 삼각형 평면 보간 — 렌더 메시(sahaStream)와 **같은 식**이라 차가 보이는 지면 위에 정확히 놓인다.
+ */
+export interface HeightField {
+  x0: number;
+  z0: number;
+  w: number;
+  h: number;
+  cell: number;
+  /** 높이(m) — 길이 w·h, 행 우선 (j·w + i) */
+  data: Float32Array;
+}
+export function fieldHeight(f: HeightField, x: number, z: number): number | null {
+  const fx = (x - f.x0) / f.cell;
+  const fz = (z - f.z0) / f.cell;
+  if (fx < 0 || fz < 0 || fx > f.w - 1 || fz > f.h - 1) return null;
+  const i = Math.min(f.w - 2, Math.floor(fx));
+  const j = Math.min(f.h - 2, Math.floor(fz));
+  const u = fx - i;
+  const v = fz - j;
+  const d = f.data;
+  const h00 = d[j * f.w + i];
+  const h10 = d[j * f.w + i + 1];
+  const h01 = d[(j + 1) * f.w + i];
+  const h11 = d[(j + 1) * f.w + i + 1];
+  return u >= v ? h00 + (h10 - h00) * u + (h11 - h10) * v : h00 + (h11 - h01) * u + (h01 - h00) * v;
+}
+
 export interface Terrain {
+  /** v0.6.2 실제 지형 높이장(있으면 면들과 함께 "가장 높은 면" 후보가 된다) */
+  field?: HeightField;
   surfaces: TerrainSurface[];
   levels: TerrainLevel[];
   /** 데크 아랫면 외의 추가 천장 */
@@ -145,6 +176,10 @@ export function groundAt(t: Terrain, x: number, z: number, yHint: number, maxSte
     const h = surfaceHeight(s, x, z);
     if (h === null) continue;
     if (Math.abs(h - yHint) <= maxStep && (best === null || h > best)) best = h;
+  }
+  if (t.field) {
+    const h = fieldHeight(t.field, x, z);
+    if (h !== null && Math.abs(h - yHint) <= maxStep && (best === null || h > best)) best = h;
   }
   return best;
 }

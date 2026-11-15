@@ -12,7 +12,9 @@ describe('맵 데이터 무결성', () => {
     expect(new Set(MAPS.map((m) => m.id)).size).toBe(MAPS.length);
   });
 
-  for (const map of MAPS) {
+  // 스트리밍 자리표시(데이터를 받기 전 사하구)는 여기서 검사하지 않고, 실제 데이터로 만든 맵을 tests/saha.test.ts 가
+  // 같은 항목(시작 위치/미션 칸/충돌체 id)을 타일 건물 충돌체까지 포함해 검사한다.
+  for (const map of MAPS.filter((m) => !m.stream || m.stream.ready)) {
     describe(map.name, () => {
       const colliders = mapColliders(map);
 

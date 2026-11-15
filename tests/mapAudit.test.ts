@@ -17,7 +17,7 @@ const vOverlap = (a: Collider, b: Collider): boolean => a.y0 < b.y0 + b.h - 0.05
 const spawnsOf = (m: MapData): { x: number; z: number; heading: number; y?: number; id: string }[] => [{ ...m.spawn, id: 'spawn' }, ...m.missions.filter((q) => q.spawn).map((q) => ({ ...q.spawn!, id: q.id }))];
 
 describe('맵 자동 검사: 모든 맵', () => {
-  for (const m of MAPS) {
+  for (const m of MAPS.filter((q) => !q.stream || q.stream.ready)) { // 스트리밍 자리표시는 tests/saha.test.ts 가 실제 데이터로 검사
     describe(m.id, () => {
       const cols = mapColliders(m);
       it('충돌체 ID 가 유일하고 완전히 겹친 중복 충돌체가 없다', () => {

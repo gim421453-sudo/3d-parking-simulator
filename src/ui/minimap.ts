@@ -90,7 +90,34 @@ export class Minimap {
     const onLevel = (y0: number, h: number): boolean => ly === null || (y0 + h > ly + 0.2 && y0 < ly + 1.7);
     for (const s of map.slots) if (ly === null || s.y === undefined || Math.abs(s.y - ly) < 0.6) this.slotPath(g, s);
     // 경사로(항상 표시: 층 연결 위치 안내)
-    if (map.terrain) {
+    // v0.6.2 스트리밍 실제 지도: 경계 외곽선 + 전역 도로망(타일이 내려가 있어도 전체 길이 보인다)
+    if (map.stream && map.roadNet) {
+      g.fillStyle = '#18222c';
+      g.strokeStyle = 'rgba(160,190,220,.6)';
+      g.lineWidth = 1;
+      for (const ring of map.outline ?? []) {
+        g.beginPath();
+        ring.forEach(([x, z], i) => {
+          const [sx, sy] = P(x, z);
+          if (i) g.lineTo(sx, sy);
+          else g.moveTo(sx, sy);
+        });
+        g.closePath();
+        g.fill();
+        g.stroke();
+      }
+      g.strokeStyle = '#6d7782';
+      g.lineWidth = Math.max(0.6, this.scale * 6);
+      g.beginPath();
+      for (const [a, b] of map.roadNet.edges) {
+        const [ax, ay] = P(map.roadNet.nodes[a][0], map.roadNet.nodes[a][1]);
+        const [bx, by] = P(map.roadNet.nodes[b][0], map.roadNet.nodes[b][1]);
+        g.moveTo(ax, ay);
+        g.lineTo(bx, by);
+      }
+      g.stroke();
+    }
+    if (map.terrain && !map.stream) {
       g.fillStyle = 'rgba(120,150,190,0.35)';
       for (const t of map.terrain.surfaces) {
         if (t.kind === 'ramp') {
@@ -170,13 +197,13 @@ export class Minimap {
         g.restore();
       }
     }
-    if (map.geo) {
+    if (map.geo || map.attribution) {
       // 출처 표시 (ODbL)
       g.fillStyle = 'rgba(255,255,255,.55)';
       g.font = `${Math.max(8, Math.round(this.h * 0.045))}px sans-serif`;
       g.textAlign = 'left';
       g.textBaseline = 'bottom';
-      g.fillText(map.geo.attribution, 4, this.h - 3);
+      g.fillText(map.geo?.attribution ?? map.attribution ?? '', 4, this.h - 3);
     }
     this.base = c;
   }

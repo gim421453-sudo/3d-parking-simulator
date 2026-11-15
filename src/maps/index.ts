@@ -10,6 +10,7 @@ import { MAP_TOWER } from './mapTower';
 import { MAP_UNDERGROUND } from './mapUnderground';
 import { withMechAnnex, type AnnexOpts } from './mechAnnex';
 import type { MapData } from './types';
+import { SAHA_STUB } from './saha/mapSaha';
 
 /** 새 맵은 MapData 파일을 만들고 여기에 추가하면 된다. */
 import { MAP_ALLEY } from './mapAlley';
@@ -33,7 +34,13 @@ export const MECH_ANNEX: Record<string, AnnexOpts> = {
   garage: { id: 'gar-mech', name: '정비소 옆 기계식 타워 (4층)', side: 'west', at: -14, floors: 4 },
   alley: { id: 'al-mech', name: '골목 끝 기계식 타워 (6층)', side: 'west', at: -19, floors: 6 },
 };
-export const MAPS: MapData[] = BASE_MAPS.map((m) => (MECH_ANNEX[m.id] ? withMechAnnex(m, MECH_ANNEX[m.id]) : m));
+export const MAPS: MapData[] = [...BASE_MAPS.map((m) => (MECH_ANNEX[m.id] ? withMechAnnex(m, MECH_ANNEX[m.id]) : m)), SAHA_STUB];
 export const getMap = (id: string): MapData => MAPS.find((m) => m.id === id) ?? MAPS[0];
+/** v0.6.2 스트리밍 맵: 데이터를 받은 뒤 자리표시(stream.ready=false)를 완성된 맵으로 바꾼다 */
+export function setStreamMap(map: MapData): void {
+  const i = MAPS.findIndex((m) => m.id === map.id);
+  if (i >= 0) MAPS[i] = map;
+  else MAPS.push(map);
+}
 export type { MapData } from './types';
 export { mapColliders } from './types';

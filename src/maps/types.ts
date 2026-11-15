@@ -137,7 +137,17 @@ export interface MapData {
   /** v0.6.0 실제 지도 표시 레이어(건물 다각형/도로 폴리라인/면) */
   geo?: GeoLayer;
   /** v0.6.0 실제 도로망 그래프(내비): 노드 [x,z], 간선 [a, b, 일방통행] */
-  roadNet?: { nodes: [number, number][]; edges: [number, number, 0 | 1][] };
+  roadNet?: { nodes: [number, number][]; edges: [number, number, 0 | 1][]; restrictions?: [number, number, number, 0 | 1][] };
+  /**
+   * v0.6.2 스트리밍 대형 실제 지도(사하구): 데이터는 public/maps/<kind>/ 에서 비동기로 읽는다.
+   * ready=false 인 맵(메뉴용 자리표시)은 Game 이 데이터를 받은 뒤 완성된 MapData 로 바꿔 시작한다.
+   * 지면은 terrain.field(실제 지형)이고 바닥 평면/층 외형(towerBuilder)은 그리지 않는다. 건물/도로 메시와 건물 충돌체는 타일 단위로 붙었다 떨어진다.
+   */
+  stream?: { kind: 'saha'; ready: boolean };
+  /** v0.6.2 행정 경계 외곽선(미니맵 표시용) */
+  outline?: [number, number][][];
+  /** 화면에 표시할 출처 문구(geo 레이어가 없는 맵) */
+  attribution?: string;
 }
 
 export function obstacleToCollider(o: ObstacleDef): Collider {

@@ -3,7 +3,10 @@ import type { Collider } from '../core/geometry';
 import { DEG, worldToLocal } from '../core/math';
 import { loadRecords, loadSettings, mechMirrorTarget, QUALITY_PRESETS, sanitizeSettings, saveRecords, saveSettings, type Records, type Settings } from '../core/settings';
 import { removeKey } from '../core/storage';
-import { getMap, mapColliders } from '../maps';
+import { getMap, mapColliders, setStreamMap } from '../maps';
+import { SahaStream } from '../world/sahaStream';
+import { loadSahaBase, type SahaBase, type SahaSource, type SahaTile } from '../maps/saha/data';
+import { buildSahaMap, sahaInitialTiles } from '../maps/saha/mapSaha';
 import { buildMap, type BuiltMap } from '../maps/mapBuilder';
 import type { MapData, MapMission, MapSlot } from '../maps/types';
 import { HOLD_SECONDS, HEADING_TOLERANCE, MissionRunner } from '../mission/parking';
@@ -461,6 +464,11 @@ export class Game {
       this.tower.dispose();
       this.tower = null;
     }
+    if (this.saha) {
+      this.scene.remove(this.saha.group);
+      this.saha.dispose();
+      this.saha = null;
+    }
     for (const f of this.facilities) {
       this.scene.remove(f.built.group);
       f.built.dispose();
@@ -483,7 +491,7 @@ export class Game {
     });
     this.scene.add(this.built.group);
     this.built.setLevelVisibility(map.spawn.y ?? 0); // 다층 맵: 시작 층에서 먼 층의 주차 차량 모델은 처음부터 그리지 않는다
-    if (map.terrain) {
+    if (map.terrain && !map.stream) {
       this.tower = buildTowerVisual(map, map.terrain);
       this.scene.add(this.tower.group);
     }
@@ -510,12 +518,23 @@ export class Game {
     // 대형 맵(통합 맵): 먼 타일은 그리지 않으므로 안개 끝을 가시 반경에 맞춰 경계가 드러나지 않게 한다
     const vr = VIEW_RADIUS[this.settings.quality].load;
     const bigMap = (map.bounds.maxX - map.bounds.minX) * (map.bounds.maxZ - map.bounds.minZ) > 40000;
-    this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : bigMap ? new THREE.Fog(map.env.sky, vr * 0.5, vr * 1.02) : new THREE.Fog(map.env.sky, 100, 320);
+    this.scene.fog = map.env.indoor ? new THREE.Fog(0x0d1015, 28, 110) : map.stream ? new THREE.Fog(map.env.sky, 450, 2800) : bigMap ? new THREE.Fog(map.env.sky, vr * 0.5, vr * 1.02) : new THREE.Fog(map.env.sky, 100, 320);
     this.zoneAcc = 1; // 첫 프레임에 타일 가시성 갱신
+    // 사하구: 먼 산·바다까지 보이게 원거리 평면을 늘린다(안개 끝 2.8km). 다른 맵은 이전 값
+    this.rig.camera.far = map.stream ? 3000 : 600;
+    this.rig.camera.updateProjectionMatrix();
     // 복사본: 기계식 셔터 충돌체(동적)와 v0.6.0 파손(제거/벽 분할)이 이 배열을 제자리에서 바꾼다 — 맵 데이터 캐시는 그대로 둔다
     this.colliders = [...mapColliders(map)];
     this.colliderById = new Map(this.colliders.map((c) => [c.id, c]));
     this.rig.colliders = this.colliders;
+    if (map.stream?.ready && this.sahaBase) {
+      // v0.6.2 사하구: 타일 스트리밍(지형·도로·차선·건물 + 건물 충돌체를 이 배열에 붙였다 뗀다)
+      const R = this.settings.quality === 'low' ? 300 : this.settings.quality === 'medium' ? 400 : 520;
+      this.saha = new SahaStream(this.sahaBase, this.sahaSrc, { radius: R, colliders: this.colliders, byId: this.colliderById, slots: map.slots, lanes: true }, this.built!.textures.facade);
+      this.saha.prime(this.sahaTiles);
+      this.scene.add(this.saha.group);
+      this.saha.update(map.spawn.x, map.spawn.z);
+    }
     this.rig.cameraOccluders = (map.mechFacilities ?? []).flatMap((f) => facilityCameraOccluders(f, `${f.id}:`));
     this.damage = new DamageWorld(this.scene, this.built!, {
       colliders: this.colliders,
@@ -536,7 +555,51 @@ export class Game {
     this.applyShadows();
   }
 
+  /** v0.6.2 사하구 스트리밍 지도 */
+  saha: SahaStream | null = null;
+  sahaBase: SahaBase | null = null;
+  private sahaTiles = new Map<string, SahaTile>();
+  sahaLoad: { state: 'idle' | 'loading' | 'ready' | 'error'; ms: number; error?: string } = { state: 'idle', ms: 0 };
+  private readonly sahaSrc: SahaSource = {
+    json: async <T,>(rel: string): Promise<T> => {
+      const r = await fetch(`${import.meta.env.BASE_URL}maps/saha/${rel}`);
+      if (!r.ok) throw new Error(`${rel}: ${r.status}`);
+      return (await r.json()) as T;
+    },
+    bin: async (rel: string): Promise<ArrayBuffer> => {
+      const r = await fetch(`${import.meta.env.BASE_URL}maps/saha/${rel}`);
+      if (!r.ok) throw new Error(`${rel}: ${r.status}`);
+      return r.arrayBuffer();
+    },
+  };
+  /** 스트리밍 지도 데이터(경계·지형·도로망 + 출발지/미션 주변 타일)를 받은 뒤 완성된 맵으로 바꾸고 다시 시작한다 */
+  private loadStreamMap(): void {
+    if (this.sahaLoad.state === 'loading') return;
+    this.sahaLoad = { state: 'loading', ms: 0 };
+    this.hud.toast('사하구 지도 데이터를 불러오는 중… (지형·도로망·건물 타일)');
+    const t0 = performance.now();
+    void (async () => {
+      try {
+        const base = await loadSahaBase(this.sahaSrc);
+        const keys = sahaInitialTiles(base);
+        const got = await Promise.all(keys.map((k) => this.sahaSrc.json<SahaTile>(`tiles/${k}.json`)));
+        keys.forEach((k, i) => this.sahaTiles.set(k, got[i]));
+        this.sahaBase = base;
+        setStreamMap(buildSahaMap(base, this.sahaTiles));
+        this.sahaLoad = { state: 'ready', ms: performance.now() - t0 };
+        this.startRun();
+      } catch (e) {
+        this.sahaLoad = { state: 'error', ms: performance.now() - t0, error: String(e) };
+        this.hud.toast('사하구 지도 데이터를 불러오지 못했습니다: ' + String(e), 'bad');
+      }
+    })();
+  }
+
   startRun(): void {
+    if (getMap(this.settings.mapId).stream && !getMap(this.settings.mapId).stream!.ready) {
+      this.loadStreamMap();
+      return;
+    }
     this.beeper.init();
     this.engineSound.init(); // 사용자 조작(시작 버튼) 이후 — 자동재생 정책
     this.engineSound.enabled = this.settings.engineSound;
@@ -2200,6 +2263,7 @@ export class Game {
     const zones = (this.map as unknown as { zones?: { id: string; label: string; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } }[] }).zones;
     const mb = this.map.bounds;
     const largeMap = (mb.maxX - mb.minX) * (mb.maxZ - mb.minZ) > 40000;
+    if (this.saha) this.saha.update(this.car.x, this.car.z);
     if (largeMap && !zones) {
       // v0.6.0: 구역이 없는 대형 맵(실제 지도)도 타일 스트리밍 — 먼 타일은 그리지 않는다(충돌/센서는 데이터 기반이라 무관)
       this.zoneAcc += 1 / 60;
