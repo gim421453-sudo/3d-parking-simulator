@@ -5,6 +5,8 @@ import { loadRecords, loadSettings, mechMirrorTarget, QUALITY_PRESETS, sanitizeS
 import { removeKey } from '../core/storage';
 import { getMap, mapColliders, setStreamMap } from '../maps';
 import { SahaStream } from '../world/sahaStream';
+import { muOf } from '../vehicle/handling';
+import { nearestEdge } from '../nav/roadNet';
 import { loadSahaBase, type SahaBase, type SahaSource, type SahaTile } from '../maps/saha/data';
 import { buildSahaMap, sahaInitialTiles } from '../maps/saha/mapSaha';
 import { buildMap, type BuiltMap } from '../maps/mapBuilder';
@@ -50,7 +52,7 @@ import { AssistController, type AssistOutput, type AssistSettings } from '../pdc
 import { ASSIST_CAM_H, ASSIST_CAM_W, AssistPanel } from '../pdc/assistPanel';
 import { buildPdcState, type PdcState } from '../pdc/pdcModel';
 import { WHEEL_LOCK_DEG } from '../core/wheel';
-import { ceilingAbove, groundAt, levelAt } from '../maps/terrain';
+import { ceilingAbove, fieldHeight, groundAt, levelAt } from '../maps/terrain';
 import { gateViewRisk } from '../pdc/viewGate';
 import { pathHitIndex } from '../pdc/guidelines';
 import { RiskRanker, type RiskCandidate } from '../pdc/riskRank';
@@ -553,6 +555,30 @@ export class Game {
     this.loadedMapId = map.id;
     this.map = map;
     this.applyShadows();
+  }
+
+  /** (디버그/E2E) (x,z) 의 지면 높이 — 지형 높이장이 있으면 그 값(교량 상판보다 아래), 없으면 0 */
+  groundHeight(x: number, z: number): number {
+    const f = this.map.terrain?.field;
+    return f ? (fieldHeight(f, x, z) ?? 0) : 0;
+  }
+  private muAcc = 0;
+  private muCache = 1;
+  /** 핸들링 모델에 줄 노면 마찰(0.25초마다): 사하구는 도로 위면 아스팔트(1), 도로 밖이면 토지피복(숲/풀/모래). 다른 맵은 1 */
+  surfaceMu(): number {
+    if (!this.saha || !this.sahaBase || !this.map.roadNet) return 1;
+    if ((this.muAcc += 1 / 60) < 0.25) return this.muCache;
+    this.muAcc = 0;
+    const c = centerOf(this.car, this.spec);
+    const g = this.nav.realRoadGraph();
+    const e = g ? nearestEdge(g, c.x, c.z) : null;
+    const lanes = e ? this.sahaBase.roadNet.lanes[e.e] ?? 1 : 1;
+    if (e && e.d <= lanes * 3.4 + 2) return (this.muCache = muOf('asphalt'));
+    const f = this.sahaBase.field;
+    const i = Math.round((c.x - f.x0) / f.cell);
+    const j = Math.round((c.z - f.z0) / f.cell);
+    const cov = this.sahaBase.cover[j * f.w + i] ?? 0;
+    return (this.muCache = cov === 2 ? muOf('ground') : cov === 1 ? muOf('grass') : cov === 4 ? 0.5 : muOf('compacted'));
   }
 
   /** v0.6.2 사하구 스트리밍 지도 */
@@ -1191,6 +1217,7 @@ export class Game {
       this.hud.toast('주차 브레이크 자동 해제');
     }
     // v0.6.0 차량 손상 효과: 출력/최고속도 감소, 측면 손상 쏠림, 완전 파손이면 엔진 정지
+    vin.mu = this.surfaceMu();
     const dfx = this.damage?.effects;
     if (dfx && dfx.level !== 'none') {
       vin.throttle *= dfx.power;

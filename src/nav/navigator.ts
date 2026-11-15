@@ -101,6 +101,10 @@ export class Navigator {
   private spec: VehicleSpec | null = null;
   /** v0.6.0 실제 지도 도로망(OSM) 그래프 */
   private rnet: RoadNetGraph | null = null;
+  /** 실제 도로망 그래프(있으면) — 노면 판정 등에서 재사용(다시 만들지 않는다) */
+  realRoadGraph(): RoadNetGraph | null {
+    return this.rnet;
+  }
   private lgraph: LevelGraph | null = null;
   /** 다층 맵 경로 탐색에 쓸 차량(차폭/차고/회전 반경에 따라 통과 가능한 길이 달라진다). setMap 전에 호출 */
   setVehicle(spec: VehicleSpec): void {

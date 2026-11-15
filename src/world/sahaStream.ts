@@ -7,11 +7,10 @@
  * 차량이 다른 구역으로 가도 게임 상태는 그대로이고, 도로망(내비)은 전역 데이터라 먼 타일이 내려가도 경로가 유지된다.
  */
 import * as THREE from 'three';
-import type { BoxCollider, Collider } from '../core/geometry';
-import { footprintBoxes, type Pt } from './footprint';
+import type { Collider } from '../core/geometry';
 import { fieldHeight } from '../maps/terrain';
 import { disposeObject } from '../core/dispose';
-import { tilesWithin, type SahaBase, type SahaBuilding, type SahaRoad, type SahaSource, type SahaTile } from '../maps/saha/data';
+import { buildingColliders, tilesWithin, type SahaBase, type SahaBuilding, type SahaRoad, type SahaSource, type SahaTile } from '../maps/saha/data';
 import type { MapSlot } from '../maps/types';
 
 export interface SahaStreamOpts {
@@ -226,8 +225,7 @@ export class SahaStream {
     // 충돌체
     const ids: string[] = [];
     for (const b of tile.buildings) {
-      footprintBoxes(b.o as Pt[], 1).forEach((q, k) => {
-        const c: BoxCollider = { kind: 'box', id: `sb-${b.id}-${k}`, tag: 'building', x: q.x, z: q.z, w: q.w, d: q.d, rot: q.rot, y0: b.y - 0.5, h: b.h + 0.5 };
+      buildingColliders(b).forEach((c) => {
         this.opts.colliders.push(c);
         this.opts.byId.set(c.id, c);
         ids.push(c.id);
@@ -487,7 +485,7 @@ export class SahaStream {
     for (const b of bs) {
       const pal = B_PAL[b.k] ?? B_PAL.default;
       const c = new THREE.Color(pal[hash(b.id) % pal.length]);
-      const y0 = b.y - 0.5; // 경사 대지: 가장 낮은 꼭짓점보다 조금 아래부터(뜬 건물 방지)
+      const y0 = b.y - 3; // 경사 대지: 가장 낮은 꼭짓점보다 3m 아래부터(기초 — 외곽 안쪽 지면이 더 낮아도 뜬 건물이 보이지 않게)
       const y1 = b.y + b.h;
       const rings = [b.o, ...(b.hl ?? [])];
       for (const ring of rings) {

@@ -96,7 +96,9 @@ export function colliderIsSolidForCar(c: Collider): boolean {
 export function findVehicleCollision(car: Obb, colliders: readonly Collider[], y?: number, height?: number): Collider | null {
   const reach = Math.hypot(car.hw, car.hl);
   for (const c of colliders) {
-    if (!colliderIsSolidForCar(c)) continue;
+    // 높이 정보가 없을 때만 절대 높이로 낮은 물체(연석 등)를 거른다. 높이가 있으면 아래 줄이 **차량 높이 기준**으로 같은 일을 한다
+    // (v0.6.2 회귀: 실제 지형 지도에서 y=0 아래 지면의 건물이 통째로 '낮은 물체'로 걸러져 통과되던 문제)
+    if ((y === undefined || height === undefined) && !colliderIsSolidForCar(c)) continue;
     // 다층: 차량의 현재 높이 구간 [y+지상고, y+차고] 와 충돌체의 높이 구간이 겹쳐야 충돌 (다른 층 물체는 무시)
     if (y !== undefined && height !== undefined && (c.y0 + c.h <= y + GROUND_CLEARANCE || c.y0 >= y + height)) continue;
     if (c.kind === 'box') {

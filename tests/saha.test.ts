@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { loadSahaBase, inSaha, tilesWithin, type SahaBase, type SahaSource, type SahaTile } from '../src/maps/saha/data';
+import { loadSahaBase, inSaha, tilesWithin, buildingColliders, type SahaBase, type SahaSource, type SahaTile } from '../src/maps/saha/data';
 import { buildSahaMap, sahaInitialTiles, SAHA_FACILITY_XZ, SAHA_STUB } from '../src/maps/saha/mapSaha';
 import { fieldHeight, groundAt } from '../src/maps/terrain';
 import { buildRoadNetGraph, findRoadNetRoute, turnAllowed } from '../src/nav/roadNet';
@@ -127,7 +127,7 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
   // tests/maps.test.ts 의 맵 공통 검사와 같은 항목 — 타일 건물 충돌체(스트리밍이 붙이는 것과 같은 분해)까지 포함
   const allColliders = (): Collider[] => [
     ...mapColliders(map),
-    ...[...tiles.values()].flatMap((t) => t.buildings.flatMap((b) => footprintBoxes(b.o as Pt[], 1).map((q, k): Collider => ({ kind: 'box', id: `sb-${b.id}-${k}`, tag: 'building', x: q.x, z: q.z, w: q.w, d: q.d, rot: q.rot, y0: b.y - 0.5, h: b.h + 0.5 })))),
+    ...[...tiles.values()].flatMap((t) => t.buildings.flatMap((b) => buildingColliders(b))),
   ];
   it('(공통) 충돌체 id 고유 · 모든 차량이 시작 위치/미션 시작 위치에서 겹치지 않는다', () => {
     const cs = allColliders();
@@ -169,7 +169,7 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
       for (const k of keys) {
         if (!base.manifest.tiles.includes(k)) continue;
         const t = await src.json<SahaTile>(`tiles/${k}.json`);
-        for (const b of t.buildings) footprintBoxes(b.o as Pt[], 1).forEach((q, i) => obs.push({ id: `sb-${b.id}-${i}`, tag: 'building', shape: 'box', x: q.x, z: q.z, w: q.w, d: q.d, rot: q.rot, y0: b.y - 0.5, h: b.h + 0.5 }));
+        for (const b of t.buildings) for (const c of buildingColliders(b)) obs.push({ id: c.id, tag: 'building', shape: 'box', x: c.x, z: c.z, w: c.w, d: c.d, rot: c.rot, y0: c.y0, h: c.h });
       }
       const m2 = { ...map, obstacles: obs };
       const car = startState(m2, spec, map.spawn.x, map.spawn.z, map.spawn.heading, map.spawn.y);
@@ -180,6 +180,26 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
       expect(res.maxY - res.minY, `${id} 실제 고저차`).toBeGreaterThan(5); // 평면 지도가 아니다
     }
   }, 60000);
+  it('회귀(e2e-v062): 경사지 건물 충돌체는 외곽 안·주변의 가장 낮은 지면보다 아래까지 내려간다(낮은 쪽에서 오는 차가 밑으로 통과 금지)', () => {
+    let worst = Infinity;
+    for (const t of tiles.values())
+      for (const b of t.buildings) {
+        const cs = buildingColliders(b);
+        for (const c of cs) {
+          // 상자 둘레 2m 바깥까지 지면 최저
+          let gmin = Infinity;
+          for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) {
+            const hx = (c.w / 2 + 2) * u;
+            const hz = (c.d / 2 + 2) * v;
+            const x = c.x + hx * Math.cos(c.rot) + hz * Math.sin(c.rot);
+            const z = c.z - hx * Math.sin(c.rot) + hz * Math.cos(c.rot);
+            gmin = Math.min(gmin, fieldHeight(base.field, x, z) ?? gmin);
+          }
+          worst = Math.min(worst, gmin - c.y0);
+        }
+      }
+    expect(worst).toBeGreaterThan(0);
+  });
   it('타일 범위 계산: 반경 안 타일만', () => {
     const k = tilesWithin(base.manifest, 0, 0, 300);
     expect(k).toContain('0_0');

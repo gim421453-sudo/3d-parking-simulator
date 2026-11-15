@@ -53,7 +53,8 @@ export function buildLevelGraph(map: MapData, o: GraphOptions = {}): LevelGraph 
   const spacing = o.spacing ?? 3;
   const clearance = o.clearance ?? 1.4;
   const height = o.height ?? 1.75;
-  const solids = mapColliders(map).filter(colliderIsSolidForCar);
+  // 지형(다층) 맵은 낮은 물체 판정을 층 높이 기준으로 한다(clearAt) — 절대 높이로 미리 거르면 지하층(y<0) 기둥·차량이 모두 빠진다(v0.6.2 회귀 수정)
+  const solids = map.terrain ? mapColliders(map) : mapColliders(map).filter(colliderIsSolidForCar);
   const index = new SpatialIndex(8);
   index.rebuild(solids);
   const b = map.bounds;

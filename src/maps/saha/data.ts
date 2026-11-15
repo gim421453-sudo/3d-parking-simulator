@@ -5,6 +5,8 @@
  * 값마다 실제/추정 플래그가 있다: 차로 ls(1 = OSM 태그, 0 = 추정), 폭 ws, 건물 높이 hs, 교량/터널 종단은 추정.
  */
 import type { HeightField, RampSurface } from '../terrain';
+import type { BoxCollider } from '../../core/geometry';
+import { footprintBoxes, type Pt } from '../../world/footprint';
 
 export interface SahaDeck {
   id: string;
@@ -156,4 +158,14 @@ export function inSaha(m: SahaManifest, x: number, z: number): boolean {
     return c;
   };
   return m.boundary.some((d) => d.outer.some(inR) && !d.inner.some(inR));
+}
+
+/**
+ * 건물 기초 깊이(m): 바닥 높이(b.y)는 외곽 꼭짓점 지면의 최저값이라, 경사지에서는 외곽 안/옆 지면이 그보다 낮을 수 있다.
+ * 충돌체를 그만큼 아래로 내려 낮은 쪽에서 다가오는 차가 건물 밑으로 지나가지 못하게 한다(실제 회귀: e2e-v062 건물 충돌).
+ */
+export const BUILDING_FOUNDATION = 6;
+/** 건물 외곽 → 회전 상자 충돌체(1m 격자 분해). 스트리밍·검사가 같은 함수를 쓴다 */
+export function buildingColliders(b: SahaBuilding): BoxCollider[] {
+  return footprintBoxes(b.o as Pt[], 1).map((q, k) => ({ kind: 'box', id: `sb-${b.id}-${k}`, tag: 'building', x: q.x, z: q.z, w: q.w, d: q.d, rot: q.rot, y0: b.y - BUILDING_FOUNDATION, h: b.h + BUILDING_FOUNDATION }));
 }
