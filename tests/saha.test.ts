@@ -7,6 +7,9 @@ import { fieldHeight, groundAt } from '../src/maps/terrain';
 import { buildRoadNetGraph, findRoadNetRoute, turnAllowed } from '../src/nav/roadNet';
 import { mapColliders, type MapData } from '../src/maps/types';
 import { footprintBoxes, type Pt } from '../src/world/footprint';
+import { drivePath, startState } from '../src/sim/autodrive';
+import { getVehicle } from '../src/vehicle/spec';
+import type { ObstacleDef } from '../src/maps/types';
 import { obbOverlap, findVehicleCollision, type Collider } from '../src/core/geometry';
 import { evaluateParking } from '../src/mission/parking';
 import { centerOf, createVehicleState, obbOf } from '../src/vehicle/physics';
@@ -153,6 +156,30 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
       }
     }
   });
+  it('실주행(헤드리스, 게임과 같은 물리·지형·건물 충돌체): 괴정역 → 하단(약 2.9km)·다대포(약 7.8km) 공영주차장까지 막힘 없이 도착', async () => {
+    const g = buildRoadNetGraph(map.roadNet!);
+    const spec = getVehicle('sedan');
+    for (const id of ['saha-hadan-p', 'saha-dadae-p']) {
+      const slot = map.slots.find((q) => q.id === id)!;
+      const r = findRoadNetRoute(g, map.spawn, slot, 120)!;
+      const pts = r.points.map((p) => [p.x, p.z] as [number, number]);
+      const keys = new Set<string>();
+      for (const p of pts) for (const k of tilesWithin(base.manifest, p[0], p[1], 60)) keys.add(k);
+      const obs: ObstacleDef[] = [...map.obstacles];
+      for (const k of keys) {
+        if (!base.manifest.tiles.includes(k)) continue;
+        const t = await src.json<SahaTile>(`tiles/${k}.json`);
+        for (const b of t.buildings) footprintBoxes(b.o as Pt[], 1).forEach((q, i) => obs.push({ id: `sb-${b.id}-${i}`, tag: 'building', shape: 'box', x: q.x, z: q.z, w: q.w, d: q.d, rot: q.rot, y0: b.y - 0.5, h: b.h + 0.5 }));
+      }
+      const m2 = { ...map, obstacles: obs };
+      const car = startState(m2, spec, map.spawn.x, map.spawn.z, map.spawn.heading, map.spawn.y);
+      const res = drivePath(m2, spec, car, pts.slice(1, -1), { speed: 11, lookahead: 6, maxTime: 1500, goalRadius: 6, continueOnBlock: true, cornerSlow: true });
+      expect(res.reached, id).toBe(true);
+      expect(res.blocks, id).toEqual([]);
+      expect(res.dist).toBeGreaterThan(r.length * 0.9);
+      expect(res.maxY - res.minY, `${id} 실제 고저차`).toBeGreaterThan(5); // 평면 지도가 아니다
+    }
+  }, 60000);
   it('타일 범위 계산: 반경 안 타일만', () => {
     const k = tilesWithin(base.manifest, 0, 0, 300);
     expect(k).toContain('0_0');

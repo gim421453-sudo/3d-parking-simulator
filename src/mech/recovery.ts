@@ -14,7 +14,7 @@
  * 불변식: 수동복구 진입 시점의 보관 차량 ID 집합이 그대로 유지된다(삭제·중복·새 생성 없음). 팔레트 안치/인출은 정상 입고/출고와 같은
  *         'stored'/'picked' 이벤트를 내 게임의 차량 모델 소유권 처리를 그대로 탄다.
  */
-import { FLOOR_H, SLOTS, SLOT_Z, TIMES, floorLabel, slotIdOf, type MachineState, type StoredCar } from './machine';
+import { FLOOR_H, SLOT_Z, TIMES, floorLabel, slotIdOf, type MachineState, type StoredCar } from './machine';
 
 export type ManualCmd =
   | 'doorOpen'
@@ -324,4 +324,3 @@ export function manualStatus(m: MachineState): { mode: string; door: number; flo
   };
 }
 
-void SLOTS;

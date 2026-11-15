@@ -29,6 +29,8 @@ export interface DriveOptions {
   gain?: number;
   /** 도착 시 차량 높이(층) 조건 */
   goalY?: number;
+  /** v0.6.2 앞 25m 안의 꺾임 각도에 따라 감속(실제 도로망의 급커브·회전 진입). 생략하면 이전 동작(일정 속도) */
+  cornerSlow?: boolean;
 }
 export interface DriveBlock {
   reason: BlockReason;
@@ -109,7 +111,31 @@ export function drivePath(map: MapData, spec: VehicleSpec, car: VehicleState, pa
     err = Math.atan2(Math.sin(err), Math.cos(err));
     const steerCmd = Math.max(-1, Math.min(1, (err * gain) / spec.maxSteer)) * (rev ? -1 : 1);
     const braking = o.brakeWindow && t >= o.brakeWindow[0] && t <= o.brakeWindow[1];
-    const vin = { throttle: !braking && Math.abs(car.v) < o.speed ? 1 : 0, brake: braking ? 1 : Math.abs(car.v) > o.speed * 1.25 ? 0.5 : 0, steerInput: steerCmd };
+    let vt = o.speed;
+    if (o.cornerSlow) {
+      // 앞 25m 경로의 최대 방향 변화(차량 진행 방향 기준) → 목표 속도: 90° 이상이면 3m/s
+      let turn = 0;
+      let acc = 0;
+      let prevH = dirH;
+      let px = cx;
+      let pz = cz;
+      for (let j = idx; j < path.length && acc < 25; j++) {
+        const L = Math.hypot(path[j][0] - px, path[j][1] - pz);
+        if (L < 0.5) continue;
+        const h = Math.atan2(path[j][0] - px, path[j][1] - pz);
+        let d = h - prevH;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        turn = Math.max(turn, Math.abs(Math.atan2(Math.sin(h - dirH), Math.cos(h - dirH))));
+        prevH = h;
+        acc += L;
+        px = path[j][0];
+        pz = path[j][1];
+        void d;
+      }
+      vt = Math.max(3, o.speed * (1 - Math.min(1, turn / (Math.PI / 2))) + 3 * Math.min(1, turn / (Math.PI / 2)));
+      vt = Math.min(o.speed, vt);
+    }
+    const vin = { throttle: !braking && Math.abs(car.v) < vt ? 1 : 0, brake: braking ? 1 : Math.abs(car.v) > vt * 1.25 ? 0.6 : 0, steerInput: steerCmd };
     const n = substepCount(car.v, STEP);
     let stop = false;
     for (let k = 0; k < n; k++) {
