@@ -1,6 +1,6 @@
 # HANDOFF — 3D 주차 시뮬레이터
 
-최종 갱신: v0.6.2-dev (`feature/v062-saha-city-handling`, 아래 v0.6.2 섹션, **Pages 배포됨: `feature/pdc-display-v2` = `5aff29e`, run #16**) · 이전 v0.6.1-dev (`feature/v061-pdc-recovery`, **Pages 배포됨: `feature/pdc-display-v2` = `5644686`, run #15**) · 이전 v0.6.0-dev (`feature/v060-damage-city`, **Pages 배포됨: `feature/pdc-display-v2` = `04b6830`, run #14**) · 이전 v0.5.5-dev (`feature/v055-controls`) · v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
+최종 갱신: v0.6.3-dev (`feature/v063-pdc-saha-visual`, 아래 v0.6.3 섹션, **미배포 — 사용자 승인 대기**) · 이전 v0.6.2-dev (`feature/v062-saha-city-handling`, 아래 v0.6.2 섹션, **Pages 배포됨: `feature/pdc-display-v2` = `5aff29e`, run #16**) · 이전 v0.6.1-dev (`feature/v061-pdc-recovery`, **Pages 배포됨: `feature/pdc-display-v2` = `5644686`, run #15**) · 이전 v0.6.0-dev (`feature/v060-damage-city`, **Pages 배포됨: `feature/pdc-display-v2` = `04b6830`, run #14**) · 이전 v0.5.5-dev (`feature/v055-controls`) · v0.5.4-dev (`feature/v054-map-engine`) · 이전 v0.5.3-dev · 이전 표기 v0.5.0-dev (`feature/pdc-display-v2`) — v0.1.0 은 `claude/compassionate-fermi-i6emhr` 에 보존
 
 브랜치: `claude/compassionate-fermi-i6emhr`(v0.1.0 기준선, 수정 안 함) · `feature/idrive-pdc-ui-phase1`(ChatGPT 작성, 미검증 — 아이디어만 참고, 코드는 재사용하지 않음) · **`feature/pdc-display-v2`(현재 개발)**
 
@@ -21,6 +21,36 @@
 | 10 Unity 준비 | ✅ `npm run export:data` → `export/*.json` (제원·센서·맵·규칙·조명/UI 상태 정의) |
 | 11 테스트 | ✅ 단위 104 / E2E 104 (자세한 내용 `docs/TESTING.md`) |
 
+
+## v0.6.3 진행 상황 (PDC 자동 카메라 회귀 수정 · 사하구 배치 감사 · 장평지하차도 · 건물 PBR 외벽 · 도로 시각 · REA 조사) — 브랜치 `feature/v063-pdc-saha-visual`
+
+상세: `docs/V063.md`, 비교 화면 `docs/v063-pdc-compare.jpg`, REA/모바일 비교 `docs/REA_MOBILE_ANALYSIS.md`. `2082a1e`(v0.6.2 보강)에서 분기. Pages 미배포, 다른 브랜치 병합 안 함. APK/ADB 보류.
+- 한 일
+  - P0 자동 카메라: 경로와 무관한 근접은 카메라를 움직이지 않게 함(relevant), 방향은 접촉 부위(contact)로, 자동 시점끼리 전환에 히스테리시스 적용. 장면 하네스 v0.6.0 52 · v0.6.1 48 → 72/72.
+  - 게임 버그 수정: `nearColliders` 재조회 누락.
+  - 사하구 배치 감사: 생성 건물 6,4xx동(용도지역·밀도 규칙), 추정 도로 폭을 건물선에 맞춤, 바닥 뜸 보정.
+  - 장평지하차도: 지형 홈 제거, 입구 절토·갱문, 천장 5.6m, 실주행 통과.
+  - 건물 외벽 PBR 아틀라스(그리기 호출 증가 없음), 모임지붕·옥상 구조물.
+  - 도로: 연석·맨홀·가로등·신호등·실제 turn:lanes 화살표.
+- 남은 일(사용자)
+  - 배포 승인.
+  - 국토부 GIS건물통합정보 SHP 를 받아 오면 실제 건물로 교체.
+  - REA: PC 에서 설정 백업 후 `npx rea-agents setup` 실행, 대상 앱 패키지명·APK 준비. 실기기 FPS 측정(APK 보류).
+- 남은 일(개발)
+  - 좌/우회전 화살표는 OSM 태그가 없어 그리지 않음.
+  - 보도·횡단 신호 보행등 없음.
+  - 지하차도 실제 종단·폭은 추정.
+  - 괴정동 레거시 맵(geoBuilder)은 이전 외벽 그대로.
+  - 먼 거리 건물 LOD 없음.
+- 알려진 제한
+  - 실제 건물의 일반 도로 침범 21곳(<2m, 추정 폭), 실제 건물끼리 겹침 98쌍(OSM 원본).
+  - 생성 건물은 실제가 아님(회청·창문 없음·설정으로 끔).
+  - 외벽은 유형별 일반 외관.
+- 버그 기록
+  - [자동 카메라가 위험과 반대/무관한 방향] 원인 = 1·2등급 근접이 경로와 무관해도 게이트·즉시 전환 · 수정 = relevant/contact/cameraTop · 재발 방지 = `tests/autoView.test.ts`, `scripts/pdc-scenes.ts`, `e2e-v063`.
+  - [사라진 충돌체를 계속 감지] 원인 = 다른 호출이 공간 인덱스를 먼저 재구성하면 `nearColliders` 가 재조회하지 않음 · 수정 = `spatial.builds` 비교 · 재발 방지 = `e2e-v063`(장면 교체).
+  - [지하차도 위 지형 홈] 원인 = 렌더러가 터널 전 구간 지형 칸 삭제 · 수정 = 데이터 절토 + 갱문 · 재발 방지 = `tests/saha.test.ts` 장평지하차도.
+  - [지하차도 입구 하부 접촉/갱문 앞 edge] 원인 = 20m 격자 보간이 끝점·갱문 앞 지면을 바꿈 · 수정 = 끝점 삼각형 보존·터널 상판 우선 · 재발 방지 = 같은 테스트(실주행).
 
 ## v0.6.2 진행 상황 (부산 사하구 전체 실제 지도 · 핸들링 고도화) — 브랜치 `feature/v062-saha-city-handling`
 
