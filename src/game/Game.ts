@@ -56,6 +56,7 @@ import { ceilingAbove, fieldHeight, groundAt, levelAt } from '../maps/terrain';
 import { gateViewRisk } from '../pdc/viewGate';
 import { pathHitIndex } from '../pdc/guidelines';
 import { RiskRanker, type RiskCandidate } from '../pdc/riskRank';
+import { buildViewLog, viewGateOpens, viewTopOf, type ViewLog } from '../pdc/autoView';
 import { buildTowerVisual, type TowerVisual } from '../maps/towerBuilder';
 import { chooseBeepTarget } from '../sensors/beepPlan';
 import { buildWarnLines } from '../pdc/overlay';
@@ -214,6 +215,8 @@ export class Game {
   /** v0.6.1 장애물별 위험 순위(디버그/테스트: 근거 로그) */
   readonly ranker = new RiskRanker();
   rankOut: RiskCandidate[] = [];
+  /** v0.6.3 자동 카메라 프레임 기록(디버그/E2E 전용 — 일반 HUD 표시 금지) */
+  viewLog: ViewLog | null = null;
   dbgZones: import('../pdc/overlay').ObstacleZone[] = [];
   private gateSteer0 = 0;
   private blockedAcc = 99;
@@ -1339,7 +1342,8 @@ export class Game {
     }
     // v0.6.1: 정지 중에도 핸들을 돌리면(기어 변경 때보다 3° 이상) 조향 경로 기준 위험으로 자동 시점을 허용한다.
     // 접촉 직전·매우 근접(1·2등급)이면 즉시 허용. 기어만 바꾸고 가만히 있으면 그 방향 기본 카메라 유지(이전 규칙).
-    if (!this.viewGate && (Math.abs(this.car.v) > 0.3 || Math.abs(this.car.steer - this.gateSteer0) > 0.05 || (this.rankOut[0]?.cls ?? 9) <= 2)) this.viewGate = true;
+    // v0.6.3: 1·2등급이라도 경로 밖(relevant=false)이면 게이트를 열지 않는다(autoView.viewGateOpens)
+    if (!this.viewGate && viewGateOpens(this.car.v, this.car.steer, this.gateSteer0, this.rankOut)) this.viewGate = true;
     // 자동 3D 시점(측면 장애물) + 인포테인먼트 공유 상태 + 내비게이션
     this.viewOut = this.viewPolicy.update(
       dt,
@@ -1348,6 +1352,7 @@ export class Game {
       this.sensorSnap ? this.sideObservation(this.sensorSnap) : null,
       this.viewGate && this.settings.assistAutoView && autoViewAllowed(caps) && this.assistOut.active && this.settings.sensorEnabled && (this.car.gear === 'R' || this.car.gear === 'D'), // N/P 에서는 자동 시점 전환을 하지 않는다
     );
+    this.viewLog = buildViewLog(this.rankOut, pose, this.car.gear, this.car.steer, this.viewOut);
     const infoSet: InfoSettings = { autoShow: this.settings.infoAutoShow, autoHide: this.settings.infoAutoHide, autoHideSec: this.settings.infoAutoHideSec };
     this.infoOut = this.info.update({ dt, gear: this.car.gear, parkingActive: this.assistOut.active, firstPerson: this.rig.mode === 'driver' }, infoSet);
     this.navState = this.nav.update(dt, { x: pose.x, z: pose.z, y: this.car.y });
@@ -1559,11 +1564,17 @@ export class Game {
   }
 
   /** 차량 주변 충돌체(공간 인덱스 조회 결과). 차량이 조회 중심에서 3m 이상 벗어나거나 충돌체 목록이 바뀌면 다시 조회한다 */
+  private nearBuilds = -1;
   private nearColliders(): Collider[] {
-    const rebuilt = this.spatial.sync(this.colliders);
+    this.spatial.sync(this.colliders);
+    // v0.6.3: 다른 곳(파손 세계의 밀린 물체 조회)이 먼저 인덱스를 다시 만들어도 여기서 다시 조회해야 한다.
+    // 이전에는 sync() 의 반환값만 봐서, 그 프레임에 다른 호출이 재구성을 가져가면 사라진 충돌체를 계속 감지하고 새 충돌체를 놓쳤다
+    // (차가 3m 움직일 때까지 — 벽 파손·사하구 타일 로드와 밀린 물체 이동이 겹칠 때). 재구성 횟수(builds)로 판단한다.
+    const rebuilt = this.spatial.builds !== this.nearBuilds;
     const dx = this.car.x - this.nearCx;
     const dz = this.car.z - this.nearCz;
     if (rebuilt || dx * dx + dz * dz > 9) {
+      this.nearBuilds = this.spatial.builds;
       this.nearCx = this.car.x;
       this.nearCz = this.car.z;
       // 반경 = 재조회 이동 여유(3) + 차체 도달(≈3.5) + 센서/가이드 범위(≈6) + 여유
@@ -1913,9 +1924,8 @@ export class Game {
     );
     const threat = gated.threat;
     const veryClose = gated.veryClose;
-    const t = this.rankOut[0];
-    // v0.6.1: 1순위 위험(장애물 단위) — 이전 그룹 경쟁(threat/veryClose)은 rankOut 이 없을 때만 쓰인다
-    const top = t ? { group: t.group, place: t.place, cls: t.cls, swing: t.swing, id: t.id } : null;
+    // v0.6.1: 1순위 위험(장애물 단위). v0.6.3: 경로와 교차하거나 실제로 접근하는 후보만(autoView.viewTopOf), 방향은 접촉 부위
+    const top = viewTopOf(this.rankOut);
     return { threat, veryClose, pillar: pick((g) => g.pillar), narrow: r.narrow, gap: pick((g) => g.gap), sideBlocked: { ...this.sideBlocked }, top };
   }
 
@@ -1988,6 +1998,18 @@ export class Game {
       this.latch = null;
     }
     this.rig.updateAssistCamera(dt, view, pose, this.spec, frame);
+    if (this.viewLog?.world) {
+      // 선택된 보조 카메라 화면 안에 기록된 장애물이 실제로 들어오는가(높이 0.3~1.3m 중 한 점이라도)
+      const cam = this.rig.assistCamera;
+      cam.updateMatrixWorld();
+      const w = this.viewLog.world;
+      const gy = (pose.y ?? 0);
+      const v3 = new THREE.Vector3();
+      this.viewLog.inView = [0.3, 0.55, 0.9, 1.3].some((h) => {
+        v3.set(w.x, gy + h, w.z).project(cam);
+        return v3.z > -1 && v3.z < 1 && Math.abs(v3.x) <= 1 && Math.abs(v3.y) <= 1;
+      });
+    }
     const switched = this.assistLastCamera !== view;
     this.assistCamAcc += dt;
     // 부하 관리: 보조 카메라는 설정 FPS 로만 다시 렌더링한다 (시점이 바뀌면 즉시)

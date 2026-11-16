@@ -44,6 +44,21 @@ export interface RiskCandidate {
   hits: number;
   /** 대표 히트점(월드) */
   point: { x: number; z: number };
+  /** 대표 히트점(현재 차체 로컬: +x 왼쪽, +z 앞) — 디버그 로그용 */
+  local: { x: number; z: number };
+  /**
+   * v0.6.3: 예상 경로로 진행할 때 **내 차체의 어느 부분**이 처음 닿는가(장애물 위치가 아니라 접촉 부위).
+   * 앞/뒤 = 범퍼 면, left/right = 옆면 가운데, frontLeft 등 = 옆면 앞/뒤 끝(모서리 쪽). 경로 교차가 없으면 null.
+   * 카메라는 장애물이 "어디 있나"보다 "차 어디가 닿나"로 골라야 한다(큰 충돌체의 가장 가까운 점이 측면이어도 실제 접촉은 뒤범퍼일 수 있음).
+   */
+  contact: Place | null;
+  /**
+   * v0.6.3: 자동 카메라를 움직일 자격. 현재 기어·조향의 예상 경로와 교차하거나(pathDist) 실제로 빠르게 접근(TTC)할 때만 true.
+   * 경로 밖에서 나란히 가까운 물체(좁은 칸 옆 차, 벗어나는 중인 앞벽)는 경고음/색으로만 알리고 카메라는 바꾸지 않는다.
+   */
+  relevant: boolean;
+  /** 예상 경로를 따라가며 가장 가까워지는 간격(경로 교차 전까지). 디버그·카메라 우선순위용 */
+  passGap: number | null;
   why: string;
 }
 
@@ -68,6 +83,32 @@ const placeOf = (lx: number, lz: number, hw: number, hl: number): Place => {
 };
 const groupOf = (p: Place): SensorGroup => (p === 'front' ? 'front' : p === 'rear' ? 'rear' : p === 'left' || p === 'frontLeft' || p === 'rearLeft' ? 'left' : 'right');
 
+/** 진행 방향 끝(범퍼)이 아니라 측면 바깥쪽 모서리 부근에서 닿으면 스윙 (q = 미래 차체 로컬 점) */
+function swingAt(q: { x: number; z: number }, dir: 1 | -1, body: { hw: number; hl: number }): boolean {
+  const lead = dir > 0 ? q.z > body.hl * 0.55 : q.z < -body.hl * 0.55;
+  const trail = dir > 0 ? q.z < -body.hl * 0.55 : q.z > body.hl * 0.55;
+  return (Math.abs(q.x) > body.hw * 0.6 && !lead) || trail;
+}
+
+/**
+ * 접촉 부위(v0.6.3): 차폭 안에 든 점이 있으면 범퍼 면, 차체 길이 안에 든 점이 있으면 옆면(앞/뒤 끝 쪽이면 모서리 표기),
+ * 둘 다 아니면(모서리 바깥 대각선) 더 많이 벗어난 축으로 정한다.
+ * 한 점만 보고 정하면 직진 후진 벽이 모서리 여유 구간 점 때문에 '옆면'으로 잘못 분류된다(하네스 rear-wall 회귀).
+ */
+function contactOf(inside: readonly { x: number; z: number }[], q: { x: number; z: number }, body: { hw: number; hl: number }): Place {
+  const sideName = (p: { x: number; z: number }): Place => {
+    const sd = p.x > 0 ? 'Left' : 'Right';
+    return p.z > body.hl * 0.55 ? (`front${sd}` as Place) : p.z < -body.hl * 0.55 ? (`rear${sd}` as Place) : sd === 'Left' ? 'left' : 'right';
+  };
+  const endPt = inside.find((p) => Math.abs(p.x) <= body.hw);
+  if (endPt) return endPt.z > 0 ? 'front' : 'rear';
+  const sidePt = inside.find((p) => Math.abs(p.z) <= body.hl);
+  if (sidePt) return sideName(sidePt);
+  if (Math.abs(q.x) <= body.hw) return q.z > 0 ? 'front' : 'rear';
+  if (Math.abs(q.z) <= body.hl) return sideName(q);
+  return Math.abs(q.z) - body.hl >= Math.abs(q.x) - body.hw ? (q.z > 0 ? 'front' : 'rear') : sideName(q);
+}
+
 /** 현재 조향으로 dir 방향 s 만큼 진행한 미래 차체(초기 차량 로컬 좌표) */
 export function futureBody(spec: VehicleSpec, steer: number, dir: 1 | -1, s: number): { x: number; z: number; rot: number } {
   const zRear = -spec.length / 2 + spec.rearOverhang;
@@ -82,10 +123,12 @@ export function futureBody(spec: VehicleSpec, steer: number, dir: 1 | -1, s: num
 export class RiskRanker {
   private prev = new Map<string, number>();
   private closing = new Map<string, number>();
+  private nearPassIds = new Set<string>();
 
   reset(): void {
     this.prev.clear();
     this.closing.clear();
+    this.nearPassIds.clear();
   }
 
   update(dt: number, i: RankInput): RiskCandidate[] {
@@ -123,22 +166,40 @@ export class RiskRanker {
       // 스윕: 현재 조향으로 진행할 때 이 장애물의 히트점이 미래 차체 안(+여유)에 들어오는 첫 진행 거리
       let pathDist: number | null = null;
       let swing = false;
+      let contact: Place | null = null;
+      /** 예상 경로를 따라가는 동안 가장 가까워지는 간격(스치듯 지나감 판정) */
+      let passGap = Infinity;
+      let passQ: { x: number; z: number } | null = null;
       if (dir !== 0) {
         for (let s = SWEEP_STEP; s <= RANK_PATH + 1e-9 && pathDist === null; s += SWEEP_STEP) {
           const fb = futureBody(spec, i.steer, dir, s);
+          const inside: { x: number; z: number }[] = [];
           for (const p of e.pts) {
             const q = worldToLocal(fb.x, fb.z, fb.rot, p.lx, p.lz);
-            if (Math.abs(q.x) <= body.hw + SWEEP_MARGIN && Math.abs(q.z) <= body.hl + SWEEP_MARGIN) {
-              pathDist = s;
-              // 진행 방향 끝(범퍼)이 아니라 측면 바깥쪽 모서리 부근에서 닿으면 스윙
-              const lead = dir > 0 ? q.z > body.hl * 0.55 : q.z < -body.hl * 0.55;
-              const trail = dir > 0 ? q.z < -body.hl * 0.55 : q.z > body.hl * 0.55;
-              swing = (Math.abs(q.x) > body.hw * 0.6 && !lead) || trail;
-              break;
-            }
+            if (Math.abs(q.x) <= body.hw + SWEEP_MARGIN && Math.abs(q.z) <= body.hl + SWEEP_MARGIN) inside.push(q);
+            const d = Math.hypot(Math.max(Math.abs(q.x) - body.hw, 0), Math.max(Math.abs(q.z) - body.hl, 0));
+            if (d < passGap) [passGap, passQ] = [d, q];
           }
+          if (!inside.length) continue;
+          pathDist = s;
+          const q = inside[0];
+          swing = swingAt(q, dir, body);
+          contact = contactOf(inside, q, body);
         }
       }
+      // v0.6.3: 경로 교차(접촉 여유 0.08m)는 아니지만 지금보다 가까이(≤ 0.3m) 스치며 지나가면 카메라 자격(near-pass).
+      // 후진 중 앞 모서리가 기둥 옆 0.2m 로 스윙하는 경우를 놓쳤다(브라우저 e2e-v063 swing-front).
+      let nearPass = false;
+      // 히스테리시스: 진입은 지금보다 0.02m 이상 가까워질 때, 유지는 멀어지기 시작(지금 + 0.01m 초과)할 때까지.
+      // 경계값에서 매 프레임 들락거리면 카메라가 깜빡였다(e2e-v063 swing-front-L, 예상 0.22 = 지금 0.24 − 0.02).
+      const was = this.nearPassIds.has(id);
+      if (pathDist === null && passQ && passGap <= RANK_VERY_CLOSE && passGap < best.gap + (was ? 0.01 : -0.02)) {
+        nearPass = true;
+        swing = swingAt(passQ, dir as 1 | -1, body);
+        contact = contactOf([], passQ, body);
+      }
+      if (nearPass) this.nearPassIds.add(id);
+      else this.nearPassIds.delete(id);
       const place = placeOf(best.lx, best.lz, body.hw, body.hl);
       const g = best.gap;
       let cls: RiskCandidate['cls'];
@@ -149,13 +210,33 @@ export class RiskRanker {
       else if (pathDist !== null && swing) [cls, why] = [4, '조향 시 차체 스윙 교차'];
       else if (g <= RANK_NEAR || (ttc !== null && ttc < 2.5)) [cls, why] = [5, ttc !== null && g > RANK_NEAR ? '빠르게 접근' : '근접'];
       else [cls, why] = [6, '먼 장애물'];
-      out.push({ id, tag: e.tag, cls, gap: g, place, group: groupOf(place), pathDist, swing, closing: cl, ttc, hits: e.pts.length, point: { x: best.x, z: best.z }, why });
+      const relevant = pathDist !== null || nearPass || (ttc !== null && ttc < 2.5);
+      if (nearPass && cls > 4) [cls, why] = [4, '스치듯 지나감(예상 간격 매우 좁음)'];
+      if (!relevant && cls <= 2) why += ' (경로 밖 — 카메라 유지)';
+      out.push({ id, tag: e.tag, cls, gap: g, place, group: groupOf(place), pathDist, swing, closing: cl, ttc, hits: e.pts.length, point: { x: best.x, z: best.z }, local: { x: best.lx, z: best.lz }, contact, relevant, passGap: Number.isFinite(passGap) ? passGap : null, why });
     }
     for (const id of [...this.prev.keys()]) if (!seen.has(id)) {
       this.prev.delete(id);
       this.closing.delete(id);
+      this.nearPassIds.delete(id);
     }
     out.sort((a, b) => a.cls - b.cls || a.gap - b.gap || (a.pathDist ?? 99) - (b.pathDist ?? 99));
     return out;
   }
+}
+
+/**
+ * 카메라 선택에 쓸 1순위(v0.6.3): 자동 카메라 자격(relevant)이 있는 후보 중
+ *  1) 경로 교차(실제로 닿음) — 진행 거리가 짧은 순  2) 스치듯 지나감 — 예상 간격이 좁은 순  3) 빠른 접근(TTC)
+ * 단순 간격 순(등급 순)으로 고르면, 정차 중 좌회전 때 실제로 부딪칠 왼쪽 앞 기둥보다 꼬리가 스칠 오른쪽 차를 먼저 보여 줬다.
+ */
+export function cameraTop(list: readonly RiskCandidate[]): RiskCandidate | null {
+  let best: RiskCandidate | null = null;
+  let bk = Infinity;
+  for (const c of list) {
+    if (!c.relevant) continue;
+    const k = c.pathDist !== null ? c.pathDist : c.passGap !== null && c.passGap <= RANK_VERY_CLOSE ? 10 + c.passGap : 20 + (c.ttc ?? 9);
+    if (k < bk) [bk, best] = [k, c];
+  }
+  return best;
 }

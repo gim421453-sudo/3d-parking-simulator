@@ -39,7 +39,15 @@ export interface ViewRisk {
    * v0.6.1 장애물별 위험 순위의 1순위(pdc/riskRank.ts). 있으면 이것으로 시점을 고른다(그룹 경쟁 방식 대신).
    * cls 1 접촉 직전 · 2 매우 근접 · 3 경로 교차 · 4 스윙 교차 · 5 근접 · 6 먼 장애물
    */
-  top?: { group: SensorGroup; place: string; cls: number; swing: boolean; id: string } | null;
+  top?: {
+    group: SensorGroup;
+    place: string;
+    cls: number;
+    swing: boolean;
+    id: string;
+    /** v0.6.3: 내 차체에서 처음 닿는 부위(riskRank.contact). 있으면 장애물 위치(place)보다 우선해 카메라 방향을 정한다 */
+    contact?: string | null;
+  } | null;
 }
 
 export interface SideObservation {
@@ -76,6 +84,9 @@ export interface ViewDecision {
  *  - 수동 카메라(manual != null)가 항상 우선하며 자동 전환은 멈춘다
  *  - 최소 유지/쿨다운/확인 지연/히스테리시스로 플리커 방지
  */
+const reasonOf = (t: ViewRisk['top'] | undefined, dflt: string): string =>
+  t ? `위험 ${t.cls}등급 ${t.id} (위치 ${t.place}${t.contact ? `, 접촉 ${t.contact}` : ''}${t.swing ? ', 스윙' : ''})` : dflt;
+
 export class ViewPolicy {
   private cur: AssistView | null = null; // 자동 시점 (null = base)
   /** 자동 시점을 고를 때의 기준 카메라(기어 방향) */
@@ -119,12 +130,19 @@ export class ViewPolicy {
     // 측면 위협 → 측면뷰, 진행 방향 매우 근접(risk.ts veryClose) → 집중 탑뷰. 순위는 1~4등급의 "더 급한" 경우에만 우선한다.
     if (t.cls >= 5) return this.wantGroups(r, base);
     const topOf = (d: 'front' | 'rear'): AssistView => (d === 'front' ? 'topFront' : 'topRear');
-    if (t.group === dir) return t.cls <= 2 ? topOf(dir) : this.wantGroups(r, base);
-    if (t.group === 'front' || t.group === 'rear') return t.cls === 1 ? topOf(t.group) : null;
-    const corner = t.place.startsWith('front') ? 'front' : t.place.startsWith('rear') ? 'rear' : null;
-    if (t.swing && corner && corner !== dir) return topOf(corner);
-    const side = t.group as 'left' | 'right';
-    if (r.sideBlocked[side]) return topOf(corner ?? dir);
+    // v0.6.3: 방향은 "내 차 어디가 닿는가"(contact)로 정한다. 경로 교차가 없으면(1·2등급 근접) 장애물 위치(place)
+    const at = t.contact ?? t.place;
+    const end: 'front' | 'rear' | null = at.startsWith('front') ? 'front' : at.startsWith('rear') ? 'rear' : null;
+    const side: 'left' | 'right' | null = /left/i.test(at) ? 'left' : /right/i.test(at) ? 'right' : null;
+    if (!side) {
+      // 범퍼 면: 진행 방향이면 기본 카메라(매우 가까우면 집중 탑뷰), 반대 방향은 접촉 직전만
+      const e = end ?? dir;
+      if (e === dir) return t.cls <= 2 ? topOf(dir) : this.wantGroups(r, base);
+      return t.cls === 1 ? topOf(e) : null;
+    }
+    // 옆면: 진행 반대쪽 끝의 스윙이면 그 끝 집중 탑뷰, 측면 시점이 가려지면 그 모서리 집중 탑뷰, 아니면 그 쪽 측면뷰
+    if (t.swing && end && end !== dir) return topOf(end);
+    if (r.sideBlocked[side]) return topOf(end ?? dir);
     return side;
   }
 
@@ -197,7 +215,7 @@ export class ViewPolicy {
         this.lastSwitch = this.t;
         this.switches++;
         this.relT = 0;
-        return { view: this.cur, auto: true, reason: obs.risk?.top ? `위험 ${obs.risk.top.cls}등급 (${obs.risk.top.place})` : '측면 장애물 접근' };
+        return { view: this.cur, auto: true, reason: reasonOf(obs.risk?.top, '측면 장애물 접근') };
       }
       return { view: base, auto: false, reason: '' };
     }
@@ -206,13 +224,19 @@ export class ViewPolicy {
     const stillWant = this.want(obs, this.cfg.exitRank, base); // 낮은 임계(히스테리시스)
     if (stillWant) {
       this.relT = 0;
-      if (stillWant !== this.cur && held && cool && enterWant && enterWant !== this.cur) {
+      // v0.6.3: 자동 시점끼리 바꿀 때는 최소 유지·쿨다운을 지킨다(1·2등급이라도). 접촉 부위가 경계에서 흔들리면
+      // 측면뷰↔집중 탑뷰가 매 프레임 진동했다(하네스 rr-wall). 접촉 직전(1등급)만 예외.
+      const swHeld = this.t - this.since >= this.cfg.minHoldSec || obs.risk?.top?.cls === 1;
+      const swCool = this.t - this.lastSwitch >= this.cfg.cooldownSec || obs.risk?.top?.cls === 1;
+      if (stillWant !== this.cur && swHeld && swCool && enterWant && enterWant !== this.cur) {
         this.cur = enterWant;
+        this.curBase = base;
         this.since = this.t;
         this.lastSwitch = this.t;
         this.switches++;
+        return { view: this.cur, auto: true, reason: `전환: ${reasonOf(obs.risk?.top, '측면 장애물 접근')}` };
       }
-      return { view: this.cur, auto: true, reason: '측면 장애물 접근' };
+      return { view: this.cur, auto: true, reason: stillWant === this.cur ? `유지: ${reasonOf(obs.risk?.top, '측면 장애물 접근')}` : `유지(최소 유지/쿨다운 대기 → ${stillWant})` };
     }
     this.relT += dt;
     // 집중 탑뷰는 충돌 가능성이 높을 때만 쓰는 보조 화면: 위험이 사라지면 더 빨리(0.8초) 기본 전/후방 카메라로 복귀
