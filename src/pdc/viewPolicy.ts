@@ -137,6 +137,10 @@ export class ViewPolicy {
     if (!side) {
       // 범퍼 면: 진행 방향이면 기본 카메라(매우 가까우면 집중 탑뷰), 반대 방향은 접촉 직전만
       const e = end ?? dir;
+      // 차폭 바깥(모서리 위치) 장애물에 조향 때문에 범퍼 면이 닿는 경로 교차(3등급): 기본 카메라만 유지하면
+      // 장애물이 화면 가장자리에 걸린다 → 그 끝 집중 탑뷰(범퍼+모서리). v0.6.1 의 정차 조향 자동 시점(e2e-v061)을 유지.
+      // 정면 벽처럼 차폭 안 장애물은 place 가 front/rear 라 해당 없음.
+      if (e === dir && t.cls === 3 && t.place !== dir && t.place.startsWith(dir)) return topOf(dir);
       if (e === dir) return t.cls <= 2 ? topOf(dir) : this.wantGroups(r, base);
       return t.cls === 1 ? topOf(e) : null;
     }

@@ -91,6 +91,23 @@ describe('원인 단위 검사', () => {
       expect(r.finalView).toBe(side.toLowerCase());
     }
   });
+  it('차폭 바깥 기둥(위치 앞 왼쪽)에 조향으로 앞범퍼가 닿는 경로 교차(D, 3등급): 기본 전방 카메라에 머물지 않고 전방 집중 탑뷰 — 정면 벽은 그대로', () => {
+    // 실제 게임(lot pil-1, e2e-v061): 침투 점이 앞범퍼 왼쪽 절반이라 접촉은 front, 위치는 frontLeft
+    const mk = (place: string): polM.SideObservation => ({
+      level: { front: 'none', rear: 'none', left: 'none', right: 'none' },
+      hits: { front: 0, rear: 0, left: 0, right: 0 },
+      risk: { threat: { front: false, rear: false, left: false, right: false }, veryClose: { front: false, rear: false, left: false, right: false }, pillar: { front: false, rear: false, left: false, right: false }, narrow: false, sideBlocked: { left: false, right: false }, top: { group: place === 'front' ? 'front' : 'left', place, cls: 3, swing: false, id: 'p', contact: 'front' } },
+    });
+    const run = (place: string): string => {
+      const p = new polM.ViewPolicy();
+      let v = '';
+      for (let k = 0; k < 40; k++) v = p.update(0.05, 'front', null, mk(place), true).view;
+      return v;
+    };
+    expect(run('frontLeft')).toBe('topFront');
+    expect(run('frontRight')).toBe('topFront');
+    expect(run('front')).toBe('front');
+  });
   it('자동 시점끼리 전환은 최소 유지 시간을 지킨다(2등급 접촉 부위가 경계에서 흔들려도 진동 없음)', () => {
     const p = new polM.ViewPolicy();
     const mk = (contact: string): polM.SideObservation => ({
