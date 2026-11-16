@@ -41,7 +41,7 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
     expect(inSaha(base.manifest, -1988, 6103)).toBe(true);
     expect(inSaha(base.manifest, 3000, 9000)).toBe(false);
   });
-  it('출처 계층 분리: OSM(ODbL)과 Copernicus DEM 이 따로 기록되고 생성 건물은 0', () => {
+  it('출처 계층 분리: OSM(ODbL)과 Copernicus DEM 이 따로 기록되고 생성 건물 수는 따로 보고', () => {
     const names = base.manifest.sources.map((s) => s.license);
     expect(names.some((l) => l.includes('ODbL'))).toBe(true);
     expect(names.some((l) => l.includes('Copernicus'))).toBe(true);
@@ -59,11 +59,12 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
         gen++;
         expect(b.hs).toBe('gen');
         expect(b.k).toBe('gen');
+        expect(['house', 'villa', 'shop', 'factory', 'warehouse']).toContain((b as { gk?: string }).gk);
         for (const q of footprintBoxes(b.o as Pt[], 1))
           expect(real.some((r) => obbOverlap({ x: q.x, z: q.z, rot: q.rot, hw: q.w / 2 - 0.3, hl: q.d / 2 - 0.3 }, { x: r.x, z: r.z, rot: r.rot, hw: r.w / 2 - 0.3, hl: r.d / 2 - 0.3 })), b.id).toBe(false);
         for (const [x, z] of b.o)
           for (const r of t.roads) {
-            if (r.tn || r.c >= 8) continue;
+            if (r.tn) continue; // v0.6.3: 서비스 도로(골목·진입로)도 침범하지 않는다
             for (let i = 1; i < r.p.length; i++) {
               const [ax, az] = r.p[i - 1];
               const [bx, bz] = r.p[i];
@@ -75,6 +76,35 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
       }
     }
     expect(gen).toBeGreaterThan(0);
+  });
+  it('v0.6.3 배치 감사(전체 데이터): 생성 건물은 겹침·도로/교차로 침범·보호 구역·바다·급경사 0, 실제 건물은 보존하고 일반 도로 침범은 추정 폭 맞춤 후 소수·2m 미만', () => {
+    type Audit = {
+      buildingOverlap: { genReal: number; genGen: number; realReal: number };
+      roadOverlap: { gen: number; realMain: number; realMainDepth: { ge2: number } };
+      roadWidthFit: { roads: number };
+      junction: { gen: number };
+      protectedArea: { genInside: number; genSea: number };
+      steepFootprint: { gen: number };
+      generatedKinds: Record<string, number>;
+      generatedMountain: { gen100: number };
+    };
+    const q = base.manifest.quality as { audit: Audit; buildingsGenerated: number; buildingsKept: number };
+    const a = q.audit;
+    expect(a.buildingOverlap.genReal).toBe(0);
+    expect(a.buildingOverlap.genGen).toBe(0);
+    expect(a.roadOverlap.gen).toBe(0);
+    expect(a.junction.gen).toBe(0);
+    expect(a.protectedArea.genInside).toBe(0);
+    expect(a.protectedArea.genSea).toBe(0);
+    expect(a.steepFootprint.gen).toBe(0);
+    // 실제 건물이 일반 도로 띠를 침범하는 곳: 추정 폭을 건물선에 맞춘 뒤 30곳 이하, 2m 이상 깊은 침범 0 (수정 전 136곳)
+    expect(a.roadWidthFit.roads).toBeGreaterThan(0);
+    expect(a.roadOverlap.realMain).toBeLessThanOrEqual(30);
+    expect(a.roadOverlap.realMainDepth.ge2).toBe(0);
+    // 생성 건물을 무조건 늘리지 않는다: 실제 건물 수의 1.5배 이하, 해발 100m 위는 소수
+    expect(q.buildingsGenerated).toBeLessThan(q.buildingsKept * 1.5);
+    expect(a.generatedMountain.gen100).toBeLessThan(100);
+    expect(Object.keys(a.generatedKinds).sort()).toEqual(expect.arrayContaining(['factory', 'house', 'villa', 'warehouse']));
   });
   it('지형: 높이장이 경계 전체를 덮고, 기계식 시설 자리는 y=0, 해수면은 음수 기준고', () => {
     const f = base.field;

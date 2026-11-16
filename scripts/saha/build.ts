@@ -128,6 +128,15 @@ const segDist = (x: number, z: number, a: P, b: P): number => {
   const u = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / l2)) : 0;
   return Math.hypot(x - (a[0] + dx * u), z - (a[1] + dz * u));
 };
+const crossSeg = (a: P, b: P, c: P, d: P): boolean => {
+  const o = (p: P, q: P, r: P): number => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+};
+/** 두 다각형이 겹치는가(변 교차 또는 포함) */
+const polyOverlap = (A: P[], B: P[]): boolean => {
+  for (let i = 0; i < A.length; i++) for (let j = 0; j < B.length; j++) if (crossSeg(A[i], A[(i + 1) % A.length], B[j], B[(j + 1) % B.length])) return true;
+  return inRing(B, A[0][0], A[0][1]) || inRing(A, B[0][0], B[0][1]);
+};
 function tidy(pts: P[]): P[] {
   const out: P[] = [];
   for (const p of pts) if (!out.length || Math.hypot(p[0] - out[out.length - 1][0], p[1] - out[out.length - 1][1]) > 0.25) out.push(p);
@@ -375,7 +384,7 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     bwd: number;
     lanesSrc: 'osm' | 'est';
     w: number;
-    wSrc: 'osm' | 'lanes' | 'est';
+    wSrc: 'osm' | 'lanes' | 'est' | 'fit';
     turn?: string;
     turnF?: string;
     turnB?: string;
@@ -630,6 +639,28 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     base: number;
   }
   const blds: BldOut[] = [];
+  /**
+   * v0.6.3: 건물 바닥 = 외곽선을 2m 간격으로 따라간 지면의 최저(이전: 꼭짓점 최저). 지형 삼각형이 변 중간에서 꺾여 내려가면
+   * 경사지에서 벽 밑이 떠 보였다. 감사(quality.audit.floating)에 이 보정으로 내려간 건물 수·최대량을 남긴다.
+   */
+  const lowered = { n: 0, max: 0 };
+  const outlineMin = (ring: P[]): number => {
+    let mv = Infinity;
+    let mVert = Infinity;
+    for (let k = 0; k < ring.length; k++) {
+      const a = ring[k];
+      const b = ring[(k + 1) % ring.length];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const n = Math.max(1, Math.ceil(L / 2));
+      mVert = Math.min(mVert, fieldAt(a[0], a[1]));
+      for (let q = 0; q < n; q++) mv = Math.min(mv, fieldAt(a[0] + ((b[0] - a[0]) * q) / n, a[1] + ((b[1] - a[1]) * q) / n));
+    }
+    if (mVert - mv > 0.05) {
+      lowered.n++;
+      lowered.max = Math.max(lowered.max, mVert - mv);
+    }
+    return mv;
+  };
   const bst = { found: 0, outside: 0, tiny: 0, withLevels: 0, withHeight: 0, holes: 0, mpRels: 0, openRings: 0 };
   const EST_LV: Record<string, number> = { apartments: 15, house: 2, detached: 2, residential: 4, school: 4, university: 5, commercial: 5, retail: 2, industrial: 2, warehouse: 2, church: 3, kindergarten: 2, hospital: 6, office: 8, public: 4, hotel: 10, garage: 1, shed: 1, roof: 1 };
   const pushB = (id: string, outerRefs: string[], innerRefs: string[][], t: Record<string, string>): void => {
@@ -664,7 +695,7 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
       h = (EST_LV[t.building] ?? 3) * 3.0 + 1.0;
       hSrc = 'est';
     }
-    const base = Math.min(...outer.map((p) => fieldAt(p[0], p[1])));
+    const base = outlineMin(outer);
     blds.push({ id, name: t.name, kind: t.building ?? 'yes', outer: outer.map(([x, z]) => [r1(x), r1(z)]), holes: holes.map((r) => r.map(([x, z]) => [r1(x), r1(z)] as P)), h: r1(h), levels: lvTag, hSrc, base: r2(base) });
   };
   for (const w of ways.values()) {
@@ -702,6 +733,62 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     }
     seen.set(k, b);
     uniq.push(b);
+  }
+
+  // ---------------------------------------------------------------- 6b. 추정 도로 폭을 실제 건물선에 맞춤(v0.6.3)
+  // 감사: 실제 건물이 일반 도로 띠를 0.5m 이상 침범한 136건이 모두 '추정 폭' 구간이었다. 실제 건물 외곽은 보존하고,
+  // 추정 폭(차로 수 × 3.2m 등)만 양옆 실제 건물까지의 거리에 맞춰 줄인다(최소 차로당 2.75m). OSM width 태그가 있는 도로는 그대로.
+  const fitSt = { roads: 0, maxCut: 0 };
+  {
+    const EG = 40;
+    const egrid = new Map<number, [P, P][]>();
+    for (const b of uniq)
+      for (let k = 0; k < b.outer.length; k++) {
+        const a = b.outer[k];
+        const c = b.outer[(k + 1) % b.outer.length];
+        for (let i = Math.floor(Math.min(a[0], c[0]) / EG); i <= Math.floor(Math.max(a[0], c[0]) / EG); i++)
+          for (let j = Math.floor(Math.min(a[1], c[1]) / EG); j <= Math.floor(Math.max(a[1], c[1]) / EG); j++) {
+            const key = (i + 20000) * 40000 + (j + 20000);
+            const l = egrid.get(key);
+            if (l) l.push([a, c]);
+            else egrid.set(key, [[a, c]]);
+          }
+      }
+    for (const r of roads) {
+      if (r.wSrc === 'osm' || r.tunnel || r.bridge || r.cls >= 8) continue;
+      let minClear = Infinity;
+      for (let q = 1; q < r.pts.length; q++) {
+        const a = r.pts[q - 1];
+        const b = r.pts[q];
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const n = Math.max(1, Math.ceil(L / 2));
+        for (let t = 0; t <= n; t++) {
+          const x = a[0] + ((b[0] - a[0]) * t) / n;
+          const z = a[1] + ((b[1] - a[1]) * t) / n;
+          const i0 = Math.floor(x / EG);
+          const j0 = Math.floor(z / EG);
+          for (let i = i0 - 1; i <= i0 + 1; i++)
+            for (let j = j0 - 1; j <= j0 + 1; j++)
+              for (const [ea, eb] of egrid.get((i + 20000) * 40000 + (j + 20000)) ?? []) {
+                const d = segDist(x, z, ea, eb);
+                // 건물이 도로 중심선 위에 있으면(데이터 충돌) 폭으로 해결할 수 없어 제외 — 감사에 따로 남는다
+                if (d > 0.6) minClear = Math.min(minClear, d);
+              }
+        }
+      }
+      if (minClear < r.w / 2) {
+        // 최소 폭: 차로 수가 OSM 태그면 차로당 2.75m, 추정 차로의 소로(unclassified 이하)는 한 차로 골목 3.0m 까지
+        const floor = r.lanesSrc === 'est' && r.cls >= 5 ? 3.0 : r.lanes * 2.75;
+        const nw = Math.max(floor, 2 * (minClear - 0.3));
+        if (nw < r.w - 0.05) {
+          fitSt.roads++;
+          fitSt.maxCut = Math.max(fitSt.maxCut, r.w - nw);
+          r.w = r1(nw);
+          r.wSrc = 'fit';
+        }
+      }
+    }
+    console.log(`추정 도로 폭을 실제 건물선에 맞춤: ${fitSt.roads}개 (최대 ${fitSt.maxCut.toFixed(1)}m 줄임)`);
   }
 
   // ---------------------------------------------------------------- 7. 주차장 면
@@ -744,16 +831,63 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
   const NOFILL = (t: Record<string, string>): boolean =>
     ['school', 'university', 'college', 'kindergarten', 'hospital', 'place_of_worship', 'parking', 'fuel', 'marketplace'].includes(t.amenity ?? '') ||
     !!t.leisure ||
-    ['industrial', 'military', 'construction', 'railway', 'cemetery', 'religious', 'recreation_ground', 'grass', 'forest', 'farmland', 'meadow', 'brownfield'].includes(t.landuse ?? '') ||
+    ['military', 'construction', 'railway', 'cemetery', 'religious', 'recreation_ground', 'grass', 'forest', 'farmland', 'meadow', 'brownfield', 'port'].includes(t.landuse ?? '') ||
     !!t.natural || t.waterway === 'riverbank';
   let noFillPolys = 0;
+  const protectedPolys: { ring: P[]; kind: string }[] = [];
   for (const w of ways.values()) {
     if (!NOFILL(w.tags) || w.refs[0] !== w.refs[w.refs.length - 1] || w.tags.highway || w.tags.building) continue;
     const ring = ringPts(w.refs.slice(0, -1));
     if (ring.length < 3 || Math.abs(area(ring)) > 2e6) continue;
     rasterOcc(ring, 0);
     noFillPolys++;
+    protectedPolys.push({ ring, kind: w.tags.amenity ?? (w.tags.leisure ? `leisure:${w.tags.leisure}` : w.tags.landuse ? `landuse:${w.tags.landuse}` : w.tags.natural ? `natural:${w.tags.natural}` : 'water') });
   }
+  // ---- v0.6.3 용도지역(OSM landuse): 1 주거 · 2 상업/판매 · 3 공업 — 생성 건물의 종류·크기를 정한다
+  const ZC = 8;
+  const zone = new Map<number, number>();
+  const zoneCode = (t: Record<string, string>): number => (t.landuse === 'residential' ? 1 : t.landuse === 'commercial' || t.landuse === 'retail' ? 2 : t.landuse === 'industrial' ? 3 : 0);
+  const rasterZone = (ring: P[], code: number): void => {
+    const xs = ring.map((p) => p[0]);
+    const zs = ring.map((p) => p[1]);
+    for (let i = Math.floor(Math.min(...xs) / ZC); i <= Math.floor(Math.max(...xs) / ZC); i++)
+      for (let j = Math.floor(Math.min(...zs) / ZC); j <= Math.floor(Math.max(...zs) / ZC); j++)
+        if (inRing(ring, (i + 0.5) * ZC, (j + 0.5) * ZC)) zone.set(okey(i, j), code);
+  };
+  const zst = { residential: 0, commercial: 0, industrial: 0 };
+  for (const w of ways.values()) {
+    const code = zoneCode(w.tags);
+    if (!code || w.refs[0] !== w.refs[w.refs.length - 1]) continue;
+    const ring = ringPts(w.refs.slice(0, -1));
+    if (ring.length < 3 || Math.abs(area(ring)) > 4e6) continue;
+    rasterZone(ring, code);
+    zst[code === 1 ? 'residential' : code === 2 ? 'commercial' : 'industrial']++;
+  }
+  for (const r of rels.values()) {
+    const code = zoneCode(r.tags);
+    if (!code || r.tags.type !== 'multipolygon') continue;
+    for (const ring of assemble(r.members.filter((m) => m.type === 'way' && m.role === 'outer').map((m) => m.ref)).rings) {
+      const pts = ringPts(ring);
+      if (pts.length >= 3 && Math.abs(area(pts)) <= 4e6) rasterZone(pts, code);
+    }
+    zst[code === 1 ? 'residential' : code === 2 ? 'commercial' : 'industrial']++;
+  }
+  const zoneAt = (x: number, z: number): number => zone.get(okey(Math.floor(x / ZC), Math.floor(z / ZC))) ?? 0;
+  // 실제 건물 밀도(주변 80m 안 실제 건물 수) — 용도지역이 없는 곳은 실제 마을 근처에만 생성
+  const DG = 40;
+  const dens = new Map<number, number>();
+  for (const b of uniq) {
+    const c = cen(b);
+    const k = okey(Math.floor(c[0] / DG), Math.floor(c[1] / DG));
+    dens.set(k, (dens.get(k) ?? 0) + 1);
+  }
+  const realNear = (x: number, z: number): number => {
+    let n = 0;
+    const i0 = Math.floor(x / DG);
+    const j0 = Math.floor(z / DG);
+    for (let i = i0 - 2; i <= i0 + 2; i++) for (let j = j0 - 2; j <= j0 + 2; j++) n += dens.get(okey(i, j)) ?? 0;
+    return n;
+  };
   // 도로 선분 격자(가장 가까운 도로 가장자리 거리·방향)
   const RG = 40;
   const rgrid = new Map<number, { a: P; b: P; hw: number }[]>();
@@ -785,50 +919,189 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
         }
     return best;
   };
+  // v0.6.3: 생성 건물의 도로 여유는 서비스 도로(골목·진입로)까지 포함해 검사한다(이전: 일반 도로만 → 감사에서 골목 침범 421건)
+  const cgrid = new Map<number, { a: P; b: P; hw: number }[]>();
+  for (const r of roads) {
+    if (r.tunnel) continue;
+    for (let q = 1; q < r.pts.length; q++) {
+      const a: P = [r.pts[q - 1][0], r.pts[q - 1][1]];
+      const b: P = [r.pts[q][0], r.pts[q][1]];
+      const sg = { a, b, hw: r.w / 2 };
+      for (let i = Math.floor(Math.min(a[0], b[0]) / RG); i <= Math.floor(Math.max(a[0], b[0]) / RG); i++)
+        for (let j = Math.floor(Math.min(a[1], b[1]) / RG); j <= Math.floor(Math.max(a[1], b[1]) / RG); j++) {
+          const k = okey(i, j);
+          const l = cgrid.get(k);
+          if (l) l.push(sg);
+          else cgrid.set(k, [sg]);
+        }
+    }
+  }
+  const clearOf = (x: number, z: number): number => {
+    let d = Infinity;
+    const i0 = Math.floor(x / RG);
+    const j0 = Math.floor(z / RG);
+    for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) for (const sg of cgrid.get(okey(i, j)) ?? []) d = Math.min(d, segDist(x, z, sg.a, sg.b) - sg.hw);
+    return d;
+  };
+  // 교차로(팔 ≥3 OSM 노드) — 생성 건물은 교차로 반경 + 2m 밖
+  const jArms = new Map<string, { n: number; p: P; w: number }>();
+  for (const r of roads) {
+    if (r.tunnel) continue;
+    r.refs.forEach((ref, q) => {
+      const i = r.nodeIdx[q];
+      const add = q === 0 || q === r.refs.length - 1 ? 1 : 2;
+      const e = jArms.get(ref);
+      if (e) {
+        e.n += add;
+        e.w = Math.max(e.w, r.w);
+      } else jArms.set(ref, { n: add, p: [r.pts[i][0], r.pts[i][1]], w: r.w });
+    });
+  }
+  const jgrid = new Map<number, { p: P; R: number }[]>();
+  for (const j of jArms.values()) {
+    if (j.n < 3) continue;
+    const k = okey(Math.floor(j.p[0] / RG), Math.floor(j.p[1] / RG));
+    const l = jgrid.get(k);
+    const e = { p: j.p, R: j.w / 2 + 2 };
+    if (l) l.push(e);
+    else jgrid.set(k, [e]);
+  }
+  const nearJunction = (x: number, z: number): boolean => {
+    const i0 = Math.floor(x / RG);
+    const j0 = Math.floor(z / RG);
+    for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) for (const e of jgrid.get(okey(i, j)) ?? []) if (Math.hypot(x - e.p[0], z - e.p[1]) < e.R) return true;
+    return false;
+  };
+  // 이미 놓은 생성 건물(정확한 다각형 겹침 검사 — 4m 점유 칸만으로는 큰 창고 모서리가 겹쳤다)
+  const ggrid = new Map<number, P[][]>();
+  const genHits = (o: P[]): boolean => {
+    const xs = o.map((q) => q[0]);
+    const zs = o.map((q) => q[1]);
+    for (let i = Math.floor((Math.min(...xs) - 2) / RG); i <= Math.floor((Math.max(...xs) + 2) / RG); i++)
+      for (let j = Math.floor((Math.min(...zs) - 2) / RG); j <= Math.floor((Math.max(...zs) + 2) / RG); j++) for (const q of ggrid.get(okey(i, j)) ?? []) if (polyOverlap(o, q)) return true;
+    return false;
+  };
+  const genAdd = (o: P[]): void => {
+    const xs = o.map((q) => q[0]);
+    const zs = o.map((q) => q[1]);
+    for (let i = Math.floor(Math.min(...xs) / RG); i <= Math.floor(Math.max(...xs) / RG); i++)
+      for (let j = Math.floor(Math.min(...zs) / RG); j <= Math.floor(Math.max(...zs) / RG); j++) {
+        const k = okey(i, j);
+        const l = ggrid.get(k);
+        if (l) l.push(o);
+        else ggrid.set(k, [o]);
+      }
+  };
+  for (const b of uniq) genAdd(b.outer); // 실제 건물도 정확한 겹침 검사 대상(4m 점유 칸이 얇은 건물을 놓쳤다 — 감사 genReal 1건)
   let seed = 20261116;
   const rnd = (): number => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  /** 생성 건물 종류(v0.6.3): 재질·지붕·크기를 정한다. 실제 건물이 아니다 */
+  type GenKind = 'house' | 'villa' | 'shop' | 'factory' | 'warehouse';
   interface GenB {
     id: string;
     outer: P[];
     h: number;
     levels: number;
     base: number;
+    gk: GenKind;
   }
   const genB: GenB[] = [];
+  const gst = { zoneR: 0, zoneC: 0, zoneI: 0, zoneNone: 0, skipNoSettlement: 0, skipSlope: 0, skipHigh: 0 };
   const GSTEP = 13;
+  /** 용도별 후보 크기(큰 것부터 시도 — 남은 공간이 작으면 작은 건물로) */
+  const optionsFor = (zn: number, dn: number): { gk: GenKind; w: [number, number]; d: [number, number]; lv: [number, number] }[] => {
+    if (zn === 3)
+      return [
+        { gk: 'warehouse', w: [22, 34], d: [16, 26], lv: [1, 1] },
+        { gk: 'factory', w: [16, 24], d: [12, 18], lv: [1, 2] },
+        { gk: 'factory', w: [12, 15], d: [10, 12], lv: [1, 2] },
+      ];
+    if (zn === 2)
+      return [
+        { gk: 'shop', w: [12, 17], d: [10, 14], lv: [3, 6] },
+        { gk: 'villa', w: [9, 12], d: [8, 11], lv: [3, 5] },
+      ];
+    const villaFirst = dn >= 8 ? 0.6 : 0.35;
+    return rnd() < villaFirst
+      ? [
+          { gk: 'villa', w: [10, 13], d: [9, 12], lv: [3, 5] },
+          { gk: 'house', w: [7, 10], d: [7, 9], lv: [1, 2] },
+        ]
+      : [
+          { gk: 'house', w: [7.5, 10.5], d: [7, 9.5], lv: [1, 2] },
+          { gk: 'villa', w: [9, 11], d: [8, 10], lv: [3, 4] },
+        ];
+  };
+  const occAt = (x: number, z: number): boolean => occ.has(okey(Math.floor(x / OCC), Math.floor(z / OCC)));
   for (let gx = LB.minX; gx <= LB.maxX; gx += GSTEP)
     for (let gz = LB.minZ; gz <= LB.maxZ; gz += GSTEP) {
       const x = gx + (rnd() - 0.5) * 4;
       const z = gz + (rnd() - 0.5) * 4;
       const fi = Math.round((x - FX0) / CELL);
       const fj = Math.round((z - FZ0) / CELL);
-      if (fi < 0 || fj < 0 || fi >= FW || fj >= FH || cover[fj * FW + fi] !== 0 || !LAND[fj * FW + fi]) continue;
+      if (fi < 0 || fj < 0 || fi >= FW || fj >= FH || !LAND[fj * FW + fi]) continue;
+      const zn = zoneAt(x, z);
+      // 공업지역은 후보 간격 26m(큰 공장/창고 위주 — 13m 격자로 채우면 작은 공장이 지나치게 촘촘했다)
+      if (zn === 3 && (Math.round((gx - LB.minX) / GSTEP) % 2 !== 0 || Math.round((gz - LB.minZ) / GSTEP) % 2 !== 0)) continue;
+      // 공업지역은 풀/나대지 피복도 허용(창고 마당), 나머지는 시가지 피복만
+      if (cover[fj * FW + fi] !== 0 && !(zn === 3 && cover[fj * FW + fi] === 1)) continue;
       if (Math.hypot(x - fac[0], z - fac[1]) < 70) continue;
-      if (fieldAt(x, z) > 120) continue; // 해발 120m 위(산지)는 채우지 않는다(추정 지표면 기준)
+      const elev = fieldAt(x, z);
+      if (elev > 120) {
+        gst.skipHigh++;
+        continue; // 해발 120m 위(산지)는 채우지 않는다(추정 지표면 기준)
+      }
+      const dn = realNear(x, z);
+      // 실제 주거지로 확인되지 않은 곳(용도지역 없음)은 실제 건물이 근처에 있어야 한다. 언덕(해발 50m+)은 더 엄격
+      if (zn === 0 && (dn < 3 || (elev > 50 && dn < 6))) {
+        gst.skipNoSettlement++;
+        continue;
+      }
+      if (zn === 1 && elev > 80 && dn < 3) {
+        gst.skipNoSettlement++;
+        continue;
+      }
+      const grad = Math.hypot(fieldAt(x + 6, z) - fieldAt(x - 6, z), fieldAt(x, z + 6) - fieldAt(x, z - 6)) / 12;
+      if (grad > 0.25) {
+        gst.skipSlope++;
+        continue;
+      }
       const nr = roadEdge(x, z);
-      if (nr.d < 3.5 + 5 || nr.d > 40) continue;
-      if (occ.has(okey(Math.floor(x / OCC), Math.floor(z / OCC)))) continue;
-      const w = 8 + rnd() * 5;
-      const d = 8 + rnd() * 4;
+      if (nr.d < 3.5 + 5 || nr.d > (zn === 3 ? 60 : 40)) continue;
+      if (occAt(x, z)) continue;
       const c = Math.cos(nr.dir);
       const sn = Math.sin(nr.dir);
-      const corners: P[] = [
-        [-w / 2, -d / 2],
-        [w / 2, -d / 2],
-        [w / 2, d / 2],
-        [-w / 2, d / 2],
-      ].map(([lx, lz]) => [r1(x + lx * c + lz * sn), r1(z - lx * sn + lz * c)] as P);
-      // 모서리도 도로 가장자리에서 2.5m 이상, 점유 칸·경계 밖 금지
-      if (corners.some(([cx, cz]) => roadEdge(cx, cz).d < 2.5 || !inLand(cx, cz))) continue;
-      let blocked = false;
-      for (const [cx, cz] of [...corners, [x, z] as P]) if (occ.has(okey(Math.floor(cx / OCC), Math.floor(cz / OCC)))) blocked = true;
-      if (blocked) continue;
-      const ys = corners.map(([cx, cz]) => fieldAt(cx, cz));
-      if (Math.max(...ys) - Math.min(...ys) > 0.3 * Math.max(w, d)) continue;
-      const levels = 2 + Math.floor(rnd() * 4);
-      const outer = area(corners) < 0 ? corners.reverse() : corners;
-      genB.push({ id: `g${genB.length}`, outer, h: r1(levels * 3 + 0.8), levels, base: r2(Math.min(...ys)) });
-      rasterOcc(outer, 1.5);
+      for (const opt of optionsFor(zn, dn)) {
+        const w = opt.w[0] + rnd() * (opt.w[1] - opt.w[0]);
+        const d = opt.d[0] + rnd() * (opt.d[1] - opt.d[0]);
+        const loc = (lx: number, lz: number): P => [r1(x + lx * c + lz * sn), r1(z - lx * sn + lz * c)];
+        const corners: P[] = [loc(-w / 2, -d / 2), loc(w / 2, -d / 2), loc(w / 2, d / 2), loc(-w / 2, d / 2)];
+        // 외곽선(4m 간격)과 내부(4m 격자) 모두: 도로 가장자리 2.5m 밖, 육지, 점유 칸 아님
+        const probes: P[] = [];
+        for (let u = -w / 2; u <= w / 2 + 1e-6; u += Math.min(4, w)) for (let v = -d / 2; v <= d / 2 + 1e-6; v += Math.min(4, d)) probes.push(loc(u, v));
+        for (const p of corners) probes.push(p);
+        if (probes.some(([px, pz]) => clearOf(px, pz) < 2.5 || !inLand(px, pz) || occAt(px, pz) || nearJunction(px, pz))) continue;
+        // 1m 여유를 둔 외곽으로 이미 놓은 생성 건물과 정확히 겹침 검사
+        const grown: P[] = [loc(-w / 2 - 1, -d / 2 - 1), loc(w / 2 + 1, -d / 2 - 1), loc(w / 2 + 1, d / 2 + 1), loc(-w / 2 - 1, d / 2 + 1)];
+        if (genHits(grown)) continue;
+        const ys = probes.map(([px, pz]) => fieldAt(px, pz));
+        const rise = Math.max(...ys) - Math.min(...ys);
+        if (rise > Math.min(0.3 * Math.max(w, d), opt.gk === 'warehouse' || opt.gk === 'factory' ? 2.0 : 3.5)) {
+          gst.skipSlope++;
+          continue;
+        }
+        const levels = opt.lv[0] + Math.floor(rnd() * (opt.lv[1] - opt.lv[0] + 1));
+        const h = opt.gk === 'warehouse' ? 7 + rnd() * 3 : opt.gk === 'factory' ? levels * 4.5 + 1 : opt.gk === 'shop' ? levels * 3.4 + 0.8 : opt.gk === 'house' ? levels * 2.9 + 1.2 : levels * 2.9 + 0.8;
+        const outer = area(corners) < 0 ? corners.reverse() : corners;
+        genB.push({ id: `g${genB.length}`, outer, h: r1(h), levels, base: r2(outlineMin(outer)), gk: opt.gk });
+        rasterOcc(outer, 1.5);
+        genAdd(outer);
+        if (zn === 1) gst.zoneR++;
+        else if (zn === 2) gst.zoneC++;
+        else if (zn === 3) gst.zoneI++;
+        else gst.zoneNone++;
+        break;
+      }
     }
   console.log(`생성 건물(실제 아님): ${genB.length}동 (채우지 않는 면 ${noFillPolys})`);
 
@@ -910,7 +1183,7 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
   for (const g of genB) {
     const cx = g.outer.reduce((a, p) => a + p[0], 0) / g.outer.length;
     const cz = g.outer.reduce((a, p) => a + p[1], 0) / g.outer.length;
-    tileOf(tkey(cx, cz)).buildings.push({ id: g.id, k: 'gen', o: g.outer, h: g.h, lv: g.levels, hs: 'gen', g: 1, y: g.base });
+    tileOf(tkey(cx, cz)).buildings.push({ id: g.id, k: 'gen', gk: g.gk, o: g.outer, h: g.h, lv: g.levels, hs: 'gen', g: 1, y: g.base });
   }
   for (const l of lots) {
     const c: P = [l.pts.reduce((s, p) => s + p[0], 0) / l.pts.length, l.pts.reduce((s, p) => s + p[1], 0) / l.pts.length];
@@ -932,6 +1205,194 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
   function r1000(v: number): number {
     return Math.round(v * 1000) / 1000;
   }
+
+  // ---------------------------------------------------------------- 9b. 배치 감사(v0.6.3) — 실제 건물은 보존(보고만), 생성 건물은 0 이어야 하는 항목
+  const audit = (() => {
+    type B = { id: string; o: P[]; g: boolean; base: number; c: P };
+    const all: B[] = [...uniq.map((b) => ({ id: b.id, o: b.outer, g: false, base: b.base, c: cen(b) })), ...genB.map((b) => ({ id: b.id, o: b.outer, g: true, base: b.base, c: [b.outer.reduce((a, q) => a + q[0], 0) / 4, b.outer.reduce((a, q) => a + q[1], 0) / 4] as P }))];
+    const AG = 50;
+    const bgrid = new Map<number, B[]>();
+    const bbox = (o: P[]): [number, number, number, number] => [Math.min(...o.map((q) => q[0])), Math.max(...o.map((q) => q[0])), Math.min(...o.map((q) => q[1])), Math.max(...o.map((q) => q[1]))];
+    for (const b of all) {
+      const [x0, x1, z0, z1] = bbox(b.o);
+      for (let i = Math.floor(x0 / AG); i <= Math.floor(x1 / AG); i++)
+        for (let j = Math.floor(z0 / AG); j <= Math.floor(z1 / AG); j++) {
+          const k = okey(i, j);
+          const l = bgrid.get(k);
+          if (l) l.push(b);
+          else bgrid.set(k, [b]);
+        }
+    }
+    const segSeg = (a: P, b: P, c: P, d: P): number => (crossSeg(a, b, c, d) ? 0 : Math.min(segDist(a[0], a[1], c, d), segDist(b[0], b[1], c, d), segDist(c[0], c[1], a, b), segDist(d[0], d[1], a, b)));
+    // 1) 건물–건물 겹침
+    const ov = { realReal: 0, genReal: 0, genGen: 0, samples: [] as string[] };
+    const seenPair = new Set<string>();
+    for (const list of bgrid.values())
+      for (let i = 0; i < list.length; i++)
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i];
+          const b = list[j];
+          const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+          if (seenPair.has(key)) continue;
+          seenPair.add(key);
+          const [ax0, ax1, az0, az1] = bbox(a.o);
+          const [bx0, bx1, bz0, bz1] = bbox(b.o);
+          if (ax1 < bx0 || bx1 < ax0 || az1 < bz0 || bz1 < az0) continue;
+          if (!polyOverlap(a.o, b.o)) continue;
+          if (a.g && b.g) ov.genGen++;
+          else if (a.g || b.g) ov.genReal++;
+          else ov.realReal++;
+          if (ov.samples.length < 6) ov.samples.push(key);
+        }
+    // 2) 건물–도로(지상 도로, 교량/터널 제외): 차도 띠 안으로 0.5m 이상 들어옴
+    const RG2 = 40;
+    const rg2 = new Map<number, { a: P; b: P; hw: number; cls: number; ws: string }[]>();
+    for (const r of roads) {
+      if (r.tunnel || r.bridge) continue;
+      for (let q = 1; q < r.pts.length; q++) {
+        const a: P = [r.pts[q - 1][0], r.pts[q - 1][1]];
+        const b: P = [r.pts[q][0], r.pts[q][1]];
+        for (let i = Math.floor(Math.min(a[0], b[0]) / RG2); i <= Math.floor(Math.max(a[0], b[0]) / RG2); i++)
+          for (let j = Math.floor(Math.min(a[1], b[1]) / RG2); j <= Math.floor(Math.max(a[1], b[1]) / RG2); j++) {
+            const k = okey(i, j);
+            const l = rg2.get(k);
+            const sg = { a, b, hw: r.w / 2, cls: r.cls, ws: r.wSrc };
+            if (l) l.push(sg);
+            else rg2.set(k, [sg]);
+          }
+      }
+    }
+    const segsNear = (o: P[]): { a: P; b: P; hw: number; cls: number; ws: string }[] => {
+      const [x0, x1, z0, z1] = bbox(o);
+      const out: { a: P; b: P; hw: number; cls: number; ws: string }[] = [];
+      const seen = new Set<object>();
+      for (let i = Math.floor((x0 - 15) / RG2); i <= Math.floor((x1 + 15) / RG2); i++)
+        for (let j = Math.floor((z0 - 15) / RG2); j <= Math.floor((z1 + 15) / RG2); j++)
+          for (const sg of rg2.get(okey(i, j)) ?? []) if (!seen.has(sg)) (seen.add(sg), out.push(sg));
+      return out;
+    };
+    const rd = { real: 0, realMain: 0, gen: 0, realMainDepth: { lt1: 0, lt2: 0, ge2: 0 }, realMainEstWidth: 0, samples: [] as string[] };
+    const ent = { real30: 0, real60: 0, gen30: 0 };
+    for (const b of all) {
+      const segs = segsNear(b.o);
+      let hit = false;
+      let main = false;
+      let near = Infinity;
+      let depth = 0;
+      let est = false;
+      for (const sg of segs) {
+        let d = Infinity;
+        for (let k = 0; k < b.o.length; k++) d = Math.min(d, segSeg(b.o[k], b.o[(k + 1) % b.o.length], sg.a, sg.b));
+        if (inRing(b.o, sg.a[0], sg.a[1]) || inRing(b.o, sg.b[0], sg.b[1])) d = 0;
+        near = Math.min(near, d - sg.hw);
+        if (d < sg.hw - 0.5) {
+          hit = true;
+          if (sg.cls < 8) {
+            main = true;
+            if (sg.hw - d > depth) [depth, est] = [sg.hw - d, sg.ws !== 'osm'];
+          }
+        }
+      }
+      if (main && !b.g) {
+        if (depth < 1) rd.realMainDepth.lt1++;
+        else if (depth < 2) rd.realMainDepth.lt2++;
+        else rd.realMainDepth.ge2++;
+        if (est) rd.realMainEstWidth++;
+      }
+      if (hit) {
+        if (b.g) rd.gen++;
+        else rd.real++;
+        if (main && !b.g) rd.realMain++;
+        if (rd.samples.length < 6 && (b.g || main)) rd.samples.push(b.id);
+      }
+      if (!segs.length || near > 30) {
+        if (b.g) ent.gen30++;
+        else ent.real30++;
+      }
+      if (!b.g && (!segs.length || near > 60)) ent.real60++;
+    }
+    // 3) 교차로(팔 ≥3 노드) 위
+    const arms = new Map<string, { n: number; p: P; w: number }>();
+    for (const r of roads) {
+      if (r.tunnel || r.bridge) continue;
+      r.refs.forEach((ref, q) => {
+        const i = r.nodeIdx[q];
+        const add = q === 0 || q === r.refs.length - 1 ? 1 : 2;
+        const e = arms.get(ref);
+        if (e) {
+          e.n += add;
+          e.w = Math.max(e.w, r.w);
+        } else arms.set(ref, { n: add, p: [r.pts[i][0], r.pts[i][1]], w: r.w });
+      });
+    }
+    const junc = { nodes: 0, real: 0, gen: 0 };
+    for (const j of arms.values()) {
+      if (j.n < 3) continue;
+      junc.nodes++;
+      const R = j.w / 2;
+      for (const b of bgrid.get(okey(Math.floor(j.p[0] / AG), Math.floor(j.p[1] / AG))) ?? []) {
+        let d = inRing(b.o, j.p[0], j.p[1]) ? 0 : Infinity;
+        for (let k = 0; k < b.o.length && d > 0; k++) d = Math.min(d, segDist(j.p[0], j.p[1], b.o[k], b.o[(k + 1) % b.o.length]));
+        if (d < R - 0.5) b.g ? junc.gen++ : junc.real++;
+      }
+    }
+    // 4) 보호 구역(공원·학교·물·숲 등)·바다 / 5) 급경사 / 6) 산지 생성 밀도
+    const prot = { genInside: 0, realInside: 0, byKind: {} as Record<string, number>, genSea: 0, realSea: 0 };
+    const pgrid = new Map<number, { ring: P[]; kind: string }[]>();
+    for (const pp of protectedPolys) {
+      const [x0, x1, z0, z1] = bbox(pp.ring);
+      for (let i = Math.floor(x0 / AG); i <= Math.floor(x1 / AG); i++)
+        for (let j = Math.floor(z0 / AG); j <= Math.floor(z1 / AG); j++) {
+          const k = okey(i, j);
+          const l = pgrid.get(k);
+          if (l) l.push(pp);
+          else pgrid.set(k, [pp]);
+        }
+    }
+    const steep = { real: 0, gen: 0 };
+    const mount = { gen50: 0, gen80: 0, gen100: 0, genIsolated: 0 };
+    for (const b of all) {
+      const inside = (pgrid.get(okey(Math.floor(b.c[0] / AG), Math.floor(b.c[1] / AG))) ?? []).find((pp) => inRing(pp.ring, b.c[0], b.c[1]));
+      if (inside) {
+        if (b.g) prot.genInside++;
+        else {
+          prot.realInside++;
+          prot.byKind[inside.kind] = (prot.byKind[inside.kind] ?? 0) + 1;
+        }
+      }
+      if (!inLand(b.c[0], b.c[1])) b.g ? prot.genSea++ : prot.realSea++;
+      const ys = b.o.map((q) => fieldAt(q[0], q[1]));
+      const [x0, x1, z0, z1] = bbox(b.o);
+      if ((Math.max(...ys) - Math.min(...ys)) / Math.max(4, Math.hypot(x1 - x0, z1 - z0)) > 0.3) b.g ? steep.gen++ : steep.real++;
+      if (b.g) {
+        const e = fieldAt(b.c[0], b.c[1]);
+        if (e > 50) mount.gen50++;
+        if (e > 80) mount.gen80++;
+        if (e > 100) mount.gen100++;
+        if (realNear(b.c[0], b.c[1]) < 3) mount.genIsolated++;
+      }
+    }
+    const kinds: Record<string, number> = {};
+    for (const g of genB) kinds[g.gk] = (kinds[g.gk] ?? 0) + 1;
+    return {
+      note: '실제 건물(OSM)은 위치·외곽을 보존하고 보고만 한다. 생성 건물은 겹침·도로 침범·교차로·보호 구역·바다가 0 이어야 한다(tests/saha.test.ts).',
+      buildingOverlap: ov,
+      roadOverlap: { ...rd, note: '차도 띠 안으로 0.5m 이상(지상 도로만). realMain = 서비스 도로 제외. 남은 것은 최소 차로 폭보다 건물선이 좁은 곳(데이터 충돌)' },
+      roadWidthFit: { roads: fitSt.roads, maxCutM: r2(fitSt.maxCut), note: "추정 폭을 양옆 실제 건물선에 맞춰 줄인 도로(ws:'fit', 여전히 추정)" },
+      junction: junc,
+      protectedArea: prot,
+      steepFootprint: steep,
+      farFromRoad: { ...ent, note: '가장 가까운 지상 도로 가장자리까지 30m/60m 초과(진입 연결 어려움 후보)' },
+      floating: { loweredByOutline: lowered.n, maxLoweredM: r2(lowered.max), note: '바닥을 외곽선 2m 간격 최저 지면으로 내린 건물 수(이전 방식이면 벽 밑이 뜸)' },
+      generatedMountain: mount,
+      generatedKinds: kinds,
+      generatedZones: gst,
+      zonePolygons: zst,
+      zoneAreaKm2: { residential: r2(([...zone.values()].filter((v) => v === 1).length * ZC * ZC) / 1e6), commercial: r2(([...zone.values()].filter((v) => v === 2).length * ZC * ZC) / 1e6), industrial: r2(([...zone.values()].filter((v) => v === 3).length * ZC * ZC) / 1e6) },
+      realInZone: uniq.reduce((a, b) => { const c = cen(b); const zz = zoneAt(c[0], c[1]); a[zz]++; return a; }, [0, 0, 0, 0]),
+    };
+  })();
+  console.log('배치 감사', JSON.stringify(audit));
 
   // ---------------------------------------------------------------- 10. 쓰기
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -1012,7 +1473,8 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     buildingsWithLevelsTag: uniq.filter((b) => b.hSrc === 'osm-levels').length,
     buildingsHeightEstimated: uniq.filter((b) => b.hSrc === 'est').length,
     buildingsGenerated: genB.length,
-    buildingsGeneratedNote: 'g:1 / hs:gen — OSM 에 건물이 없는 시가지 블록을 채운 절차 생성 건물(실제 아님)',
+    buildingsGeneratedNote: 'g:1 / hs:gen — OSM 에 건물이 없는 시가지 블록을 채운 절차 생성 건물(실제 아님). gk = 생성 종류(house/villa/shop/factory/warehouse, OSM 용도지역 기준)',
+    audit,
     parkingLots: lots.length,
     dem: { source: 'Copernicus GLO-30 (DSM)', cellM: CELL, grid: [FW, FH], missingCells: demMissing, seaCells, coverage: r2(1 - demMissing / (FW * FH)), dtm: 'estimated (opening r=100m + gaussian)' },
     landCover: { cells: landCells, urban: covCount[0], grass: covCount[1], forest: covCount[2], water: covCount[3], sand: covCount[4], polygons: coverPolys },

@@ -50,7 +50,8 @@ export interface SahaRoad {
   /** 차로 수 출처: 1 = OSM 태그(실제), 0 = 등급으로 추정 */
   ls: 0 | 1;
   w: number;
-  ws: 'osm' | 'lanes' | 'est';
+  /** 폭 출처: osm 태그 · lanes(차로 수 태그×차로폭) · est(등급 추정) · fit(추정 폭을 실제 건물선에 맞춰 줄임 — 추정) */
+  ws: 'osm' | 'lanes' | 'est' | 'fit';
   t?: string;
   tf?: string;
   tb?: string;
