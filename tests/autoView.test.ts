@@ -81,6 +81,16 @@ describe('원인 단위 검사', () => {
     expect(r[0].relevant).toBe(true);
     expect(['front', 'frontLeft', 'left']).toContain(r[0].contact);
   });
+  it('차폭 바깥 기둥에 조향하며 닿으면 모서리 접촉 — 좌우 대칭 장면이 같은 분류(앞범퍼/모서리로 갈리지 않음)', () => {
+    // e2e-v061 정차 조향: 왼쪽 장면만 '앞범퍼'로 분류돼 기본 전방 카메라에 머물렀다(점 순서에 따라 갈림)
+    for (const sc of SCENES.filter((q) => q.id === 'stop-left' || q.id === 'stop-right')) {
+      const r = runPdcScene(mods, 'cur', VEHICLES[1], sc, 0);
+      const last = r.views.at(-1)!;
+      const side = sc.id === 'stop-left' ? 'Left' : 'Right';
+      expect((last.top as { contact?: string } | null)?.contact, JSON.stringify(last.top)).toBe(`front${side}`);
+      expect(r.finalView).toBe(side.toLowerCase());
+    }
+  });
   it('자동 시점끼리 전환은 최소 유지 시간을 지킨다(2등급 접촉 부위가 경계에서 흔들려도 진동 없음)', () => {
     const p = new polM.ViewPolicy();
     const mk = (contact: string): polM.SideObservation => ({

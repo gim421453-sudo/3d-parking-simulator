@@ -92,7 +92,7 @@ function swingAt(q: { x: number; z: number }, dir: 1 | -1, body: { hw: number; h
 
 /**
  * 접촉 부위(v0.6.3): 차폭 안에 든 점이 있으면 범퍼 면, 차체 길이 안에 든 점이 있으면 옆면(앞/뒤 끝 쪽이면 모서리 표기),
- * 둘 다 아니면(모서리 바깥 대각선) 더 많이 벗어난 축으로 정한다.
+ * 둘 다 아니면(모서리 바깥 대각선) 모서리. 범퍼 면 점이 한쪽 모서리 구간(|평균 x| > 0.55·반폭)에 몰려 있어도 모서리.
  * 한 점만 보고 정하면 직진 후진 벽이 모서리 여유 구간 점 때문에 '옆면'으로 잘못 분류된다(하네스 rear-wall 회귀).
  */
 function contactOf(inside: readonly { x: number; z: number }[], q: { x: number; z: number }, body: { hw: number; hl: number }): Place {
@@ -100,13 +100,23 @@ function contactOf(inside: readonly { x: number; z: number }[], q: { x: number; 
     const sd = p.x > 0 ? 'Left' : 'Right';
     return p.z > body.hl * 0.55 ? (`front${sd}` as Place) : p.z < -body.hl * 0.55 ? (`rear${sd}` as Place) : sd === 'Left' ? 'left' : 'right';
   };
-  const endPt = inside.find((p) => Math.abs(p.x) <= body.hw);
-  if (endPt) return endPt.z > 0 ? 'front' : 'rear';
+  const ends = inside.filter((p) => Math.abs(p.x) <= body.hw);
+  if (ends.length) {
+    const end = ends[0].z > 0 ? 'front' : 'rear';
+    // 범퍼 면으로 들어온 점들이 한쪽 모서리 구간(|평균 x| > 0.55·반폭)에 몰려 있으면 모서리 접촉이다.
+    // 차폭 바깥 기둥에 조향하며 닿는 경우를 범퍼 정면으로 분류해 기본 카메라만 유지하던 문제(e2e-v061 정차 조향).
+    // 직진 벽은 점이 범퍼 전체에 퍼져 평균이 0 근처라 면 접촉 그대로다.
+    const mx = ends.reduce((s, p) => s + p.x, 0) / ends.length;
+    if (Math.abs(mx) > body.hw * 0.55) return `${end}${mx > 0 ? 'Left' : 'Right'}` as Place;
+    return end;
+  }
   const sidePt = inside.find((p) => Math.abs(p.z) <= body.hl);
   if (sidePt) return sideName(sidePt);
   if (Math.abs(q.x) <= body.hw) return q.z > 0 ? 'front' : 'rear';
   if (Math.abs(q.z) <= body.hl) return sideName(q);
-  return Math.abs(q.z) - body.hl >= Math.abs(q.x) - body.hw ? (q.z > 0 ? 'front' : 'rear') : sideName(q);
+  // 차폭 띠·차장 띠 모두 밖(대각선 구역) = 모서리 접촉. 점 하나의 축별 초과량으로 고르면 점 순서에 따라
+  // 좌우 대칭 장면이 '앞범퍼'/'앞 오른쪽 모서리'로 갈렸다(하네스 stop-left/stop-right 비대칭).
+  return `${q.z > 0 ? 'front' : 'rear'}${q.x > 0 ? 'Left' : 'Right'}` as Place;
 }
 
 /** 현재 조향으로 dir 방향 s 만큼 진행한 미래 차체(초기 차량 로컬 좌표) */
