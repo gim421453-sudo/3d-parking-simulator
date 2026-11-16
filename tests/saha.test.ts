@@ -3,7 +3,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loadSahaBase, inSaha, tilesWithin, buildingColliders, type SahaBase, type SahaSource, type SahaTile } from '../src/maps/saha/data';
 import { buildSahaMap, sahaInitialTiles, SAHA_FACILITY_XZ, SAHA_STUB } from '../src/maps/saha/mapSaha';
-import { fieldHeight, groundAt } from '../src/maps/terrain';
+import { fieldHeight, groundAt, headroomAt, ceilingAbove } from '../src/maps/terrain';
+import { TUNNEL_ROOF, type SahaRoad } from '../src/maps/saha/data';
 import { buildRoadNetGraph, findRoadNetRoute, turnAllowed } from '../src/nav/roadNet';
 import { mapColliders, type MapData } from '../src/maps/types';
 import { footprintBoxes, type Pt } from '../src/world/footprint';
@@ -237,6 +238,54 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
       expect(res.dist).toBeGreaterThan(r.length * 0.9);
       expect(res.maxY - res.minY, `${id} 실제 고저차`).toBeGreaterThan(5); // 평면 지도가 아니다
     }
+  }, 60000);
+  it('v0.6.3 장평지하차도(OSM w1150052930): 덮인 구간 위 지형 보존(구멍 없음)·입구 진입부만 절토·천장 5.6m·실주행 통과', async () => {
+    // 지하차도 조각 모으기(타일별 조각 ~k 순서)
+    const pieces: SahaRoad[] = [];
+    const keys = new Set<string>();
+    for (let x = -1800; x <= 120; x += 60) for (const k of tilesWithin(base.manifest, x, 1590, 120)) keys.add(k);
+    const loaded = new Map<string, SahaTile>();
+    for (const k of keys) if (base.manifest.tiles.includes(k)) loaded.set(k, await src.json<SahaTile>(`tiles/${k}.json`));
+    for (const t of loaded.values()) for (const r of t.roads) if (r.id.startsWith('w1150052930~')) pieces.push(r);
+    pieces.sort((a, b) => Number(a.id.split('~')[1]) - Number(b.id.split('~')[1]));
+    const pts: [number, number, number][] = [];
+    for (const r of pieces) for (const p of r.p) if (!pts.length || Math.hypot(p[0] - pts[pts.length - 1][0], p[1] - pts[pts.length - 1][1]) > 0.5) pts.push(p);
+    expect(pts.length).toBeGreaterThan(100);
+    const f = base.field;
+    const portals = (base.manifest.portals ?? []).filter((p) => p.z > 1500 && p.z < 1700 && p.x < 0);
+    expect(portals.length).toBeGreaterThanOrEqual(2);
+    // 덮인 구간(갱문 사이): 지형이 노면 + 천장 위로 남아 있다(이전: 렌더러가 지형 칸을 지워 홈이 보였다)
+    const xs = portals.map((p) => p.x);
+    const [px0, px1] = [Math.min(...xs), Math.max(...xs)];
+    let covered = 0;
+    let coveredOk = 0;
+    for (const [x, z, y] of pts) {
+      if (x < px0 + 30 || x > px1 - 30) continue;
+      covered++;
+      if ((fieldHeight(f, x, z) ?? -1e9) >= y + TUNNEL_ROOF) coveredOk++;
+    }
+    expect(covered).toBeGreaterThan(50);
+    expect(coveredOk / covered).toBeGreaterThan(0.95);
+    // 진입부(끝 ~ 갱문): 노면 중심의 지형이 노면 높이 이하로 깎였다
+    const ends = [pts[0], pts[pts.length - 1]];
+    for (const [x, z, y] of ends) expect(fieldHeight(f, x, z)!, `end ${x},${z}`).toBeLessThanOrEqual(y + 0.6);
+    // 천장: 덮인 구간 가운데에서 노면 위 여유 = 5.6m, 추적 카메라 천장도 같은 높이
+    const mid = pts.find(([x]) => Math.abs(x - (px0 + px1) / 2) < 10)!;
+    const terr = { ...map.terrain!, surfaces: map.terrain!.surfaces };
+    expect(headroomAt(terr, mid[0], mid[1], mid[2])).toBeCloseTo(TUNNEL_ROOF, 1);
+    expect(ceilingAbove(terr, mid[0], mid[1], mid[2] + 0.2)).toBeCloseTo(mid[2] + TUNNEL_ROOF, 1);
+    expect(groundAt(terr, mid[0], mid[1], mid[2])).toBeCloseTo(mid[2], 1);
+    // 실주행: 서쪽 진입부 → 지하 → 동쪽 진입부, 막힘 없음, 지하 구간 최저 높이가 지면보다 천장 이상 아래
+    const spec = getVehicle('sedan');
+    const obs: ObstacleDef[] = [...map.obstacles];
+    for (const t of loaded.values()) for (const b of t.buildings) for (const c of buildingColliders(b)) obs.push({ id: c.id, tag: 'building', shape: 'box', x: c.x, z: c.z, w: c.w, d: c.d, rot: c.rot, y0: c.y0, h: c.h });
+    const m2 = { ...map, obstacles: obs };
+    const h0 = Math.atan2(pts[3][0] - pts[0][0], pts[3][1] - pts[0][1]);
+    const car = startState(m2, spec, pts[0][0], pts[0][1], h0, pts[0][2]);
+    const res = drivePath(m2, spec, car, pts.slice(2).map((p) => [p[0], p[1]] as [number, number]), { speed: 14, lookahead: 8, maxTime: 600, goalRadius: 6, continueOnBlock: true, cornerSlow: true });
+    expect(res.blocks, JSON.stringify(res.blocks)).toEqual([]);
+    expect(res.reached).toBe(true);
+    expect(res.minY).toBeLessThan(Math.min(pts[0][2], pts[pts.length - 1][2]) - 3);
   }, 60000);
   it('회귀(e2e-v062): 경사지 건물 충돌체는 외곽 안·주변의 가장 낮은 지면보다 아래까지 내려간다(낮은 쪽에서 오는 차가 밑으로 통과 금지)', () => {
     let worst = Infinity;

@@ -31,6 +31,7 @@ export interface SahaManifest {
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   boundary: { name: string; outer: [number, number][][]; inner: [number, number][][] }[];
   decks: SahaDeck[];
+  portals?: SahaPortal[];
   sources: { layer: string; name: string; license: string; attribution: string; snapshot?: string | null }[];
   quality: Record<string, unknown>;
 }
@@ -145,7 +146,20 @@ export async function loadSahaBase(src: SahaSource): Promise<SahaBase> {
 
 /** 교량/터널 상판 → 지형 경사 면(ramp). 상판은 추정 종단(양 끝 지면 높이를 직선으로 잇고 교량은 가운데를 올림) */
 export function deckSurfaces(m: SahaManifest): RampSurface[] {
-  return m.decks.map((d) => ({ kind: 'ramp', id: `deck-${d.id}`, x: d.x, z: d.z, rot: d.rot, length: d.length, width: d.width, y0: d.y0, y1: d.y1 }));
+  return m.decks.map((d) => ({ kind: 'ramp', id: `deck-${d.id}`, x: d.x, z: d.z, rot: d.rot, length: d.length, width: d.width, y0: d.y0, y1: d.y1, ...(d.tunnel ? { roof: TUNNEL_ROOF } : {}) }));
+}
+/** 터널 천장 아랫면 높이(노면 기준, m) — 시각 모델(sahaStream 터널 천장)과 같은 값. 추정(실제 터널 제원 아님) */
+export const TUNNEL_ROOF = 5.6;
+/** v0.6.3 터널 갱문(입구) — build.ts 가 노면 덮개가 얕은 구간을 절토하고 남긴 입구 위치 */
+export interface SahaPortal {
+  x: number;
+  z: number;
+  /** 터널 안쪽을 향하는 방향(heading 규칙) */
+  rot: number;
+  w: number;
+  y: number;
+  /** 갱문 위쪽 지면 높이 */
+  top: number;
 }
 
 export const tileKeyOf = (m: Pick<SahaManifest, 'tileSize'>, x: number, z: number): string => `${Math.floor(x / m.tileSize)}_${Math.floor(z / m.tileSize)}`;

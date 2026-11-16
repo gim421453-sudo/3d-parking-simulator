@@ -44,6 +44,11 @@ export interface RampSurface {
    * 지정하면 시작/끝에서 경사가 0 에서 부드럽게 커졌다 줄어든다 → 차체 피치가 서서히 변하고 하부 접촉(배 긁힘)이 줄어든다.
    */
   ease?: number;
+  /**
+   * v0.6.3 터널: 노면에서 천장 아랫면까지 높이(m). 있으면 ceilingAbove/headroomAt 이 노면 + roof 를 천장으로 본다
+   * (차고 제한·추적 카메라가 터널 천장 위 산 속으로 올라가지 않게).
+   */
+  roof?: number;
 }
 export interface SpiralSurface {
   kind: 'spiral';
@@ -172,11 +177,18 @@ export function surfaceHeight(s: TerrainSurface, x: number, z: number): number |
  */
 export function groundAt(t: Terrain, x: number, z: number, yHint: number, maxStep = 0.7): number | null {
   let best: number | null = null;
+  let onTunnel = false;
   for (const s of surfacesNear(t, x, z)) {
     const h = surfaceHeight(s, x, z);
     if (h === null) continue;
-    if (Math.abs(h - yHint) <= maxStep && (best === null || h > best)) best = h;
+    if (Math.abs(h - yHint) <= maxStep && (best === null || h > best)) {
+      best = h;
+      if (s.kind === 'ramp' && s.roof !== undefined) onTunnel = true;
+    }
   }
+  // v0.6.3: 터널(천장 있는 경사면) 노면 위에서는 노면이 주행면 — 덮인 구간 위 산·입구 절토 비탈(20m 격자 보간)이
+  // 노면보다 조금 높아도 차가 지형 위로 올라타지 않는다(장평지하차도 갱문 앞 'edge' 회귀)
+  if (onTunnel) return best;
   if (t.field) {
     const h = fieldHeight(t.field, x, z);
     if (h !== null && Math.abs(h - yHint) <= maxStep && (best === null || h > best)) best = h;
@@ -259,6 +271,13 @@ const scratchSurf: TerrainSurface[] = [];
 export function ceilingAbove(t: Terrain, x: number, z: number, y: number): number {
   let best = Infinity;
   for (const s of surfacesNear(t, x, z)) {
+    if (s.kind === 'ramp' && s.roof !== undefined) {
+      // 차가 올라선 터널 노면(높이 차 0.4m 이내)의 천장만(노면 + roof). 나란한 반대 방향 터널 상판이 폭(추정) 때문에
+      // 겹쳐도 그 터널 천장을 잡지 않는다(장평지하차도 두 방향 높이 차 ≈0.9m)
+      const h = surfaceHeight(s, x, z);
+      if (h !== null && Math.abs(h - y) <= 0.4 && h + s.roof < best) best = h + s.roof;
+      continue;
+    }
     if (s.kind !== 'deck') continue;
     const h = surfaceHeight(s, x, z);
     if (h === null) continue;
@@ -282,6 +301,11 @@ export function levelAt(t: Terrain, y: number): TerrainLevel {
 export function headroomAt(t: Terrain, x: number, z: number, y: number): number {
   let best = Infinity;
   for (const s of surfacesNear(t, x, z)) {
+    if (s.kind === 'ramp' && s.roof !== undefined) {
+      const h = surfaceHeight(s, x, z);
+      if (h !== null && Math.abs(h - y) <= 0.4 && h + s.roof - y < best) best = h + s.roof - y;
+      continue;
+    }
     if (s.kind !== 'deck') continue;
     const h = surfaceHeight(s, x, z);
     if (h === null) continue;

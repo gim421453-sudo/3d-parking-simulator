@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { toTM, fromTM } from './lib/tm';
 import { loadDem, sampleDem } from './lib/dem';
+import { TUNNEL_ROOF } from '../../src/maps/saha/data'; // 터널 천장 높이 — 게임(물리 천장·시각 모델)과 같은 값
 
 type P = [number, number];
 const RAW = 'data-raw/saha';
@@ -510,11 +511,32 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
         const ya = fieldAt(pts[0][0], pts[0][1]);
         const yb = fieldAt(pts[pts.length - 1][0], pts[pts.length - 1][1]);
         const hump = bridge && Number(t.layer ?? 1) >= 1 ? 5.5 : 0;
+        // v0.6.3 터널/지하차도(추정): 지면(±30m 평활) − (천장 + 덮개 1.5m)를 따르되 양 끝에서 최대 6% 로 내려가고,
+        // 직선 추정보다 깊은 쪽을 쓴다(산악 터널은 직선이 더 깊다). 이전 직선 추정은 지하차도 대부분이 지면 바로 밑이라
+        // 천장이 지면 위로 드러나거나 입구 절토가 1km 가까이 길어졌다.
+        const gS: number[] = [];
+        if (tunnel) {
+          const g = pts.map((p) => fieldAt(p[0], p[1]));
+          for (let q = 0; q < pts.length; q++) {
+            let acc = 0;
+            let n = 0;
+            for (let k = 0; k < pts.length; k++) if (Math.abs(sAt[k] - sAt[q]) <= 30) (acc += g[k]), n++;
+            gS.push(acc / n);
+          }
+        }
         for (let q = 0; q < pts.length; q++) {
           const u = L ? sAt[q] / L : 0;
           let y = ya + (yb - ya) * u;
           if (hump) y += Math.min(hump, 0.08 * Math.min(sAt[q], L - sAt[q]));
           if (bridge) y = Math.max(y, fieldAt(pts[q][0], pts[q][1]) + (hump ? 0 : 0.3));
+          if (tunnel) {
+            const sEnd = Math.min(sAt[q], L - sAt[q]);
+            const yEnd = sAt[q] <= L - sAt[q] ? ya : yb;
+            // 끝에서 28m(높이 격자 대각선)는 진입 도로와 같은 면: min(원지면, 직선 추정) — 산악 터널은 직선이 산 속으로 들어간다.
+            // 그 뒤로는 평활 지면 기준 깊이를 따르되 6% 보다 가파르게 내려가지 않는다(끝점 턱 → 하부 접촉 회귀)
+            const run = Math.max(0, sEnd - 28);
+            y = sEnd < 28 ? Math.min(y, fieldAt(pts[q][0], pts[q][1])) : Math.max(Math.min(y, gS[q] - Math.min(TUNNEL_ROOF + 1.5, 0.06 * run)), Math.min(y, yEnd) - 0.06 * run);
+          }
           pts[q][2] = r2(y);
         }
       } else for (const p of pts) p[2] = r2(fieldAt(p[0], p[1]));
@@ -625,6 +647,88 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
   });
   const mainComp = [...compLen.entries()].sort((a, b) => b[1] - a[1])[0];
   const connectedRatio = mainComp[1] / netLen;
+
+  // ---------------------------------------------------------------- 5b. 터널 입구 절토·갱문(v0.6.3)
+  // 이전에는 렌더러가 터널 전 구간 위 지형 칸을 지워 산에 긴 홈(쐐기 구멍)이 보였다. 이제 지형(높이장)은 그대로 두고,
+  // 터널 양 끝에서 노면 위 덮개가 얕은(< PORTAL_COVER) 구간만 높이장을 노면 높이로 깎는다(절토 비탈 1:1.25).
+  // 덮개가 PORTAL_COVER 를 넘는 첫 지점이 갱문(입구)이다. 물리·렌더가 같은 높이장을 쓰므로 둘이 어긋나지 않는다. 형상은 추정.
+  const PORTAL_COVER = TUNNEL_ROOF + 1.0; // 천장 + 1m 슬래브 — 이보다 얕은 끝 구간은 지붕 없는 진입로(절토)
+  const portals: { x: number; z: number; rot: number; w: number; y: number; top: number }[] = [];
+  const cutSt = { roads: 0, nodes: 0 };
+  {
+    const lowered = new Set<number>();
+    /** 깎을 노면 표본(x,z,y, 끝에서의 거리) — 격자점마다 "가장 가까운 표본" 기준으로 깎는다 */
+    type Smp = { x: number; z: number; y: number; sEnd: number; hw: number };
+    const smps: Smp[] = [];
+    for (const r of roads) {
+      if (!r.tunnel) continue;
+      // 원래 지면 기준 덮개(절토 전) — 양 끝에서 안쪽으로
+      const cover = r.pts.map(([x, z, y]) => fieldAt(x, z) - y);
+      const ends: [number, number][] = [
+        [0, 1],
+        [r.pts.length - 1, -1],
+      ];
+      let any = false;
+      for (const [start, step] of ends) {
+        let q = start;
+        const zone: number[] = [];
+        while (q >= 0 && q < r.pts.length && cover[q] < PORTAL_COVER) zone.push((q += step) - step);
+        if (q < 0 || q >= r.pts.length) continue; // 전 구간이 얕음(덮개 없는 짧은 지하차도) — 직선 추정 그대로
+        if (!zone.length) zone.push(start);
+        // 갱문 뒤 15m 까지 절토를 넓히고 갱문을 그 자리로(갱문 앞 비탈이 20m 격자 보간으로 노면을 덮지 않게)
+        for (let ext = 0; ext < 15 && q + step >= 0 && q + step < r.pts.length; ) {
+          ext += Math.hypot(r.pts[q + step][0] - r.pts[q][0], r.pts[q + step][1] - r.pts[q][1]);
+          zone.push(q);
+          q += step;
+        }
+        any = true;
+        let sEnd = 0;
+        for (let k = 0; k < zone.length; k++) {
+          const a = r.pts[zone[k]];
+          const b = r.pts[Math.min(r.pts.length - 1, Math.max(0, zone[k] + step))];
+          const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          const n = Math.max(1, Math.ceil(L / 2));
+          for (let t = 0; t < n; t++) smps.push({ x: a[0] + ((b[0] - a[0]) * t) / n, z: a[1] + ((b[1] - a[1]) * t) / n, y: a[2] + ((b[2] - a[2]) * t) / n, sEnd: sEnd + (L * t) / n, hw: r.w / 2 });
+          sEnd += L;
+        }
+        // 갱문: 덮개가 처음 PORTAL_COVER 를 넘는 점, 방향은 터널 안쪽
+        const p = r.pts[q];
+        const pr = r.pts[q - step];
+        portals.push({ x: r1(p[0]), z: r1(p[1]), rot: Math.round(Math.atan2(p[0] - pr[0], p[1] - pr[1]) * 1000) / 1000, w: r.w, y: p[2], top: p[2] + cover[q] });
+      }
+      if (any) cutSt.roads++;
+    }
+    // 격자점마다 가장 가까운 표본 기준으로 깎는다. 끝에서 8m 안쪽 표본이 가장 가까운 격자점은 깎지 않는다
+    // (20m 격자 보간이 터널 끝 바깥 진입 도로 지면까지 끌어내려 0.3m 턱 → 하부 접촉, tests/saha 장평지하차도)
+    const cand = new Map<number, Smp>();
+    for (const sp of smps) {
+      const R = sp.hw + 1.5 + 14;
+      for (let j = Math.floor((sp.z - R - FZ0) / CELL); j <= Math.ceil((sp.z + R - FZ0) / CELL); j++)
+        for (let i = Math.floor((sp.x - R - FX0) / CELL); i <= Math.ceil((sp.x + R - FX0) / CELL); i++) {
+          if (i < 0 || j < 0 || i >= FW || j >= FH) continue;
+          const k = j * FW + i;
+          const d = Math.hypot(FX0 + i * CELL - sp.x, FZ0 + j * CELL - sp.z);
+          const o = cand.get(k);
+          if (d <= R && (!o || d < Math.hypot(FX0 + i * CELL - o.x, FZ0 + j * CELL - o.z))) cand.set(k, sp);
+        }
+    }
+    // 터널 끝점(진입 도로와 만나는 곳)을 품은 격자 삼각형의 꼭짓점(≤ 격자 대각선 ≈ 28.3m)은 깎지 않는다 — 끝점 지면이 같이 내려가 턱이 생긴다
+    const endPts: P[] = [];
+    for (const r of roads) if (r.tunnel) endPts.push([r.pts[0][0], r.pts[0][1]], [r.pts[r.pts.length - 1][0], r.pts[r.pts.length - 1][1]]);
+    for (const [k, sp] of cand) {
+      if (sp.sEnd < 8) continue;
+      const i = k % FW;
+      const j = Math.floor(k / FW);
+      if (endPts.some((e) => Math.hypot(FX0 + i * CELL - e[0], FZ0 + j * CELL - e[1]) < CELL * 1.45)) continue;
+      const d = Math.hypot(FX0 + i * CELL - sp.x, FZ0 + j * CELL - sp.z);
+      const target = sp.y - 0.02 + Math.max(0, d - (sp.hw + 1.5)) * 0.8;
+      if (dtm[k] > target) {
+        dtm[k] = target;
+        if (!lowered.has(k)) (lowered.add(k), cutSt.nodes++);
+      }
+    }
+    console.log(`터널 입구 절토: 터널 ${cutSt.roads}개, 높이 격자점 ${cutSt.nodes}개, 갱문 ${portals.length}`);
+  }
 
   // ---------------------------------------------------------------- 6. 건물 (구멍 보존)
   interface BldOut {
@@ -1424,6 +1528,10 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     d.y0 = r2(d.y0 - SEA_ZERO);
     d.y1 = r2(d.y1 - SEA_ZERO);
   }
+  for (const p of portals) {
+    p.y = r2(p.y - SEA_ZERO);
+    p.top = r2(p.top - SEA_ZERO);
+  }
   const roadLenByCls: Record<string, number> = {};
   for (const r of roads) {
     let L = 0;
@@ -1475,6 +1583,7 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     buildingsGenerated: genB.length,
     buildingsGeneratedNote: 'g:1 / hs:gen — OSM 에 건물이 없는 시가지 블록을 채운 절차 생성 건물(실제 아님). gk = 생성 종류(house/villa/shop/factory/warehouse, OSM 용도지역 기준)',
     audit,
+    tunnelPortals: { roads: cutSt.roads, portals: portals.length, cutNodes: cutSt.nodes, coverM: PORTAL_COVER, note: '터널 양 끝 덮개 < 천장+1m 구간만 높이장 절토(추정 형상), 터널 위 지형은 보존' },
     parkingLots: lots.length,
     dem: { source: 'Copernicus GLO-30 (DSM)', cellM: CELL, grid: [FW, FH], missingCells: demMissing, seaCells, coverage: r2(1 - demMissing / (FW * FH)), dtm: 'estimated (opening r=100m + gaussian)' },
     landCover: { cells: landCells, urban: covCount[0], grass: covCount[1], forest: covCount[2], water: covCount[3], sand: covCount[4], polygons: coverPolys },
@@ -1496,6 +1605,7 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     bounds: { minX: r1(LB.minX), maxX: r1(LB.maxX), minZ: r1(LB.minZ), maxZ: r1(LB.maxZ) },
     boundary: dongs.map((d) => ({ name: d.name, outer: d.outer.map(simpl), inner: d.inner.map(simpl) })),
     decks,
+    portals,
     sources: [
       { layer: 'roads, buildings, parking, boundary, land cover', name: 'OpenStreetMap', license: 'ODbL-1.0', attribution: '© OpenStreetMap contributors', snapshot: osmBase, method: 'OSM API /map (0.02° 격자) + relation/full' },
       { layer: 'terrain', name: 'Copernicus DEM GLO-30', license: 'Copernicus DEM licence (free, attribution)', attribution: 'Copernicus DEM © DLR e.V. 2010-2014, © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the EU and ESA' },

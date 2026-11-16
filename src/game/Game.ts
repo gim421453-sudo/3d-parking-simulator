@@ -535,12 +535,14 @@ export class Game {
     if (map.stream?.ready && this.sahaBase) {
       // v0.6.2 사하구: 타일 스트리밍(지형·도로·차선·건물 + 건물 충돌체를 이 배열에 붙였다 뗀다)
       const R = this.settings.quality === 'low' ? 300 : this.settings.quality === 'medium' ? 400 : 520;
-      this.saha = new SahaStream(this.sahaBase, this.sahaSrc, { radius: R, colliders: this.colliders, byId: this.colliderById, slots: map.slots, lanes: true, genFill: (this.sahaGenApplied = this.settings.sahaGenFill) }, this.built!.textures.facade);
+      this.saha = new SahaStream(this.sahaBase, this.sahaSrc, { radius: R, colliders: this.colliders, byId: this.colliderById, slots: map.slots, lanes: true, genFill: (this.sahaGenApplied = this.settings.sahaGenFill), atlasCell: this.settings.quality === 'low' ? 64 : this.settings.quality === 'high' ? 256 : 128 }, this.built!.textures.facade);
       this.saha.prime(this.sahaTiles);
       this.scene.add(this.saha.group);
       this.saha.update(map.spawn.x, map.spawn.z);
     }
-    this.rig.cameraOccluders = (map.mechFacilities ?? []).flatMap((f) => facilityCameraOccluders(f, `${f.id}:`));
+    this.baseCamOcc = (map.mechFacilities ?? []).flatMap((f) => facilityCameraOccluders(f, `${f.id}:`));
+    this.rig.cameraOccluders = this.baseCamOcc;
+    this.tunnelOccAt = null;
     this.damage = new DamageWorld(this.scene, this.built!, {
       colliders: this.colliders,
       byId: this.colliderById,
@@ -1565,6 +1567,8 @@ export class Game {
 
   /** 차량 주변 충돌체(공간 인덱스 조회 결과). 차량이 조회 중심에서 3m 이상 벗어나거나 충돌체 목록이 바뀌면 다시 조회한다 */
   private nearBuilds = -1;
+  private baseCamOcc: Collider[] = [];
+  private tunnelOccAt: { x: number; z: number } | null = null;
   private nearColliders(): Collider[] {
     this.spatial.sync(this.colliders);
     // v0.6.3: 다른 곳(파손 세계의 밀린 물체 조회)이 먼저 인덱스를 다시 만들어도 여기서 다시 조회해야 한다.
@@ -2316,7 +2320,15 @@ export class Game {
     const zones = (this.map as unknown as { zones?: { id: string; label: string; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } }[] }).zones;
     const mb = this.map.bounds;
     const largeMap = (mb.maxX - mb.minX) * (mb.maxZ - mb.minZ) > 40000;
-    if (this.saha) this.saha.update(this.car.x, this.car.z);
+    if (this.saha) {
+      this.saha.update(this.car.x, this.car.z);
+      // v0.6.3 터널 벽 카메라 가림(차 주변 60m, 15m 이동마다 갱신 — 배열이 바뀔 때만 교체)
+      if (!this.tunnelOccAt || Math.hypot(this.car.x - this.tunnelOccAt.x, this.car.z - this.tunnelOccAt.z) > 15) {
+        this.tunnelOccAt = { x: this.car.x, z: this.car.z };
+        const tw = this.saha.tunnelOccluders(this.car.x, this.car.z, 60);
+        this.rig.cameraOccluders = tw.length ? [...this.baseCamOcc, ...tw] : this.baseCamOcc;
+      }
+    }
     if (largeMap && !zones) {
       // v0.6.0: 구역이 없는 대형 맵(실제 지도)도 타일 스트리밍 — 먼 타일은 그리지 않는다(충돌/센서는 데이터 기반이라 무관)
       this.zoneAcc += 1 / 60;

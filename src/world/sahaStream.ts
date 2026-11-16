@@ -10,7 +10,9 @@ import * as THREE from 'three';
 import type { Collider } from '../core/geometry';
 import { fieldHeight } from '../maps/terrain';
 import { disposeObject } from '../core/dispose';
-import { buildingColliders, tilesWithin, type SahaMark, type SahaBase, type SahaBuilding, type SahaRoad, type SahaSource, type SahaTile } from '../maps/saha/data';
+import { applyFacadeAtlas, createFacadeAtlas, type FacadeAtlas } from './facadeAtlas';
+import { cellOffset, facadeStyleOf, hipRoof, FACADE_CELLS } from './facadeTypes';
+import { buildingColliders, tilesWithin, TUNNEL_ROOF, type SahaMark, type SahaBase, type SahaBuilding, type SahaRoad, type SahaSource, type SahaTile } from '../maps/saha/data';
 import type { MapSlot } from '../maps/types';
 
 export interface SahaStreamOpts {
@@ -24,6 +26,8 @@ export interface SahaStreamOpts {
   lanes: boolean;
   /** 생성 건물(g:1, 실제 아님) 표시·충돌 — 기본 true */
   genFill?: boolean;
+  /** v0.6.3 외벽 아틀라스 칸 크기(px): low 64 · medium 128 · high 256 */
+  atlasCell?: number;
 }
 interface Loaded {
   key: string;
@@ -53,7 +57,7 @@ export class SahaStream {
   private failed = new Set<string>();
   private cache = new Map<string, SahaTile>();
   private mats: { terrain: THREE.MeshStandardMaterial; road: THREE.MeshStandardMaterial; paint: THREE.MeshBasicMaterial; bld: THREE.MeshStandardMaterial; bldGen: THREE.MeshStandardMaterial; roof: THREE.MeshStandardMaterial; lot: THREE.MeshStandardMaterial; struct: THREE.MeshStandardMaterial; water: THREE.MeshStandardMaterial };
-  private tunnelCells = new Set<number>();
+  private atlas: FacadeAtlas;
   private lastCx = Infinity;
   private lastCz = Infinity;
   private disposed = false;
@@ -75,31 +79,23 @@ export class SahaStream {
       terrain: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }),
       road: po(new THREE.MeshStandardMaterial({ color: 0x45484d, roughness: 0.95, side: THREE.DoubleSide }), -2) as THREE.MeshStandardMaterial,
       paint: po(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }), -4) as THREE.MeshBasicMaterial,
-      bld: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, map: facadeTex ?? null, side: THREE.DoubleSide }),
-      // 생성 건물(실제 아님): 창문 무늬 없는 회청색 — 실제 건물과 한눈에 구분
-      bldGen: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
+      // v0.6.3: 건물 유형별 PBR 외벽 아틀라스(facadeAtlas.ts) — 실제 건물은 유리 반사 있음
+      bld: new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+      // 생성 건물(실제 아님): 회청 패널 칸(창문·반사 없음) — 실제 건물과 한눈에 구분
+      bldGen: new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide }),
       roof: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
       lot: po(new THREE.MeshStandardMaterial({ color: 0x6b6e72, roughness: 0.95, side: THREE.DoubleSide }), -1) as THREE.MeshStandardMaterial,
       struct: new THREE.MeshStandardMaterial({ color: 0x9a9890, roughness: 0.85 }),
       water: new THREE.MeshStandardMaterial({ color: 0x2f5f7c, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.92 }),
     };
     this.group.name = 'SahaStream';
-    // 터널 위 지형 칸(위에서 터널이 보이도록 비운다)
-    const f = base.field;
-    for (const d of base.manifest.decks) {
-      if (!d.tunnel) continue;
-      const fx = Math.sin(d.rot);
-      const fz = Math.cos(d.rot);
-      for (let s = 0; s <= d.length; s += f.cell / 2) {
-        const x = d.x + fx * s;
-        const z = d.z + fz * s;
-        const g = fieldHeight(f, x, z);
-        if (g === null || g < d.y0 + 3) continue;
-        const i = Math.round((x - f.x0) / f.cell);
-        const j = Math.round((z - f.z0) / f.cell);
-        for (let a = -1; a <= 0; a++) for (let b = -1; b <= 0; b++) this.tunnelCells.add((j + b) * f.w + (i + a));
-      }
-    }
+    void facadeTex; // v0.6.2 공용 외벽 텍스처 대신 아틀라스(이 스트림 소유 — dispose 에서 해제)
+    this.atlas = createFacadeAtlas(opts.atlasCell ?? 128, 4);
+    applyFacadeAtlas(this.mats.bld, this.atlas, { glass: true });
+    applyFacadeAtlas(this.mats.bldGen, this.atlas, { glass: false });
+    // v0.6.3: 터널 위 지형 칸을 지우지 않는다(이전: 터널 전 구간 위 산에 긴 홈이 보였다). 입구는 build.ts 가 높이장을 절토했고
+    // 갱문(콘크리트 입구 면)은 manifest.portals 로 한 번만 만든다.
+    this.buildPortals();
     this.buildFar();
   }
 
@@ -223,7 +219,13 @@ export class SahaStream {
     add(this.roadGeo(roads), this.mats.road, 'roads');
     if (this.opts.lanes) add(this.paintGeo(roads, ix, iz, tile.marks ?? []), this.mats.paint, 'lanes');
     add(this.lotGeo(tile), this.mats.lot, 'lots');
-    add(this.structGeo(roads), this.mats.struct, 'bridges-tunnels', true);
+    const tunnelDecks: THREE.BufferGeometry[] = [];
+    add(this.structGeo(roads, tunnelDecks), this.mats.struct, 'bridges-tunnels', true);
+    if (tunnelDecks.length) {
+      const m = THREE_UTILS.mergeGeometries(tunnelDecks.map((g) => g.toNonIndexed()));
+      tunnelDecks.forEach((g) => g.dispose());
+      add(m, this.mats.road, 'tunnel-road', false);
+    }
     const blds = this.opts.genFill === false ? tile.buildings.filter((b) => !b.g) : tile.buildings;
     const bg = this.buildingGeo(blds.filter((b) => !b.g));
     add(bg.walls, this.mats.bld, 'buildings', true);
@@ -285,7 +287,6 @@ export class SahaStream {
     for (let j = j0; j < j0 + n; j++)
       for (let i = i0; i < i0 + n; i++) {
         if (i < 0 || j < 0 || i >= f.w - 1 || j >= f.h - 1) continue;
-        if (this.tunnelCells.has(j * f.w + i)) continue;
         const h = [f.data[j * f.w + i], f.data[j * f.w + i + 1], f.data[(j + 1) * f.w + i], f.data[(j + 1) * f.w + i + 1]];
         if (h.every((v) => v < sea)) continue; // 바다 밑
         // fieldHeight 와 같은 분할: (i,j)-(i+1,j+1) 대각선. 위에서 볼 때 법선 +y 가 되도록 감기 순서
@@ -534,8 +535,61 @@ export class SahaStream {
     }
   }
 
+  private tunnelWalls: Collider[] | null = null;
+  /**
+   * v0.6.3 터널 벽(덮인 구간)의 카메라 전용 가림 상자 — 추적 카메라가 터널 벽을 뚫고 산 속으로 나가지 않게.
+   * 충돌체가 아니다(차량 제약은 상판 가장자리·천장). (x,z) 반경 r 안의 것만 돌려준다.
+   */
+  tunnelOccluders(x: number, z: number, r: number): Collider[] {
+    if (!this.tunnelWalls) {
+      this.tunnelWalls = [];
+      for (const d of this.base.manifest.decks) {
+        if (!d.tunnel) continue;
+        const fx = Math.sin(d.rot);
+        const fz = Math.cos(d.rot);
+        const mx = d.x + (fx * d.length) / 2;
+        const mz = d.z + (fz * d.length) / 2;
+        const my = (d.y0 + d.y1) / 2;
+        const g = fieldHeight(this.base.field, mx, mz);
+        if (g === null || g - my < TUNNEL_ROOF + 0.5) continue; // 진입부(지붕 없음)
+        for (const side of [1, -1]) {
+          const off = side * (d.width / 2 + 0.45);
+          this.tunnelWalls.push({ kind: 'box', id: `tw-${d.id}-${side}`, tag: 'wall', x: mx + fz * off, z: mz - fx * off, w: 0.6, d: d.length + 0.4, rot: d.rot, y0: Math.min(d.y0, d.y1) - 0.5, h: TUNNEL_ROOF + 1.5 + Math.abs(d.y1 - d.y0) });
+        }
+      }
+    }
+    return this.tunnelWalls.filter((c) => Math.abs(c.x - x) < r && Math.abs(c.z - z) < r);
+  }
+
+  /** 갱문: 터널 입구 위·옆 콘크리트 면(입구 구멍 테두리). 시각 전용 — 차량 제약은 상판 가장자리·천장(roof)이 한다 */
+  private buildPortals(): void {
+    const ps = this.base.manifest.portals ?? [];
+    if (!ps.length) return;
+    const geos: THREE.BufferGeometry[] = [];
+    for (const p of ps) {
+      const W = p.w + 1.4; // 터널 벽 바깥 폭(구조 모델과 같은 값)
+      const top = Math.max(p.top + 1.0, p.y + TUNNEL_ROOF + 2.5);
+      const box = (w: number, h: number, d: number, ox: number, oy: number): void => {
+        const g = new THREE.BoxGeometry(w, h, d);
+        g.translate(ox, oy, -d / 2); // 입구 면이 갱문 위치에서 바깥쪽으로
+        g.rotateY(p.rot);
+        g.translate(p.x, 0, p.z);
+        geos.push(g);
+      };
+      box(W + 6, top - (p.y + TUNNEL_ROOF), 1.2, 0, (p.y + TUNNEL_ROOF + top) / 2); // 상부 면
+      box(3, top - p.y + 0.5, 1.2, -(W / 2 + 1.5), (p.y - 0.5 + top) / 2); // 좌우 날개벽
+      box(3, top - p.y + 0.5, 1.2, W / 2 + 1.5, (p.y - 0.5 + top) / 2);
+    }
+    const { mergeGeometries } = THREE_UTILS;
+    const m = mergeGeometries(geos.map((g) => g.toNonIndexed()));
+    geos.forEach((g) => g.dispose());
+    const mesh = new THREE.Mesh(m, this.mats.struct);
+    mesh.name = 'tunnel-portals';
+    this.group.add(mesh);
+  }
+
   /** 교량: 상판 측면·난간(시각 — 낙하 방지는 지형 '가장자리' 판정이 한다), 터널: 바닥·벽·천장 */
-  private structGeo(roads: SahaRoad[]): THREE.BufferGeometry | null {
+  private structGeo(roads: SahaRoad[], deckOut?: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
     const geos: THREE.BufferGeometry[] = [];
     for (const r of roads) {
       if (!r.br && !r.tn) continue;
@@ -547,23 +601,30 @@ export class SahaStream {
         const rot = Math.atan2(bx - ax, bz - az);
         const mid = new THREE.Vector3((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
         const pitch = Math.atan2(by - ay, L);
-        const mk = (w: number, h: number, ox: number, oy: number): void => {
+        const mk = (w: number, h: number, ox: number, oy: number, into = geos): void => {
           const g = new THREE.BoxGeometry(w, h, L + 0.05);
           g.translate(ox, oy, 0);
           g.rotateX(-pitch);
           g.rotateY(rot);
           g.translate(mid.x, mid.y, mid.z);
-          geos.push(g);
+          into.push(g);
         };
         if (r.br) {
           mk(r.w + 0.6, 0.9, 0, -0.42); // 상판
           mk(0.3, 1.0, -(r.w / 2 + 0.15), 0.5); // 난간
           mk(0.3, 1.0, r.w / 2 + 0.15, 0.5);
         } else {
-          mk(r.w + 0.4, 0.3, 0, -0.1); // 터널 노면
-          mk(0.5, 5.6, -(r.w / 2 + 0.45), 2.8);
-          mk(0.5, 5.6, r.w / 2 + 0.45, 2.8);
-          mk(r.w + 1.4, 0.5, 0, 5.85); // 천장
+          mk(r.w + 0.4, 0.3, 0, -0.1, deckOut ?? geos); // 터널 노면(아스팔트 — 구조물 콘크리트와 구분)
+          // v0.6.3: 덮인 구간(지면이 천장 + 0.5m 보다 위)만 벽·천장, 입구 진입부(절토)는 낮은 옹벽만 — 진입부 천장이 지면 위로 드러나지 않게
+          const g = fieldHeight(this.base.field, mid.x, mid.z);
+          if (g !== null && g - mid.y >= TUNNEL_ROOF + 0.5) {
+            mk(0.5, TUNNEL_ROOF, -(r.w / 2 + 0.45), TUNNEL_ROOF / 2);
+            mk(0.5, TUNNEL_ROOF, r.w / 2 + 0.45, TUNNEL_ROOF / 2);
+            mk(r.w + 1.4, 0.5, 0, TUNNEL_ROOF + 0.25); // 천장(아랫면 = 노면 + TUNNEL_ROOF, 물리 천장과 같은 값)
+          } else {
+            mk(0.5, 1.1, -(r.w / 2 + 0.45), 0.55);
+            mk(0.5, 1.1, r.w / 2 + 0.45, 0.55);
+          }
         }
       }
     }
@@ -578,11 +639,24 @@ export class SahaStream {
     const wp: number[] = [];
     const wc: number[] = [];
     const wu: number[] = [];
+    const wa: number[] = [];
     const rp: number[] = [];
     const rc: number[] = [];
+    const white = new THREE.Color(1, 1, 1);
+    const roofTri = (a: number[], b: number[], c: number[], col: THREE.Color): void => {
+      for (const v of [a, c, b]) {
+        rp.push(v[0], v[1], v[2]);
+        rc.push(col.r, col.g, col.b);
+      }
+    };
     for (const b of bs) {
+      const area = Math.abs(b.o.reduce((acc, p, i) => acc + p[0] * b.o[(i + 1) % b.o.length][1] - b.o[(i + 1) % b.o.length][0] * p[1], 0)) / 2;
+      const st = facadeStyleOf(b, area);
       const pal = b.g ? B_PAL.gen : B_PAL[b.k] ?? B_PAL.default;
-      const c = new THREE.Color(pal[hash(b.id) % pal.length]);
+      // 아틀라스가 색을 갖고 있으므로 팔레트는 약한 색조(건물마다 조금씩 다르게)만
+      const c = new THREE.Color(pal[hash(b.id) % pal.length]).lerp(white, b.g ? 0.45 : 0.6);
+      const [mx, my] = cellOffset(st.main);
+      const [gx, gy] = cellOffset(st.ground);
       const y0 = b.y - 3; // 경사 대지: 가장 낮은 꼭짓점보다 3m 아래부터(기초 — 외곽 안쪽 지면이 더 낮아도 뜬 건물이 보이지 않게)
       const y1 = b.y + b.h;
       const rings = [b.o, ...(b.hl ?? [])];
@@ -599,34 +673,70 @@ export class SahaStream {
             [x1, y1, z1],
             [x0, y1, z0],
           ];
+          // UV: u = 벽을 따라 모듈 수, v = 지면(b.y)부터 층 수 → 층고마다 창이 반복된다(1층 v<1 은 1층 칸)
           const UV = [
-            [u / 5, y0 / 4],
-            [(u + L) / 5, y0 / 4],
-            [(u + L) / 5, y1 / 4],
-            [u / 5, y1 / 4],
+            [u / st.module, (y0 - b.y) / st.floor],
+            [(u + L) / st.module, (y0 - b.y) / st.floor],
+            [(u + L) / st.module, (y1 - b.y) / st.floor],
+            [u / st.module, (y1 - b.y) / st.floor],
           ];
           for (const k of [0, 2, 1, 0, 3, 2]) {
             wp.push(...P[k]);
             wc.push(c.r, c.g, c.b);
-            wu.push(UV[k][0], UV[k][1] - y0 / 4);
+            wu.push(UV[k][0], UV[k][1]);
+            wa.push(mx, my, gx, gy);
           }
           u += L;
         }
       }
-      // 지붕(구멍 포함 삼각분할)
-      const contour = b.o.map(([x, z]) => new THREE.Vector2(x, z));
-      const holes = (b.hl ?? []).map((h) => h.map(([x, z]) => new THREE.Vector2(x, z)));
-      if (THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
-      for (const h of holes) if (!THREE.ShapeUtils.isClockWise(h)) h.reverse();
-      const all = [...contour, ...holes.flat()];
-      const rc2 = c.clone().multiplyScalar(0.82);
-      for (const t of THREE.ShapeUtils.triangulateShape(contour, holes))
-        for (const i of [t[0], t[2], t[1]]) {
-          rp.push(all[i].x, y1, all[i].y);
-          rc.push(rc2.r, rc2.g, rc2.b);
+      // 지붕: 작은 주택은 모임지붕(기와색), 그 외 평지붕(콘크리트 또는 녹색 방수 도장 — 일반적인 모습, 실제 지붕 자료 아님)
+      const h = hash(b.id + 'r');
+      const hip = st.roof === 'hip' ? hipRoof(b.o as [number, number][], y1) : null;
+      if (hip) {
+        const tile = new THREE.Color(b.g ? 0x8f99a4 : [0x6b4a3a, 0x4d5257, 0x7a5a40, 0x55616b][h % 4]);
+        for (const t of hip) roofTri(t[0], t[1], t[2], tile);
+      } else {
+        const contour = b.o.map(([x, z]) => new THREE.Vector2(x, z));
+        const holes = (b.hl ?? []).map((ho) => ho.map(([x, z]) => new THREE.Vector2(x, z)));
+        if (THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
+        for (const ho of holes) if (!THREE.ShapeUtils.isClockWise(ho)) ho.reverse();
+        const all = [...contour, ...holes.flat()];
+        const flat = b.g ? c.clone().multiplyScalar(0.85) : new THREE.Color(st.main === 'villa' || st.main === 'apartment' || st.main === 'house' ? (h % 5 < 2 ? 0x5f8a6a : 0xa8a59c) : 0x9d9b95);
+        for (const t of THREE.ShapeUtils.triangulateShape(contour, holes)) roofTri([all[t[0]].x, y1, all[t[0]].y], [all[t[1]].x, y1, all[t[1]].y], [all[t[2]].x, y1, all[t[2]].y], flat);
+        // 옥상 계단실/기계실(면적 200m² 이상 — 중심이 외곽 안일 때만)
+        if (st.rooftop && area > 200) {
+          const cx = b.o.reduce((a2, p) => a2 + p[0], 0) / b.o.length;
+          const cz = b.o.reduce((a2, p) => a2 + p[1], 0) / b.o.length;
+          let inside = false;
+          for (let i = 0, j = b.o.length - 1; i < b.o.length; j = i++) {
+            const [xi, zi] = b.o[i];
+            const [xj, zj] = b.o[j];
+            if (zi > cz !== zj > cz && cx < ((xj - xi) * (cz - zi)) / (zj - zi) + xi) inside = !inside;
+          }
+          if (inside) {
+            const s = 1.8;
+            const top = y1 + 2.6;
+            const box = new THREE.Color(0xb7b3aa);
+            const q = [
+              [cx - s, cz - s],
+              [cx + s, cz - s],
+              [cx + s, cz + s],
+              [cx - s, cz + s],
+            ];
+            for (let i = 0; i < 4; i++) {
+              const [ax, az] = q[i];
+              const [bx, bz] = q[(i + 1) % 4];
+              roofTri([ax, y1, az], [bx, y1, bz], [bx, top, bz], box.clone().multiplyScalar(0.9));
+              roofTri([ax, y1, az], [bx, top, bz], [ax, top, az], box.clone().multiplyScalar(0.9));
+            }
+            roofTri([q[0][0], top, q[0][1]], [q[2][0], top, q[2][1]], [q[1][0], top, q[1][1]], box);
+            roofTri([q[0][0], top, q[0][1]], [q[3][0], top, q[3][1]], [q[2][0], top, q[2][1]], box);
+          }
         }
+      }
     }
     const walls = wp.length ? this.geo(wp, wc, wu) : null;
+    if (walls) walls.setAttribute('aCell', new THREE.Float32BufferAttribute(wa, 4));
     const roofs = rp.length ? this.geo(rp, rc) : null;
     return { walls, roofs };
   }
@@ -650,10 +760,12 @@ export class SahaStream {
   dispose(): void {
     this.disposed = true;
     for (const k of [...this.loaded.keys()]) this.unload(k);
-    disposeObject(this.group, { textures: new Set<THREE.Texture>(this.mats.bld.map ? [this.mats.bld.map] : []) }); // 외벽 텍스처는 맵 빌더 공유 자원
+    disposeObject(this.group, { textures: new Set<THREE.Texture>([this.atlas.map, this.atlas.normalMap, this.atlas.ormMap]) });
     for (const m of Object.values(this.mats)) m.dispose();
+    this.atlas.dispose();
   }
 }
 
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 const THREE_UTILS = { mergeGeometries };
+void FACADE_CELLS;
