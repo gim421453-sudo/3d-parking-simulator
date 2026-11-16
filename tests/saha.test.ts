@@ -45,8 +45,36 @@ describe('사하구 실제 지도 데이터 (v0.6.2)', () => {
     const names = base.manifest.sources.map((s) => s.license);
     expect(names.some((l) => l.includes('ODbL'))).toBe(true);
     expect(names.some((l) => l.includes('Copernicus'))).toBe(true);
-    expect((base.manifest.quality as { buildingsGenerated: number }).buildingsGenerated).toBe(0);
+    // 생성 건물(빈 블록 채움)은 개수가 따로 보고되고 실제 건물 수(OSM)는 그대로다
+    const q = base.manifest.quality as { buildingsGenerated: number; buildingsKept: number };
+    expect(q.buildingsKept).toBe(5155);
+    expect(q.buildingsGenerated).toBeGreaterThan(0);
     expect(fs.existsSync(path.join(DIR, 'LICENSE.md'))).toBe(true);
+  });
+  it('생성 건물(실제 아님): 모두 g=1·hs=gen 표시, 실제 건물과 겹치지 않고 도로를 침범하지 않는다', () => {
+    let gen = 0;
+    for (const t of tiles.values()) {
+      const real = t.buildings.filter((b) => !b.g).flatMap((b) => footprintBoxes(b.o as Pt[], 1));
+      for (const b of t.buildings.filter((q) => q.g)) {
+        gen++;
+        expect(b.hs).toBe('gen');
+        expect(b.k).toBe('gen');
+        for (const q of footprintBoxes(b.o as Pt[], 1))
+          expect(real.some((r) => obbOverlap({ x: q.x, z: q.z, rot: q.rot, hw: q.w / 2 - 0.3, hl: q.d / 2 - 0.3 }, { x: r.x, z: r.z, rot: r.rot, hw: r.w / 2 - 0.3, hl: r.d / 2 - 0.3 })), b.id).toBe(false);
+        for (const [x, z] of b.o)
+          for (const r of t.roads) {
+            if (r.tn || r.c >= 8) continue;
+            for (let i = 1; i < r.p.length; i++) {
+              const [ax, az] = r.p[i - 1];
+              const [bx, bz] = r.p[i];
+              const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+              const u = l2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2)) : 0;
+              expect(Math.hypot(x - (ax + dx * u), z - (az + dz * u)) - r.w / 2, `${b.id} vs ${r.id}`).toBeGreaterThan(2);
+            }
+          }
+      }
+    }
+    expect(gen).toBeGreaterThan(0);
   });
   it('지형: 높이장이 경계 전체를 덮고, 기계식 시설 자리는 y=0, 해수면은 음수 기준고', () => {
     const f = base.field;

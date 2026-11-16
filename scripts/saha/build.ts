@@ -7,7 +7,7 @@
  * 높이: Copernicus GLO-30(DSM) → 열림 연산(건물 제거 근사) + 평활 = **추정 지표면**(열림 반경 100m). 괴정역 기계식 시설 자리를 y=0 으로 맞춘다
  *       (기계식 시설 키트가 y=0 바닥을 전제) — 해수면은 y = −seaOffset.
  * 데이터 계층 분리: OSM(ODbL) 도로/건물/면/경계, Copernicus(DEM) 지형. 출처는 manifest.sources 에 계층별로 남긴다.
- * 실제/추정 구분: 차로 수·폭·건물 높이·교량 종단은 값마다 출처 플래그(osm/est)를 둔다. 절차 생성 건물은 만들지 않는다.
+ * 실제/추정 구분: 차로 수·폭·건물 높이·교량 종단은 값마다 출처 플래그(osm/est)를 둔다. 절차 생성 건물(빈 블록 채움)은 g:1·hs:'gen' 으로 표시해 실제 건물과 구분한다.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -723,6 +723,115 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     lots.push({ id: `w${w.id}`, name: w.tags.name, pts: pts.map(([x, z]) => [r1(x), r1(z)]), y: r2(fieldAt(cx, cz)) });
   }
 
+  // ---------------------------------------------------------------- 7b. 생성 건물(실제 아님): OSM 에 건물이 없는 시가지 블록 채우기
+  // 규칙: 토지피복 '시가지' 칸, 도로 가장자리에서 3.5~40m(블록 앞쪽), 실제 건물·주차장·학교/공원/병원 등 시설 면·기계식 시설 자리와 겹치지 않음,
+  //       경사 30% 미만. 2~5층 저층, 가까운 도로와 나란히. 결정적 난수(재현 가능). 타일에는 g:1·hs:'gen' 으로 실제 건물과 구분해 넣는다.
+  const OCC = 4;
+  const occ = new Set<number>();
+  const okey = (i: number, j: number): number => (i + 20000) * 40000 + (j + 20000);
+  const rasterOcc = (ring: P[], margin: number): void => {
+    const xs = ring.map((p) => p[0]);
+    const zs = ring.map((p) => p[1]);
+    for (let i = Math.floor((Math.min(...xs) - margin) / OCC); i <= Math.floor((Math.max(...xs) + margin) / OCC); i++)
+      for (let j = Math.floor((Math.min(...zs) - margin) / OCC); j <= Math.floor((Math.max(...zs) + margin) / OCC); j++) {
+        const x = (i + 0.5) * OCC;
+        const z = (j + 0.5) * OCC;
+        if (inRing(ring, x, z) || ring.some((p, k) => segDist(x, z, p, ring[(k + 1) % ring.length]) <= margin + OCC * 0.71)) occ.add(okey(i, j));
+      }
+  };
+  for (const b of uniq) rasterOcc(b.outer, 1.5);
+  for (const l of lots) rasterOcc(l.pts, 1);
+  const NOFILL = (t: Record<string, string>): boolean =>
+    ['school', 'university', 'college', 'kindergarten', 'hospital', 'place_of_worship', 'parking', 'fuel', 'marketplace'].includes(t.amenity ?? '') ||
+    !!t.leisure ||
+    ['industrial', 'military', 'construction', 'railway', 'cemetery', 'religious', 'recreation_ground', 'grass', 'forest', 'farmland', 'meadow', 'brownfield'].includes(t.landuse ?? '') ||
+    !!t.natural || t.waterway === 'riverbank';
+  let noFillPolys = 0;
+  for (const w of ways.values()) {
+    if (!NOFILL(w.tags) || w.refs[0] !== w.refs[w.refs.length - 1] || w.tags.highway || w.tags.building) continue;
+    const ring = ringPts(w.refs.slice(0, -1));
+    if (ring.length < 3 || Math.abs(area(ring)) > 2e6) continue;
+    rasterOcc(ring, 0);
+    noFillPolys++;
+  }
+  // 도로 선분 격자(가장 가까운 도로 가장자리 거리·방향)
+  const RG = 40;
+  const rgrid = new Map<number, { a: P; b: P; hw: number }[]>();
+  for (const r of roads) {
+    // 생성 건물 기준 도로: 일반 도로만(서비스 도로·임도 옆 산지에 집을 만들지 않는다). 터널 제외
+    if (r.tunnel || r.cls >= 8) continue;
+    for (let q = 1; q < r.pts.length; q++) {
+      const a: P = [r.pts[q - 1][0], r.pts[q - 1][1]];
+      const b: P = [r.pts[q][0], r.pts[q][1]];
+      const seg = { a, b, hw: r.w / 2 };
+      for (let i = Math.floor(Math.min(a[0], b[0]) / RG); i <= Math.floor(Math.max(a[0], b[0]) / RG); i++)
+        for (let j = Math.floor(Math.min(a[1], b[1]) / RG); j <= Math.floor(Math.max(a[1], b[1]) / RG); j++) {
+          const k = okey(i, j);
+          const l = rgrid.get(k);
+          if (l) l.push(seg);
+          else rgrid.set(k, [seg]);
+        }
+    }
+  }
+  const roadEdge = (x: number, z: number): { d: number; dir: number } => {
+    let best = { d: Infinity, dir: 0 };
+    const i0 = Math.floor(x / RG);
+    const j0 = Math.floor(z / RG);
+    for (let i = i0 - 2; i <= i0 + 2; i++)
+      for (let j = j0 - 2; j <= j0 + 2; j++)
+        for (const sgm of rgrid.get(okey(i, j)) ?? []) {
+          const d = segDist(x, z, sgm.a, sgm.b) - sgm.hw;
+          if (d < best.d) best = { d, dir: Math.atan2(sgm.b[0] - sgm.a[0], sgm.b[1] - sgm.a[1]) };
+        }
+    return best;
+  };
+  let seed = 20261116;
+  const rnd = (): number => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  interface GenB {
+    id: string;
+    outer: P[];
+    h: number;
+    levels: number;
+    base: number;
+  }
+  const genB: GenB[] = [];
+  const GSTEP = 13;
+  for (let gx = LB.minX; gx <= LB.maxX; gx += GSTEP)
+    for (let gz = LB.minZ; gz <= LB.maxZ; gz += GSTEP) {
+      const x = gx + (rnd() - 0.5) * 4;
+      const z = gz + (rnd() - 0.5) * 4;
+      const fi = Math.round((x - FX0) / CELL);
+      const fj = Math.round((z - FZ0) / CELL);
+      if (fi < 0 || fj < 0 || fi >= FW || fj >= FH || cover[fj * FW + fi] !== 0 || !LAND[fj * FW + fi]) continue;
+      if (Math.hypot(x - fac[0], z - fac[1]) < 70) continue;
+      if (fieldAt(x, z) > 120) continue; // 해발 120m 위(산지)는 채우지 않는다(추정 지표면 기준)
+      const nr = roadEdge(x, z);
+      if (nr.d < 3.5 + 5 || nr.d > 40) continue;
+      if (occ.has(okey(Math.floor(x / OCC), Math.floor(z / OCC)))) continue;
+      const w = 8 + rnd() * 5;
+      const d = 8 + rnd() * 4;
+      const c = Math.cos(nr.dir);
+      const sn = Math.sin(nr.dir);
+      const corners: P[] = [
+        [-w / 2, -d / 2],
+        [w / 2, -d / 2],
+        [w / 2, d / 2],
+        [-w / 2, d / 2],
+      ].map(([lx, lz]) => [r1(x + lx * c + lz * sn), r1(z - lx * sn + lz * c)] as P);
+      // 모서리도 도로 가장자리에서 2.5m 이상, 점유 칸·경계 밖 금지
+      if (corners.some(([cx, cz]) => roadEdge(cx, cz).d < 2.5 || !inLand(cx, cz))) continue;
+      let blocked = false;
+      for (const [cx, cz] of [...corners, [x, z] as P]) if (occ.has(okey(Math.floor(cx / OCC), Math.floor(cz / OCC)))) blocked = true;
+      if (blocked) continue;
+      const ys = corners.map(([cx, cz]) => fieldAt(cx, cz));
+      if (Math.max(...ys) - Math.min(...ys) > 0.3 * Math.max(w, d)) continue;
+      const levels = 2 + Math.floor(rnd() * 4);
+      const outer = area(corners) < 0 ? corners.reverse() : corners;
+      genB.push({ id: `g${genB.length}`, outer, h: r1(levels * 3 + 0.8), levels, base: r2(Math.min(...ys)) });
+      rasterOcc(outer, 1.5);
+    }
+  console.log(`생성 건물(실제 아님): ${genB.length}동 (채우지 않는 면 ${noFillPolys})`);
+
   // ---------------------------------------------------------------- 8. 타일
   const tkey = (x: number, z: number): string => `${Math.floor(x / TILE)}_${Math.floor(z / TILE)}`;
   interface TileData {
@@ -797,6 +906,11 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
   for (const b of uniq) {
     const c = cen(b);
     tileOf(tkey(c[0], c[1])).buildings.push({ id: b.id, n: b.name, k: b.kind, o: b.outer, hl: b.holes.length ? b.holes : undefined, h: b.h, lv: b.levels ?? undefined, hs: b.hSrc, y: b.base });
+  }
+  for (const g of genB) {
+    const cx = g.outer.reduce((a, p) => a + p[0], 0) / g.outer.length;
+    const cz = g.outer.reduce((a, p) => a + p[1], 0) / g.outer.length;
+    tileOf(tkey(cx, cz)).buildings.push({ id: g.id, k: 'gen', o: g.outer, h: g.h, lv: g.levels, hs: 'gen', g: 1, y: g.base });
   }
   for (const l of lots) {
     const c: P = [l.pts.reduce((s, p) => s + p[0], 0) / l.pts.length, l.pts.reduce((s, p) => s + p[1], 0) / l.pts.length];
@@ -897,7 +1011,8 @@ const demFiles = ['N35_00_E128_00', 'N35_00_E129_00', 'N34_00_E128_00', 'N34_00_
     buildingsWithHeightTag: uniq.filter((b) => b.hSrc === 'osm-height').length,
     buildingsWithLevelsTag: uniq.filter((b) => b.hSrc === 'osm-levels').length,
     buildingsHeightEstimated: uniq.filter((b) => b.hSrc === 'est').length,
-    buildingsGenerated: 0,
+    buildingsGenerated: genB.length,
+    buildingsGeneratedNote: 'g:1 / hs:gen — OSM 에 건물이 없는 시가지 블록을 채운 절차 생성 건물(실제 아님)',
     parkingLots: lots.length,
     dem: { source: 'Copernicus GLO-30 (DSM)', cellM: CELL, grid: [FW, FH], missingCells: demMissing, seaCells, coverage: r2(1 - demMissing / (FW * FH)), dtm: 'estimated (opening r=100m + gaussian)' },
     landCover: { cells: landCells, urban: covCount[0], grass: covCount[1], forest: covCount[2], water: covCount[3], sand: covCount[4], polygons: coverPolys },

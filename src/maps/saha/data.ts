@@ -72,7 +72,9 @@ export interface SahaBuilding {
   h: number;
   lv?: number;
   /** 높이 출처 */
-  hs: 'osm-height' | 'osm-levels' | 'est';
+  hs: 'osm-height' | 'osm-levels' | 'est' | 'gen';
+  /** 1 = 생성 건물(OSM 에 건물이 없는 블록을 채운 것 — 실제 건물 아님) */
+  g?: 1;
   /** 바닥 높이(외곽 꼭짓점 지면 최저) */
   y: number;
 }

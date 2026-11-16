@@ -23,6 +23,8 @@ export interface Settings {
   assistGuides: boolean; // 조향 연동 주차 가이드라인
   /** v0.6.1 서라운드뷰 예상 이동선: basic = 차체 폭 경계 2선(이전), detail = 앞바퀴 2(실선)+뒷바퀴 2(점선)+앞 모서리 스윙+충돌 예상 지점 */
   surroundGuideMode: 'basic' | 'detail';
+  /** v0.6.2 사하구: OSM 에 건물이 없는 블록을 채운 생성 건물(실제 아님) 표시 */
+  sahaGenFill: boolean;
   assistCameraFps: number; // 주차 보조 카메라 갱신 FPS (부하 조절)
   pdcPalette: PdcPaletteId; // PDC 경고 색상 프리셋
   /** 3인칭 화면에 좌/룸/우 미러 표시 (기본 OFF, v0.5.0) */
@@ -78,6 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
   assistExitSec: 3,
   assistGuides: true,
   surroundGuideMode: 'detail',
+  sahaGenFill: true,
   assistCameraFps: 30,
   pdcPalette: 'standard',
   thirdMirror: false,
@@ -121,6 +124,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Settings {
   if (!(s.pdcPalette in PDC_PALETTES)) s.pdcPalette = 'standard';
   s.pdcView = s.pdcView === 'sensor' ? 'sensor' : 'surround';
   s.surroundGuideMode = s.surroundGuideMode === 'basic' ? 'basic' : 'detail';
+  s.sahaGenFill = s.sahaGenFill !== false;
   s.thirdMirror = s.thirdMirror === true;
   s.mechAutoSlot = s.mechAutoSlot === true;
   s.engineSound = s.engineSound !== false;

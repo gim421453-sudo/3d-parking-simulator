@@ -15,7 +15,7 @@ import { deckSurfaces, tileKeyOf, type SahaBase, type SahaLot, type SahaTile } f
 
 export const SAHA_ATTRIBUTION = '© OpenStreetMap contributors (ODbL) · 지형 Copernicus DEM GLO-30 (추정 지표면)';
 const DESC =
-  '부산광역시 사하구 법정동 8개 전역(41.4km²) — 실제 도로망·건물(OpenStreetMap)·지형 고도(Copernicus DEM). 차로 수는 OSM 태그가 있는 구간만 실제이고 나머지는 도로 등급으로 추정, 건물 높이는 층수 태그가 없으면 추정. 생성 건물 없음. ' +
+  '부산광역시 사하구 법정동 8개 전역(41.4km²) — 실제 도로망·건물(OpenStreetMap)·지형 고도(Copernicus DEM). 차로 수는 OSM 태그가 있는 구간만 실제이고 나머지는 도로 등급으로 추정, 건물 높이는 층수 태그가 없으면 추정. OSM 에 건물이 없는 블록의 회청색 무늬 없는 건물은 생성 건물(실제 아님 — 설정에서 끌 수 있음). ' +
   SAHA_ATTRIBUTION;
 
 /** 미션 주차장(OSM 면 id) — 중심 좌표는 타일을 미리 받기 위한 값(build 결과) */

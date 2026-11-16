@@ -22,6 +22,8 @@ export interface SahaStreamOpts {
   slots: MapSlot[];
   /** 차선 그리기 */
   lanes: boolean;
+  /** 생성 건물(g:1, 실제 아님) 표시·충돌 — 기본 true */
+  genFill?: boolean;
 }
 interface Loaded {
   key: string;
@@ -29,12 +31,13 @@ interface Loaded {
   colliderIds: string[];
   tris: number;
 }
-const COVER_COL = [new THREE.Color(0x8d8a80), new THREE.Color(0x7d9a5a), new THREE.Color(0x4f6f3e), new THREE.Color(0x3d6a85), new THREE.Color(0xd8c9a0)];
+const COVER_COL = [new THREE.Color(0x9a978d), new THREE.Color(0x7d9a5a), new THREE.Color(0x4f6f3e), new THREE.Color(0x3d6a85), new THREE.Color(0xd8c9a0)];
 const B_PAL: Record<string, number[]> = {
   apartments: [0xe9e6de, 0xdcd8cc, 0xe3ddd0],
   industrial: [0xb8bcc0, 0xa8adb2, 0xc4c2b8],
   warehouse: [0xb8bcc0, 0xa8adb2],
   school: [0xd9b9a0, 0xd0ad92],
+  gen: [0xa9b2bc, 0xa1abb6, 0xb2b9c1],
   default: [0xe6e0d4, 0xd9d4c8, 0xeae6dc, 0xcfc9bc, 0xe0d8c8, 0xc9bfae],
 };
 const hash = (s: string): number => {
@@ -49,7 +52,7 @@ export class SahaStream {
   private pending = new Set<string>();
   private failed = new Set<string>();
   private cache = new Map<string, SahaTile>();
-  private mats: { terrain: THREE.MeshStandardMaterial; road: THREE.MeshStandardMaterial; paint: THREE.MeshBasicMaterial; bld: THREE.MeshStandardMaterial; roof: THREE.MeshStandardMaterial; lot: THREE.MeshStandardMaterial; struct: THREE.MeshStandardMaterial; water: THREE.MeshStandardMaterial };
+  private mats: { terrain: THREE.MeshStandardMaterial; road: THREE.MeshStandardMaterial; paint: THREE.MeshBasicMaterial; bld: THREE.MeshStandardMaterial; bldGen: THREE.MeshStandardMaterial; roof: THREE.MeshStandardMaterial; lot: THREE.MeshStandardMaterial; struct: THREE.MeshStandardMaterial; water: THREE.MeshStandardMaterial };
   private tunnelCells = new Set<number>();
   private lastCx = Infinity;
   private lastCz = Infinity;
@@ -73,6 +76,8 @@ export class SahaStream {
       road: po(new THREE.MeshStandardMaterial({ color: 0x45484d, roughness: 0.95, side: THREE.DoubleSide }), -2) as THREE.MeshStandardMaterial,
       paint: po(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }), -4) as THREE.MeshBasicMaterial,
       bld: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, map: facadeTex ?? null, side: THREE.DoubleSide }),
+      // 생성 건물(실제 아님): 창문 무늬 없는 회청색 — 실제 건물과 한눈에 구분
+      bldGen: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
       roof: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
       lot: po(new THREE.MeshStandardMaterial({ color: 0x6b6e72, roughness: 0.95, side: THREE.DoubleSide }), -1) as THREE.MeshStandardMaterial,
       struct: new THREE.MeshStandardMaterial({ color: 0x9a9890, roughness: 0.85 }),
@@ -219,12 +224,16 @@ export class SahaStream {
     if (this.opts.lanes) add(this.paintGeo(roads, ix, iz, tile.marks ?? []), this.mats.paint, 'lanes');
     add(this.lotGeo(tile), this.mats.lot, 'lots');
     add(this.structGeo(roads), this.mats.struct, 'bridges-tunnels', true);
-    const bg = this.buildingGeo(tile.buildings);
+    const blds = this.opts.genFill === false ? tile.buildings.filter((b) => !b.g) : tile.buildings;
+    const bg = this.buildingGeo(blds.filter((b) => !b.g));
     add(bg.walls, this.mats.bld, 'buildings', true);
     add(bg.roofs, this.mats.roof, 'roofs', true);
+    const gg = this.buildingGeo(blds.filter((b) => b.g));
+    add(gg.walls, this.mats.bldGen, 'buildings-generated', true);
+    add(gg.roofs, this.mats.roof, 'roofs-generated', true);
     // 충돌체
     const ids: string[] = [];
-    for (const b of tile.buildings) {
+    for (const b of blds) {
       buildingColliders(b).forEach((c) => {
         this.opts.colliders.push(c);
         this.opts.byId.set(c.id, c);
@@ -269,7 +278,9 @@ export class SahaStream {
       const k = j * f.w + i;
       pos.push(f.x0 + i * f.cell, f.data[k], f.z0 + j * f.cell);
       const c = COVER_COL[this.base.cover[k]] ?? COVER_COL[0];
-      col.push(c.r, c.g, c.b);
+      // 단색 사막처럼 보이지 않게 격자점마다 결정적 밝기 변화(±7%) — 높이·물리와 무관(색만)
+      const n = 0.93 + ((Math.imul(i * 73856093 ^ j * 19349663, 2654435761) >>> 0) % 1000) / 1000 * 0.14;
+      col.push(c.r * n, c.g * n, c.b * n);
     };
     for (let j = j0; j < j0 + n; j++)
       for (let i = i0; i < i0 + n; i++) {
@@ -369,6 +380,50 @@ export class SahaStream {
     const col: number[] = [];
     this.slotPaint(ix, iz, pos, col);
     this.markPaint(marks, pos, col);
+    // 교차점: 이 타일 안에서 도로 팔이 3개 이상 모이는 꼭짓점(끝점 = 팔 1, 중간점 = 팔 2). 차선은 교차점 안까지 그리지 않는다
+    const arms = new Map<string, { n: number; w: number }>();
+    const key = (x: number, z: number): string => `${Math.round(x * 2)},${Math.round(z * 2)}`;
+    for (const r of roads) {
+      if (r.tn) continue;
+      r.p.forEach(([x, z], i) => {
+        const k = key(x, z);
+        const a = arms.get(k) ?? { n: 0, w: 0 };
+        a.n += i === 0 || i === r.p.length - 1 ? 1 : 2;
+        a.w = Math.max(a.w, r.w);
+        arms.set(k, a);
+      });
+    }
+    const trim = (p: [number, number, number][]): [number, number, number][][] => {
+      // 교차점 반경(가장 넓은 도로 폭/2 + 1m) 안을 잘라 낸 조각들
+      const cut: { s: number; r: number }[] = [];
+      const sAt: number[] = [0];
+      for (let i = 1; i < p.length; i++) sAt.push(sAt[i - 1] + Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]));
+      p.forEach(([x, z], i) => {
+        const a = arms.get(key(x, z));
+        if (a && a.n >= 3) cut.push({ s: sAt[i], r: a.w / 2 + 1 });
+      });
+      if (!cut.length) return [p];
+      const L = sAt[sAt.length - 1];
+      const keep: [number, number][] = [];
+      let s0 = 0;
+      for (const c of cut.sort((a, b) => a.s - b.s)) {
+        if (c.s - c.r > s0) keep.push([s0, c.s - c.r]);
+        s0 = Math.max(s0, c.s + c.r);
+      }
+      if (s0 < L) keep.push([s0, L]);
+      const at = (s: number): [number, number, number] => {
+        let i = 1;
+        while (i < sAt.length - 1 && sAt[i] < s) i++;
+        const t = (s - sAt[i - 1]) / Math.max(1e-6, sAt[i] - sAt[i - 1]);
+        return [p[i - 1][0] + (p[i][0] - p[i - 1][0]) * t, p[i - 1][1] + (p[i][1] - p[i - 1][1]) * t, p[i - 1][2] + (p[i][2] - p[i - 1][2]) * t];
+      };
+      return keep.filter(([a, b]) => b - a > 1).map(([a, b]) => {
+        const out: [number, number, number][] = [at(a)];
+        for (let i = 0; i < p.length; i++) if (sAt[i] > a && sAt[i] < b) out.push(p[i]);
+        out.push(at(b));
+        return out;
+      });
+    };
     const Y = new THREE.Color(0xf2c200);
     const Wt = new THREE.Color(0xf4f4f4);
     for (const r of roads) {
@@ -377,7 +432,10 @@ export class SahaStream {
       if (total < 1 || r.w < 4.5) continue;
       const lw = Math.min(3.5, (r.w - 0.6) / Math.max(1, total));
       const dy = r.br ? 0.05 : 0.06;
-      const line = (off: number, w: number, c: THREE.Color, dash?: { on: number; off: number }): void => this.strip(r.p, off - w / 2, off + w / 2, dy, pos, dash, col, c, !r.br);
+      const parts = trim(r.p);
+      const line = (off: number, w: number, c: THREE.Color, dash?: { on: number; off: number }): void => {
+        for (const pp of parts) this.strip(pp, off - w / 2, off + w / 2, dy, pos, dash, col, c, !r.br);
+      };
       if (!r.o) {
         // 중앙선: 오른쪽(+법선 쪽이 아닌) — strip 의 법선은 진행 방향 기준 한쪽, 중앙선은 정/역 차로 경계(오프셋 = (bw − fw)/2 · lw)
         const center = ((bw - fw) / 2) * lw;
@@ -405,11 +463,23 @@ export class SahaStream {
       const contour = l.p.map(([x, z]) => new THREE.Vector2(x, z));
       if (THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
       const tris = THREE.ShapeUtils.triangulateShape(contour, []);
-      for (const t of tris)
-        for (const i of [t[0], t[2], t[1]]) {
-          const v = contour[i];
-          pos.push(v.x, (fieldHeight(f, v.x, v.y) ?? l.y) + 0.07, v.y);
+      // 큰 삼각형을 6m 이하로 쪼개 꼭짓점마다 지형 높이 — 경사진 주차장이 지형에 묻히거나 뜨지 않게
+      const put = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number, depth: number): void => {
+        const e = Math.max(Math.hypot(bx - ax, bz - az), Math.hypot(cx - bx, cz - bz), Math.hypot(ax - cx, az - cz));
+        if (e > 6 && depth < 6) {
+          const abx = (ax + bx) / 2, abz = (az + bz) / 2, bcx = (bx + cx) / 2, bcz = (bz + cz) / 2, cax = (cx + ax) / 2, caz = (cz + az) / 2;
+          put(ax, az, abx, abz, cax, caz, depth + 1);
+          put(abx, abz, bx, bz, bcx, bcz, depth + 1);
+          put(cax, caz, bcx, bcz, cx, cz, depth + 1);
+          put(abx, abz, bcx, bcz, cax, caz, depth + 1);
+          return;
         }
+        for (const [x, z] of [[ax, az], [bx, bz], [cx, cz]]) pos.push(x, (fieldHeight(f, x, z) ?? l.y) + 0.07, z);
+      };
+      for (const t of tris) {
+        const a = contour[t[0]], b = contour[t[2]], c = contour[t[1]];
+        put(a.x, a.y, b.x, b.y, c.x, c.y, 0);
+      }
     }
     return this.geo(pos);
   }
@@ -511,7 +581,7 @@ export class SahaStream {
     const rp: number[] = [];
     const rc: number[] = [];
     for (const b of bs) {
-      const pal = B_PAL[b.k] ?? B_PAL.default;
+      const pal = b.g ? B_PAL.gen : B_PAL[b.k] ?? B_PAL.default;
       const c = new THREE.Color(pal[hash(b.id) % pal.length]);
       const y0 = b.y - 3; // 경사 대지: 가장 낮은 꼭짓점보다 3m 아래부터(기초 — 외곽 안쪽 지면이 더 낮아도 뜬 건물이 보이지 않게)
       const y1 = b.y + b.h;

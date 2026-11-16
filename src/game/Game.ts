@@ -532,7 +532,7 @@ export class Game {
     if (map.stream?.ready && this.sahaBase) {
       // v0.6.2 사하구: 타일 스트리밍(지형·도로·차선·건물 + 건물 충돌체를 이 배열에 붙였다 뗀다)
       const R = this.settings.quality === 'low' ? 300 : this.settings.quality === 'medium' ? 400 : 520;
-      this.saha = new SahaStream(this.sahaBase, this.sahaSrc, { radius: R, colliders: this.colliders, byId: this.colliderById, slots: map.slots, lanes: true }, this.built!.textures.facade);
+      this.saha = new SahaStream(this.sahaBase, this.sahaSrc, { radius: R, colliders: this.colliders, byId: this.colliderById, slots: map.slots, lanes: true, genFill: (this.sahaGenApplied = this.settings.sahaGenFill) }, this.built!.textures.facade);
       this.saha.prime(this.sahaTiles);
       this.scene.add(this.saha.group);
       this.saha.update(map.spawn.x, map.spawn.z);
@@ -585,6 +585,7 @@ export class Game {
   saha: SahaStream | null = null;
   sahaBase: SahaBase | null = null;
   private sahaTiles = new Map<string, SahaTile>();
+  private sahaGenApplied = true;
   sahaLoad: { state: 'idle' | 'loading' | 'ready' | 'error'; ms: number; error?: string } = { state: 'idle', ms: 0 };
   private readonly sahaSrc: SahaSource = {
     json: async <T,>(rel: string): Promise<T> => {
@@ -633,7 +634,9 @@ export class Game {
     this.beeper.volume = this.settings.sensorVolume;
     const map = getMap(this.settings.mapId);
     // v0.6.0: 부서지거나 밀린 물체가 있으면 다시 만든다(재시작 = 원래 상태)
-    if (this.loadedMapId !== map.id || !this.built || this.damage?.worldChanged) this.loadMap(map);
+    // v0.6.2: 사하구 생성 건물 표시 설정이 바뀌었으면 스트리밍을 다시 만든다(다음 시작부터 적용)
+    const genChanged = !!map.stream && !!this.saha && this.sahaGenApplied !== this.settings.sahaGenFill;
+    if (this.loadedMapId !== map.id || !this.built || this.damage?.worldChanged || genChanged) this.loadMap(map);
     else this.damage?.resetCar(this.model?.bodyGroup ?? null);
     this.map = map;
     this.missionDef = map.missions.find((m) => m.id === this.settings.missionId) ?? null;

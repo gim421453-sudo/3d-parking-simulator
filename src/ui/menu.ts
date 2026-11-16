@@ -274,6 +274,7 @@ export class Menu {
                ${rng('infoAutoHideSec', '자동 숨김 지연', '주차 보조가 끝난 뒤 숨기기까지', 0.5, 10, 0.5, s.infoAutoHideSec)}
                ${rng('mirrorFps', '미러 갱신 속도 (0=끔)', '사이드/룸미러는 실제 장면을 작은 해상도로 렌더링 — 모바일 부하 조절', 0, 30, 5, s.mirrorFps)}
                ${rng('mechMirrorFps', '기계식 주차장 거울 속도 (0=자동)', '자동: 높음 30 / 보통 24 / 낮음 16 FPS. 거울이 화면에 보일 때만 렌더링', 0, 30, 5, s.mechMirrorFps)}
+               ${chk('sahaGenFill', '사하구: 빈 블록 생성 건물 (실제 아님)', 'OSM 에 건물이 없는 시가지 블록을 회청색 무늬 없는 건물로 채움 — 실제 건물과 다름. 끄면 실제 OSM 건물만 (다음 시작부터)', s.sahaGenFill)}
                ${rng('cabinFps', '1인칭 실내 화면 갱신 속도', '낮추면 모바일 부하 감소', 5, 30, 5, s.cabinFps)}
                ${chk('assistGuides', '조향 연동 주차 가이드라인', '카메라 영상 위에 예상 경로 표시', s.assistGuides)}
                ${sel('surroundGuideMode', '서라운드뷰 예상 이동선', '기본: 차체 폭 경계선 2개 / 상세: 앞바퀴(실선)·뒷바퀴(점선)·앞 모서리 스윙·충돌 예상 지점', [['detail', '상세 (4륜)'], ['basic', '기본']], s.surroundGuideMode)}
