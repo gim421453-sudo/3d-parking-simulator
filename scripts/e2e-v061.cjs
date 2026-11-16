@@ -97,7 +97,9 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
   // ================= 3. 정지 중 조향으로 자동 시점 + 위험 순위 근거 로그 (lot: 기둥 pil-1 왼쪽 앞) =================
   await loadMap('lot');
   await Y(() => window.__game.updateSettings({ assistAutoView: true }));
-  await place(-11.2 - 1.45, 17.2 - 3.4, 0, 'D'); // 기둥이 왼쪽 앞 바깥
+  // 기둥이 왼쪽 앞 바깥. v0.6.3: 직진 통과 간격이 근접 통과 기준(0.3m)보다 넓어야 '핸들을 풀면 경로가 기둥을 벗어남' 전제가 성립한다
+  // (이전 위치 −1.45 는 직진 통과 간격 0.25m 라 근접 통과 위험으로 남았다). 0.15m 오른쪽 → 약 0.42m.
+  await place(-11.2 - 1.6, 17.2 - 3.4, 0, 'D');
   await sleep(800);
   const st0 = await Y(() => ({ view: window.__game.viewOut.view, top: window.__game.rankOut[0] && { id: window.__game.rankOut[0].id, cls: window.__game.rankOut[0].cls, path: window.__game.rankOut[0].pathDist } }));
   // 정지 상태(속도 0)에서 핸들만 왼쪽으로 크게

@@ -54,6 +54,8 @@ const DIR_KO = (x, z, hw, hl) => {
   };
   const place = async (x, z, h, gear) => {
     await Y(([x, z, h]) => { const G = window.__game; const c = G.car; const off = G.spec.length / 2 - G.spec.rearOverhang; c.x = x - Math.sin(h) * off; c.z = z - Math.cos(h) * off; c.heading = h; c.v = 0; c.steer = 0; if (G.groundHeight) c.y = G.groundHeight(x, z); G.debugInput = { throttle: 0, brake: 1, steerInput: 0 }; G.rig.snap(); }, [x, z, h]);
+    // 이전 장면에서 끝까지 돌린 핸들이 조향 모델로 되돌아오는 중에 변속하면 정차 조향 재평가가 엉뚱한 장면 시작을 만든다 → 직진 복귀 대기
+    await until(() => Math.abs(window.__game.car.steer) < 0.01, undefined, 10000);
     await Y(() => { window.__game.debugInput = null; });
     await pg.keyboard.down('KeyS');
     await until(() => window.__game.brake > 0.4, undefined, 10000);
