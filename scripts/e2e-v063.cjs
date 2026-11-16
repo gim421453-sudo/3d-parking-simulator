@@ -185,6 +185,45 @@ const DIR_KO = (x, z, hw, hl) => {
       }
       await Y(() => { const G = window.__game; for (let i = G.colliders.length - 1; i >= 0; i--) if (String(G.colliders[i].id).startsWith('t-')) { G.colliderById.delete(G.colliders[i].id); G.colliders.splice(i, 1); } });
     }
+    if (!ONLY || ONLY === 'pdc' || ONLY === 'real') {
+      // ================= P0 실제 맵 장면: 기계식 승강장 안쪽 벽/셔터 쪽 전진 · 주차타워 경사로 직진 =================
+      const drive = async (sec, thr, steer) => {
+        await Y(([sec, thr, steer]) => {
+          const G = window.__game;
+          const st = { t0: G.time, done: false, seq: [], logs: [] };
+          window.__drv2 = st;
+          const tick = () => {
+            const t = G.time - st.t0;
+            if (t >= sec) { st.done = true; G.debugInput = { throttle: 0, brake: 1, steerInput: steer / G.spec.maxSteer }; return; }
+            G.debugInput = { throttle: Math.abs(G.car.v) < 0.6 ? thr : 0, brake: 0, steerInput: steer / G.spec.maxSteer };
+            const vo = G.viewOut;
+            const last = st.seq[st.seq.length - 1];
+            if (!last || last.view !== vo.view) st.seq.push({ t: +t.toFixed(2), view: vo.view, auto: vo.auto, log: G.viewLog ? { id: G.viewLog.id, place: G.viewLog.place, contact: G.viewLog.contact, cls: G.viewLog.cls, relevant: G.viewLog.relevant } : null });
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }, [sec, thr, steer]);
+        await until(() => window.__drv2.done, undefined, 120000);
+        return Y(() => window.__drv2.seq);
+      };
+      await loadMap('mechpark');
+      await place(-4.4, 0, Math.PI / 2, 'D'); // 팔레트 위, 안쪽 벽 쪽으로
+      const m1 = await drive(3, 0.18, 0);
+      const bad1 = m1.filter((q) => q.auto && ['left', 'right', 'rear', 'topRear'].includes(q.view));
+      await pg.screenshot({ path: path.join(OUT, 'real-mech-inner-wall.png') });
+      check('P0 실제 맵: 기계식 승강장에서 안쪽 벽 쪽 전진 — 측면/후방 자동 시점으로 가지 않는다', bad1.length === 0, JSON.stringify(m1).slice(0, 500));
+      await place(-6.5, 0, -Math.PI / 2, 'R'); // 셔터 쪽을 향한 후진 진입 자세 → 후진은 안쪽 벽, 앞은 셔터
+      const m2 = await drive(2.5, 0.15, 0);
+      const bad2 = m2.filter((q) => q.auto && ['left', 'right', 'front', 'topFront'].includes(q.view));
+      await pg.screenshot({ path: path.join(OUT, 'real-mech-reverse.png') });
+      check('P0 실제 맵: 기계식 승강장 후진 — 앞 셔터/옆 가이드 때문에 전방·측면 자동 시점으로 가지 않는다', bad2.length === 0, JSON.stringify(m2).slice(0, 500));
+      await loadMap('tower');
+      await place(-31, 0, Math.PI / 2, 'D');
+      const m3 = await drive(6, 0.25, 0);
+      const bad3 = m3.filter((q) => q.auto && ['rear', 'topRear'].includes(q.view));
+      await pg.screenshot({ path: path.join(OUT, 'real-tower-ramp.png') });
+      check('P0 실제 맵: 주차타워 경사로 직진 — 후방 자동 시점 없음(측면뷰는 그 쪽 벽 접촉 부위일 때만)', bad3.length === 0 && m3.filter((q) => q.auto && (q.view === 'left' || q.view === 'right')).every((q) => q.log && q.log.contact && q.log.contact.toLowerCase().includes(q.view)), JSON.stringify(m3).slice(0, 500));
+    }
     if (errors.length) console.log('페이지 오류:', errors.slice(0, 5).join(' | '));
     if (strict) check('페이지 오류 없음', errors.length === 0, errors.slice(0, 3).join(' | '));
   } catch (e) {
