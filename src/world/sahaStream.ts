@@ -44,6 +44,8 @@ const B_PAL: Record<string, number[]> = {
   gen: [0xa9b2bc, 0xa1abb6, 0xb2b9c1],
   default: [0xe6e0d4, 0xd9d4c8, 0xeae6dc, 0xcfc9bc, 0xe0d8c8, 0xc9bfae],
 };
+/** 차로 폭(추정 포함) — 맨홀 위치 등 */
+const lwOf = (r: SahaRoad): number => Math.min(3.5, (r.w - 0.6) / Math.max(1, r.l[0]));
 const hash = (s: string): number => {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
@@ -56,7 +58,7 @@ export class SahaStream {
   private pending = new Set<string>();
   private failed = new Set<string>();
   private cache = new Map<string, SahaTile>();
-  private mats: { terrain: THREE.MeshStandardMaterial; road: THREE.MeshStandardMaterial; paint: THREE.MeshBasicMaterial; bld: THREE.MeshStandardMaterial; bldGen: THREE.MeshStandardMaterial; roof: THREE.MeshStandardMaterial; lot: THREE.MeshStandardMaterial; struct: THREE.MeshStandardMaterial; water: THREE.MeshStandardMaterial };
+  private mats: { terrain: THREE.MeshStandardMaterial; road: THREE.MeshStandardMaterial; paint: THREE.MeshBasicMaterial; bld: THREE.MeshStandardMaterial; bldGen: THREE.MeshStandardMaterial; roof: THREE.MeshStandardMaterial; lot: THREE.MeshStandardMaterial; struct: THREE.MeshStandardMaterial; water: THREE.MeshStandardMaterial; furn: THREE.MeshStandardMaterial };
   private atlas: FacadeAtlas;
   private lastCx = Infinity;
   private lastCz = Infinity;
@@ -87,6 +89,7 @@ export class SahaStream {
       lot: po(new THREE.MeshStandardMaterial({ color: 0x6b6e72, roughness: 0.95, side: THREE.DoubleSide }), -1) as THREE.MeshStandardMaterial,
       struct: new THREE.MeshStandardMaterial({ color: 0x9a9890, roughness: 0.85 }),
       water: new THREE.MeshStandardMaterial({ color: 0x2f5f7c, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.92 }),
+      furn: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.35 }),
     };
     this.group.name = 'SahaStream';
     void facadeTex; // v0.6.2 공용 외벽 텍스처 대신 아틀라스(이 스트림 소유 — dispose 에서 해제)
@@ -218,6 +221,7 @@ export class SahaStream {
     const roads = tile.roads;
     add(this.roadGeo(roads), this.mats.road, 'roads');
     if (this.opts.lanes) add(this.paintGeo(roads, ix, iz, tile.marks ?? []), this.mats.paint, 'lanes');
+    add(this.furnGeo(roads, tile.marks ?? [], this.opts.genFill === false ? tile.buildings.filter((b) => !b.g) : tile.buildings), this.mats.furn, 'street-furniture', true);
     add(this.lotGeo(tile), this.mats.lot, 'lots');
     const tunnelDecks: THREE.BufferGeometry[] = [];
     add(this.structGeo(roads, tunnelDecks), this.mats.struct, 'bridges-tunnels', true);
@@ -453,8 +457,170 @@ export class SahaStream {
         line(-r.w / 2 + 0.35, 0.12, Wt);
         line(r.w / 2 - 0.35, 0.12, Wt);
       }
+      // v0.6.3 방향 화살표: OSM turn:lanes 태그가 있는 조각만(실제 자료 — 사하구 전체 3조각). 태그 없는 곳에 추정 화살표를 만들지 않는다
+      const tl = r.o ? r.t : r.tf;
+      if (tl && parts.length) {
+        const lanes = tl.split('|');
+        const pp = parts[parts.length - 1];
+        const n = lanes.length;
+        const base = r.o ? -((n / 2) * lw) : ((bw - fw) / 2) * lw - n * lw;
+        lanes.forEach((ln, k) => {
+          if (!/through/.test(ln)) return; // 직진 화살표만 그린다(좌/우회전 모양은 태그가 없음)
+          this.arrow(pp, 25, base + (k + 0.5) * lw, pos, col, Wt);
+        });
+      }
+    }
+    // v0.6.3 연석 띠·맨홀·배수구(시각 전용 — 위치는 일반적인 배치 근사, 실제 시설 자료 아님)
+    const curb = new THREE.Color(0xb7b5ae);
+    const dark = new THREE.Color(0x2b2c2e);
+    for (const r of roads) {
+      if (r.tn || r.br || r.c > 6 || r.w < 4.5) continue;
+      const parts = trim(r.p);
+      for (const pp of parts) {
+        this.strip(pp, -r.w / 2, -r.w / 2 + 0.22, 0.065, pos, undefined, col, curb, true);
+        this.strip(pp, r.w / 2 - 0.22, r.w / 2, 0.065, pos, undefined, col, curb, true);
+        let acc = 0;
+        for (let q = 1; q < pp.length; q++) {
+          const [x0, z0] = pp[q - 1];
+          const [x1, z1] = pp[q];
+          const L = Math.hypot(x1 - x0, z1 - z0);
+          for (let t = 55 - (acc % 55); t < L; t += 55) {
+            const u = t / L;
+            const c0: [number, number, number] = [x0 + (x1 - x0) * u, z0 + (z1 - z0) * u, 0];
+            const c1: [number, number, number] = [x0 + (x1 - x0) * Math.min(1, u + 0.7 / L), z0 + (z1 - z0) * Math.min(1, u + 0.7 / L), 0];
+            this.strip([c0, c1], -0.35 - lwOf(r) / 2, 0.35 - lwOf(r) / 2, 0.066, pos, undefined, col, dark, true); // 맨홀(차로 가운데)
+            this.strip([c0, c1], r.w / 2 - 0.65, r.w / 2 - 0.25, 0.066, pos, undefined, col, dark, true); // 배수구(가장자리)
+          }
+          acc += L;
+        }
+      }
     }
     return this.geo(pos, col);
+  }
+
+  /**
+   * v0.6.3 가로시설(시각 전용, 충돌체 아님): 신호등 = 실제 OSM 신호 노드(sig) 기준(기둥 위치는 진행 방향 오른쪽 가장자리로 추정),
+   * 가로등 = 간선(trunk·primary·secondary) 가장자리 35m 간격(일반적인 배치 근사) — 건물 외곽 안·교차로 반경 안은 놓지 않는다.
+   */
+  private furnGeo(roads: SahaRoad[], marks: SahaMark[], blds: SahaBuilding[]): THREE.BufferGeometry | null {
+    const pos: number[] = [];
+    const col: number[] = [];
+    const f = this.base.field;
+    const box = (x: number, y: number, z: number, w: number, h: number, d: number, rot: number, c: THREE.Color): void => {
+      const cs = Math.cos(rot);
+      const sn = Math.sin(rot);
+      const P = (lx: number, ly: number, lz: number): number[] => [x + lx * cs + lz * sn, y + ly, z - lx * sn + lz * cs];
+      const v = [P(-w / 2, 0, -d / 2), P(w / 2, 0, -d / 2), P(w / 2, 0, d / 2), P(-w / 2, 0, d / 2), P(-w / 2, h, -d / 2), P(w / 2, h, -d / 2), P(w / 2, h, d / 2), P(-w / 2, h, d / 2)];
+      for (const [a, b, cc] of [[4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]])
+        for (const k of [a, b, cc]) {
+          pos.push(...v[k]);
+          col.push(c.r, c.g, c.b);
+        }
+    };
+    const gray = new THREE.Color(0x6d7378);
+    const black = new THREE.Color(0x1d1f22);
+    const lamp = new THREE.Color(0xf3ead2);
+    const R = new THREE.Color(0xd23b2f);
+    const A = new THREE.Color(0xe0a524);
+    const G = new THREE.Color(0x2fae55);
+    const inBld = (x: number, z: number): boolean =>
+      blds.some((b) => {
+        let c = false;
+        const o = b.o;
+        for (let i = 0, j = o.length - 1; i < o.length; j = i++) if (o[i][1] > z !== o[j][1] > z && x < ((o[j][0] - o[i][0]) * (z - o[i][1])) / (o[j][1] - o[i][1]) + o[i][0]) c = !c;
+        return c;
+      });
+    // 교차점(팔 ≥3) — 가로등을 교차로 안에 두지 않는다
+    const arms = new Map<string, { n: number; x: number; z: number; w: number }>();
+    const key = (x: number, z: number): string => `${Math.round(x * 2)},${Math.round(z * 2)}`;
+    for (const r of roads)
+      r.p.forEach(([x, z], i) => {
+        const k = key(x, z);
+        const a = arms.get(k) ?? { n: 0, x, z, w: 0 };
+        a.n += i === 0 || i === r.p.length - 1 ? 1 : 2;
+        a.w = Math.max(a.w, r.w);
+        arms.set(k, a);
+      });
+    const junc = [...arms.values()].filter((a) => a.n >= 3);
+    const nearJ = (x: number, z: number): boolean => junc.some((j) => Math.hypot(j.x - x, j.z - z) < j.w / 2 + 4);
+    // 가로등
+    for (const r of roads) {
+      if (r.tn || r.br || r.c > 3) continue;
+      let acc = 17;
+      for (let q = 1; q < r.p.length; q++) {
+        const [x0, z0] = r.p[q - 1];
+        const [x1, z1] = r.p[q];
+        const L = Math.hypot(x1 - x0, z1 - z0);
+        if (L < 0.1) continue;
+        const nx = (z1 - z0) / L;
+        const nz = -(x1 - x0) / L;
+        for (let t = 35 - (acc % 35); t < L; t += 35) {
+          const cx = x0 + ((x1 - x0) * t) / L;
+          const cz = z0 + ((z1 - z0) * t) / L;
+          for (const side of r.o ? [1] : [1, -1]) {
+            const px = cx + nx * side * (r.w / 2 + 0.8);
+            const pz = cz + nz * side * (r.w / 2 + 0.8);
+            if (nearJ(px, pz) || inBld(px, pz)) continue;
+            const gy = fieldHeight(f, px, pz) ?? 0;
+            const rot = Math.atan2(-nx * side, -nz * side); // 팔이 도로 쪽
+            box(px, gy, pz, 0.18, 8, 0.18, rot, gray);
+            const ax = px - nx * side * 0.9;
+            const az = pz - nz * side * 0.9;
+            box(ax, gy + 7.8, az, 0.1, 0.1, 1.8, rot, gray);
+            box(px - nx * side * 1.7, gy + 7.65, pz - nz * side * 1.7, 0.32, 0.14, 0.6, rot, lamp);
+          }
+        }
+        acc += L;
+      }
+    }
+    // 신호등(실제 OSM 신호 노드)
+    for (const m of marks) {
+      if (m.k !== 'sig') continue;
+      const fx = Math.sin(m.h);
+      const fz = Math.cos(m.h);
+      const rx = -Math.cos(m.h); // 진행 방향 오른쪽(+x 가 왼쪽인 규칙)
+      const rz = Math.sin(m.h);
+      for (const dir of m.o ? [1] : [1, -1]) {
+        const px = m.x - fx * dir * 9 + rx * dir * (m.w / 2 + 0.7);
+        const pz = m.z - fz * dir * 9 + rz * dir * (m.w / 2 + 0.7);
+        if (inBld(px, pz)) continue;
+        const gy = fieldHeight(f, px, pz) ?? 0;
+        const rot = Math.atan2(-rx * dir, -rz * dir);
+        box(px, gy, pz, 0.24, 6, 0.24, rot, gray);
+        const reach = Math.min(m.w * 0.55, 6);
+        box(px - rx * dir * (reach / 2), gy + 5.6, pz - rz * dir * (reach / 2), 0.14, 0.14, reach, rot, gray);
+        const hx = px - rx * dir * reach;
+        const hz = pz - rz * dir * reach;
+        box(hx, gy + 5.0, hz, 1.25, 0.42, 0.32, rot, black);
+        for (const [k, c] of [[-0.38, R], [0, A], [0.38, G]] as [number, THREE.Color][]) box(hx - rx * dir * k - fx * dir * 0.17, gy + 5.08, hz - rz * dir * k - fz * dir * 0.17, 0.26, 0.26, 0.04, rot, c);
+      }
+    }
+    return pos.length ? this.geo(pos, col) : null;
+  }
+
+  /** 직진 화살표(도색): 끝에서 back m 앞, 차로 중심 off */
+  private arrow(p: [number, number, number][], back: number, off: number, pos: number[], col: number[], c: THREE.Color): void {
+    let L = 0;
+    for (let q = 1; q < p.length; q++) L += Math.hypot(p[q][0] - p[q - 1][0], p[q][1] - p[q - 1][1]);
+    if (L < back + 6) return;
+    const at = (s: number): [number, number, number] => {
+      let acc = 0;
+      for (let q = 1; q < p.length; q++) {
+        const l = Math.hypot(p[q][0] - p[q - 1][0], p[q][1] - p[q - 1][1]);
+        if (acc + l >= s) {
+          const u = (s - acc) / l;
+          return [p[q - 1][0] + (p[q][0] - p[q - 1][0]) * u, p[q - 1][1] + (p[q][1] - p[q - 1][1]) * u, 0];
+        }
+        acc += l;
+      }
+      return p[p.length - 1];
+    };
+    const s0 = L - back;
+    this.strip([at(s0 - 3), at(s0)], off - 0.08, off + 0.08, 0.068, pos, undefined, col, c, true); // 몸통
+    for (let k = 0; k < 5; k++) {
+      const hw = 0.4 * (1 - k / 5);
+      this.strip([at(s0 + k * 0.24), at(s0 + (k + 1) * 0.24)], off - hw, off + hw, 0.068, pos, undefined, col, c, true); // 머리
+    }
   }
 
   private lotGeo(tile: SahaTile): THREE.BufferGeometry | null {
